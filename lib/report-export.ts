@@ -1,0 +1,59 @@
+import { Platform } from "react-native";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+
+import { type FinancialReportSummary, type ReportPaymentMethod } from "./reporting";
+
+type FinancialReportExportInput = {
+  businessName: string;
+  currency: string;
+  periodLabel: string;
+  scopeLabel: string;
+  language: "ar" | "en";
+  summary: FinancialReportSummary;
+  paymentMethodLabels: Record<ReportPaymentMethod, string>;
+};
+
+const escapeHtml = (value: string | number) => String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
+
+export function buildFinancialReportHtml({ businessName, currency, periodLabel, scopeLabel, language, summary, paymentMethodLabels }: FinancialReportExportInput) {
+  const isArabic = language === "ar";
+  const money = (amount: number) => `${Number(amount || 0).toFixed(2)} ${currency}`;
+  const metricRows = [
+    [isArabic ? "عدد الحجوزات" : "Bookings", summary.bookingCount],
+    [isArabic ? "إيجار بعد الخصم" : "Rental after discounts", money(summary.rentalTotal)],
+    [isArabic ? "المبالغ المحصلة" : "Collected", money(summary.paid)],
+    [isArabic ? "المتبقي للإيجار" : "Outstanding balance", money(summary.remaining)],
+    [isArabic ? "تأمين مسجل" : "Security deposits", money(summary.depositRecorded)],
+    [isArabic ? "تأمين مسترد" : "Refunded deposits", money(summary.depositRefunded)],
+    [isArabic ? "تأمين قيد الحيازة" : "Deposits held", money(summary.depositHeld)],
+  ].map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value)}</td></tr>`).join("");
+  const paymentRows = (Object.keys(paymentMethodLabels) as ReportPaymentMethod[]).map((method) => `<tr><td>${escapeHtml(paymentMethodLabels[method])}</td><td>${escapeHtml(money(summary.paymentMethods[method]))}</td></tr>`).join("");
+  const depositCollectionRows = (Object.keys(paymentMethodLabels) as ReportPaymentMethod[]).map((method) => `<tr><td>${escapeHtml(paymentMethodLabels[method])}</td><td>${escapeHtml(money(summary.depositCollectionMethods[method]))}</td></tr>`).join("");
+  const chaletRows = summary.chaletPerformance.length ? summary.chaletPerformance.map((chalet) => `<tr><td><span class="dot" style="background:${escapeHtml(chalet.color)}"></span>${escapeHtml(chalet.chaletName)}</td><td>${escapeHtml(chalet.bookingCount)}</td><td>${escapeHtml(money(chalet.revenue))}</td></tr>`).join("") : `<tr><td colspan="3" class="empty">${isArabic ? "لا توجد بيانات للشاليهات ضمن هذه الفترة" : "No chalet data in this period"}</td></tr>`;
+
+  return `<!DOCTYPE html><html dir="${isArabic ? "rtl" : "ltr"}" lang="${language}"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><style>@page{margin:22px}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#102A27;background:#fff;margin:0;direction:${isArabic ? "rtl" : "ltr"}}.header{background:#0F8B83;color:#fff;padding:24px;border-radius:18px}.header h1{font-size:22px;margin:0 0 7px}.header p{margin:0;opacity:.9;font-size:13px}.section{margin-top:18px;border:1px solid #D5E7E4;border-radius:16px;overflow:hidden}.section h2{font-size:15px;margin:0;padding:12px 14px;background:#F2FAF8}table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:11px 14px;border-bottom:1px solid #E8F1EF;text-align:${isArabic ? "right" : "left"}}tr:last-child td{border-bottom:0}td:last-child{font-weight:700;direction:ltr;text-align:${isArabic ? "left" : "right"}}th{color:#4C6762;font-size:11px;background:#FAFDFC}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:7px}.empty{color:#718682;text-align:center!important;direction:${isArabic ? "rtl" : "ltr"}!important}.footer{color:#718682;font-size:10px;text-align:center;margin-top:18px}</style></head><body><header class="header"><h1>${escapeHtml(businessName || (isArabic ? "StayIn" : "StayIn"))}</h1><p>${escapeHtml(isArabic ? "تقرير مالي" : "Financial report")} · ${escapeHtml(periodLabel)} · ${escapeHtml(scopeLabel)}</p></header><section class="section"><h2>${escapeHtml(isArabic ? "الملخص المالي" : "Financial summary")}</h2><table><tbody>${metricRows}</tbody></table></section><section class="section"><h2>${escapeHtml(isArabic ? "طرق دفع الإيجار" : "Rental payment methods")}</h2><table><tbody>${paymentRows}</tbody></table></section><section class="section"><h2>${escapeHtml(isArabic ? "طرق استلام التأمين" : "Deposit collection methods")}</h2><table><tbody>${depositCollectionRows}</tbody></table></section><section class="section"><h2>${escapeHtml(isArabic ? "أداء الشاليهات" : "Chalet performance")}</h2><table><thead><tr><th>${escapeHtml(isArabic ? "الشاليه" : "Chalet")}</th><th>${escapeHtml(isArabic ? "الحجوزات" : "Bookings")}</th><th>${escapeHtml(isArabic ? "الإيراد" : "Revenue")}</th></tr></thead><tbody>${chaletRows}</tbody></table></section><footer class="footer">${escapeHtml(isArabic ? "تم إنشاء التقرير من StayIn" : "Generated by StayIn")} · ${escapeHtml(new Date().toLocaleString(isArabic ? "ar-JO" : "en-GB"))}</footer></body></html>`;
+}
+
+export async function exportFinancialReportPdf(input: FinancialReportExportInput) {
+  const html = buildFinancialReportHtml(input);
+  if (Platform.OS === "web") {
+    if (typeof window !== "undefined") {
+      const reportWindow = window.open("", "_blank");
+      if (reportWindow) {
+        reportWindow.document.write(html);
+        reportWindow.document.close();
+        reportWindow.focus();
+        reportWindow.print();
+        return;
+      }
+    }
+    throw new Error("report-popup-blocked");
+  }
+  const { uri } = await Print.printToFileAsync({ html });
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, { dialogTitle: input.language === "ar" ? "مشاركة التقرير المالي" : "Share financial report", mimeType: "application/pdf", UTI: ".pdf" });
+    return;
+  }
+  throw new Error("report-sharing-unavailable");
+}

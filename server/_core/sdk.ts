@@ -1,7 +1,8 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, SESSION_TTL_MS } from "../../shared/const.js";
 import { ForbiddenError } from "../../shared/_core/errors.js";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
+import { randomBytes } from "node:crypto";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
@@ -22,6 +23,8 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  /** معرّف فريد للجلسة يُسجَّل في الخادم لتمكين الإبطال الفوري. */
+  jti: string;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -141,7 +144,9 @@ class SDKServer {
   }
 
   /**
-   * Create a session token for a Manus user openId
+   * Create a session token for a Manus user openId. Records the jti in the
+   * server store so the session can be revoked and its lifetime honoured.
+   * The default lifetime is SESSION_TTL_MS (8 hours), not one year.
    * @example
    * const sessionToken = await sdk.createSessionToken(userInfo.openId);
    */
@@ -149,14 +154,19 @@ class SDKServer {
     openId: string,
     options: { expiresInMs?: number; name?: string } = {},
   ): Promise<string> {
-    return this.signSession(
+    const jti = randomBytes(16).toString("hex");
+    const expiresInMs = options.expiresInMs ?? SESSION_TTL_MS;
+    const token = await this.signSession(
       {
         openId,
         appId: ENV.appId,
         name: options.name || "",
+        jti,
       },
-      options,
+      { expiresInMs },
     );
+    await db.createSessionRecord({ jti, openId, name: options.name || null, expiresAt: new Date(Date.now() + expiresInMs) });
+    return token;
   }
 
   async signSession(
@@ -164,7 +174,7 @@ class SDKServer {
     options: { expiresInMs?: number } = {},
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    const expiresInMs = options.expiresInMs ?? SESSION_TTL_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
 
@@ -172,6 +182,7 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      jti: payload.jti,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -180,7 +191,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null,
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; jti?: string } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -191,22 +202,63 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, jti } = payload as Record<string, unknown>;
 
       if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
       }
 
-      return {
+      const session = {
         openId,
         appId,
         name,
+        jti: isNonEmptyString(jti) ? jti : undefined,
       };
+
+      const isCron = session.openId.startsWith(CRON_OPEN_ID_PREFIX);
+
+      // Revocation-aware check: if the session carries a jti, the server must
+      // still hold a matching, non-revoked, unexpired record for it to be valid.
+      // Legacy user tokens without a jti are refused so a leaked one-year
+      // session cannot keep working after this hardening ships.
+      if (session.jti) {
+        const record = await db.getSessionRecord(session.jti);
+        const valid = record && !record.revokedAt && new Date(record.expiresAt).getTime() > Date.now();
+        if (!valid) {
+          console.warn("[Auth] Session revoked or expired on the server");
+          return null;
+        }
+      } else if (!isCron) {
+        console.warn("[Auth] Refusing legacy user session without a registered jti");
+        return null;
+      }
+
+      return session;
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
       return null;
     }
+  }
+
+  /**
+   * Revoke a session by its raw token so that logout invalidates the session
+   * server-side. Safe to call when the token is missing or already revoked.
+   */
+  async revokeSessionToken(token: string | undefined | null): Promise<boolean> {
+    if (!token || token.length === 0) return false;
+    try {
+      const secretKey = this.getSessionSecret();
+      const { payload } = await jwtVerify(token, secretKey, { algorithms: ["HS256"] });
+      const jti = (payload as Record<string, unknown>)?.jti;
+      if (typeof jti === "string" && jti.length > 0) {
+        return db.revokeSessionByJti(jti);
+      }
+    } catch (error) {
+      // Expired, malformed, or untrusted tokens have nothing to revoke; ignore.
+      console.warn("[Auth] Session revocation skipped", String(error));
+    }
+    return false;
   }
 
   async getUserInfoWithJwt(jwtToken: string): Promise<GetUserInfoWithJwtResponse> {
@@ -317,3 +369,24 @@ function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser 
 }
 
 export const sdk = new SDKServer();
+
+/** استخراج رمز الجلسة من طلب وافٍ (Bearer أولاً ثم الكوكيز) — للاستخدام في مسارات الخروج والإبطال. */
+export function sessionTokenFromRequest(req: Request): string | undefined {
+  const header = req.headers.authorization || (req.headers as Record<string, unknown>)["Authorization"];
+  if (typeof header === "string" && header.startsWith("Bearer ")) {
+    const token = header.slice("Bearer ".length).trim();
+    if (token.length > 0) return token;
+  }
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    const match = cookieHeader.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${COOKIE_NAME}=`));
+    if (match) {
+      try {
+        return decodeURIComponent(match.slice(COOKIE_NAME.length + 1));
+      } catch {
+        return match.slice(COOKIE_NAME.length + 1);
+      }
+    }
+  }
+  return undefined;
+}

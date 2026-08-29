@@ -140,6 +140,15 @@ export const stayInWorkspaceOwnerPins = mysqlTable("stayInWorkspaceOwnerPins", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const stayInSessions = mysqlTable("stayInSessions", {
+  jti: varchar("jti", { length: 191 }).primaryKey(),
+  openId: varchar("openId", { length: 191 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const stayInSuperAdminAudit = mysqlTable("stayInSuperAdminAudit", {
   id: int("id").autoincrement().primaryKey(),
   actorUserId: int("actorUserId").notNull(),
@@ -161,6 +170,7 @@ export const workspaceData = stayInWorkspaceData;
 export const workspaceDataBackups = stayInWorkspaceDataBackups;
 export const workspaceActivity = stayInWorkspaceActivity;
 export const workspaceOwnerPins = stayInWorkspaceOwnerPins;
+export const sessions = stayInSessions;
 export const superAdminAudit = stayInSuperAdminAudit;
 
 export type User = typeof stayInUsers.$inferSelect;
@@ -185,5 +195,7 @@ export type WorkspaceOwnerPin = typeof stayInWorkspaceOwnerPins.$inferSelect;
 export type InsertWorkspaceOwnerPin = typeof stayInWorkspaceOwnerPins.$inferInsert;
 export type SuperAdminAuditRecord = typeof stayInSuperAdminAudit.$inferSelect;
 export type InsertSuperAdminAudit = typeof stayInSuperAdminAudit.$inferInsert;
+export type SessionRow = typeof stayInSessions.$inferSelect;
+export type InsertSession = typeof stayInSessions.$inferInsert;
 export type AccountDeletionRequest = typeof stayInAccountDeletionRequests.$inferSelect;
 export type InsertAccountDeletionRequest = typeof stayInAccountDeletionRequests.$inferInsert;

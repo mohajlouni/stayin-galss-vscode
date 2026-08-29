@@ -131,11 +131,11 @@ export default function CalendarScreen() {
           <View style={[styles.weekRow, { flexDirection: row }]}>
             {week.map((day) => <Text key={day} style={[styles.weekday, { color: colors.muted }]}>{day.slice(0, 3)}</Text>)}
           </View>
-          <View style={[styles.grid, { flexDirection: row }]}>
+          <View style={[styles.daysGridContainer, { flexDirection: row }]}>
             {days.map((date, index) => {
               if (!date) return <View key={`blank-${index}`} style={styles.blankDay} />;
               const summary = daySummary(date);
-              return <CalendarDay key={date} date={date} bookings={summary.bookings} arrivals={summary.arrivals} departures={summary.departures} waiting={summary.waiting} selected={selected === date} today={date === today} colors={colors} onPress={() => selectDay(date)} chaletMarkers={chaletMarkers} markerMode={isAllUnitsView ? "unit" : "period"} shiftColors={selectedShiftColors} />;
+              return <CalendarDay key={date} date={date} bookings={summary.bookings} arrivals={summary.arrivals} departures={summary.departures} waiting={summary.waiting} selected={selected === date} today={date === today} colors={colors} accentColor={selectedChaletAccent} onPress={() => selectDay(date)} chaletMarkers={chaletMarkers} markerMode={isAllUnitsView ? "unit" : "period"} shiftColors={selectedShiftColors} />;
             })}
           </View>
         </GlowGlassCard>
@@ -176,11 +176,11 @@ function DayDetailsModal({ visible, date, bookings, waiting, chalets, selectedCh
   return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><GlowGlassCard radius={28} intensity={22} style={styles.dayModal} contentStyle={styles.dayModalContent}><View style={[styles.modalHeader, { flexDirection: row }]}><Text style={[styles.modalDate, { color: colors.foreground }]}>{compactDate}</Text><Pressable accessibilityLabel={language === "ar" ? "إغلاق تفاصيل اليوم" : "Close day details"} onPress={onClose} style={({ pressed }) => [styles.modalCloseIcon, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.68 : 1 }]}><MaterialIcons name="close" size={20} color={colors.primary} /></Pressable></View><FlatList data={bookings} keyExtractor={(booking) => booking.id} renderItem={({ item }) => <DayBookingCard booking={item} chalets={chalets} settings={settings} formatDate={formatDate} formatTime={formatTime} colors={colors} language={language} isRTL={isRTL} onViewDetails={() => openDetails(item.id)} />} initialNumToRender={6} maxToRenderPerBatch={6} windowSize={5} removeClippedSubviews contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false} ListHeaderComponent={bookings.length ? <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8, textAlign: align }}>{language === "ar" ? "الحجوزات المشغولة" : "Occupied bookings"}</Text> : null} ListFooterComponent={dayFooter} /></GlowGlassCard></View></Modal>;
 }
 
-function CalendarDay({ date, bookings, arrivals, departures, waiting, selected, today, colors, chaletMarkers, markerMode, shiftColors, onPress }: { date: string; bookings: Booking[]; arrivals: number; departures: number; waiting: boolean; selected: boolean; today: boolean; colors: ReturnType<typeof useColors>; chaletMarkers: Record<string, { color: string; icon: ReturnType<typeof propertyTypeIcon> }>; markerMode: "unit" | "period"; shiftColors: Record<string, { color: string; label: string }>; onPress: () => void }) {
+function CalendarDay({ date, bookings, arrivals, departures, waiting, selected, today, colors, accentColor, chaletMarkers, markerMode, shiftColors, onPress }: { date: string; bookings: Booking[]; arrivals: number; departures: number; waiting: boolean; selected: boolean; today: boolean; colors: ReturnType<typeof useColors>; accentColor: string; chaletMarkers: Record<string, { color: string; icon: ReturnType<typeof propertyTypeIcon> }>; markerMode: "unit" | "period"; shiftColors: Record<string, { color: string; label: string }>; onPress: () => void }) {
   const displayBookings = bookings.slice(0, 3);
   return (
-    <Pressable onPress={onPress} style={styles.dayPress} accessibilityLabel={`${date}${bookings.length ? `, ${bookings.length} bookings` : ""}`}>
-      <View style={[styles.day, { backgroundColor: selected ? colors.primary : today ? colors.surfaceMuted : "transparent" }]}> 
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.dayCell, { opacity: pressed ? 0.88 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]} accessibilityLabel={`${date}${bookings.length ? `, ${bookings.length} bookings` : ""}`}>
+      <View style={[styles.day, { backgroundColor: selected ? accentColor : today ? colors.surfaceMuted : "transparent", borderWidth: selected ? 1 : 0, borderColor: selected ? "rgba(255, 255, 255, 0.15)" : "transparent", borderTopColor: selected ? "rgba(255, 255, 255, 0.2)" : undefined, shadowColor: selected ? accentColor : "transparent", shadowOpacity: selected ? 0.35 : 0, shadowRadius: selected ? 16 : 0, elevation: selected ? 8 : 0 }]}> 
         <Text style={{ color: selected ? "#FFFFFF" : today ? colors.primary : colors.foreground, fontWeight: selected || today ? "800" : "600", fontSize: 13 }}>{dateObjectUTC(date).getUTCDate()}</Text>
         {arrivals || departures ? <View style={styles.operationDots}>{arrivals ? <MaterialIcons name="login" size={9} color={colors.success} /> : null}{departures ? <MaterialIcons name="logout" size={9} color={colors.primary} /> : null}</View> : null}
         <View style={markerMode === "unit" ? styles.unitMarkers : styles.dots}>{displayBookings.map((booking) => {
@@ -226,7 +226,7 @@ function CalendarLoading({ colors, language }: { colors: ReturnType<typeof useCo
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, minHeight: 0 },
-  content: { flexGrow: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 196 },
+  content: { flexGrow: 1, paddingHorizontal: 16, paddingStart: 16, paddingEnd: 16, paddingTop: 8, paddingBottom: 196, marginStart: 0, marginEnd: 0 },
   flex: { flex: 1, minWidth: 0 },
   scopeWrap: { marginTop: 11 },
   calendarCard: { borderRadius: 24, marginTop: 12 },
@@ -237,10 +237,10 @@ const styles = StyleSheet.create({
   hijriMonth: { fontSize: 10, marginTop: 2, textAlign: "center" },
   monthButton: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center" },
   weekRow: { marginTop: 17, marginBottom: 7 },
-  weekday: { width: "14.2857%", fontSize: 10, fontWeight: "800", textAlign: "center" },
-  grid: { flexWrap: "wrap" },
-  dayPress: { width: "14.2857%", aspectRatio: 1, padding: 2 },
-  blankDay: { width: "14.2857%", aspectRatio: 1 },
+  weekday: { width: "14.28%", fontSize: 10, fontWeight: "800", textAlign: "center" },
+  daysGridContainer: { flexDirection: "row", flexWrap: "wrap", width: "100%", justifyContent: "flex-start" },
+  dayCell: { width: "14.28%", height: 48, alignItems: "center", justifyContent: "center", padding: 2 },
+  blankDay: { width: "14.28%", height: 48 },
   day: { flex: 1, borderRadius: 15, alignItems: "center", justifyContent: "center", gap: 3 },
   dots: { flexDirection: "row", gap: 2, minHeight: 6 },
   unitMarkers: { flexDirection: "row", gap: 2, minHeight: 14, alignItems: "center" },

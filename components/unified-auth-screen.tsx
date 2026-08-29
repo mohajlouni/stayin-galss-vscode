@@ -6,7 +6,8 @@ import { ActivityIndicator, Alert, Animated, Image, Platform, Pressable, ScrollV
 
 import { AppToggle } from "@/components/app-toggle";
 import { ScreenContainer } from "@/components/screen-container";
-import { startOAuthLogin, getApiBaseUrl } from "@/constants/oauth";
+import { startOAuthLogin } from "@/constants/oauth";
+import { startLocalLogin } from "@/lib/_core/api";
 import { useAuthSession } from "@/lib/auth-session";
 import { LEGAL_VERSIONS, savePendingRegistration } from "@/lib/legal-consent";
 import { normalizeInternationalPhone } from "@/lib/phone-number";
@@ -19,7 +20,7 @@ type Busy = "login" | "register" | "biometric" | null;
 type ValidatedField = "name" | "contact";
 
 export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = false }: { initialTab?: Tab; standaloneRegister?: boolean }) {
-  const { isAuthenticated, biometricAvailable, activeSession, setRememberMe, unlockWithBiometrics } = useAuthSession();
+  const { isAuthenticated, biometricAvailable, activeSession, setRememberMe, unlockWithBiometrics, refresh } = useAuthSession();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [method, setMethod] = useState<Method>("phone");
   const [loginContact, setLoginContact] = useState("");
@@ -80,11 +81,14 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     if (invalidContact) { setTouched((current) => ({ ...current, contact: true })); setError(invalidContact); return; }
     if (tab === "register" && !accepted) { setError("يلزم قبول الشروط والأحكام وسياسة الخصوصية للمتابعة."); return; }
     if (tab === "register") {
-      try {
-        const phone = method === "phone" ? normalizePhone(contact).value : null;
-        await savePendingRegistration({ name: name.trim(), contactType: method, phone: phone ?? null, email: method === "email" ? contact.trim().toLowerCase() : null, acceptedAt: new Date().toISOString(), termsVersion: LEGAL_VERSIONS.terms, privacyVersion: LEGAL_VERSIONS.privacy, conditionsVersion: LEGAL_VERSIONS.conditions });
-      } catch { setMessage("تعذر تجهيز طلب إنشاء الحساب على هذا الجهاز. أعد المحاولة."); return; }
+      if (process.env.NODE_ENV === "production") {
+        try {
+          const phone = method === "phone" ? normalizePhone(contact).value : null;
+          await savePendingRegistration({ name: name.trim(), contactType: method, phone: phone ?? null, email: method === "email" ? contact.trim().toLowerCase() : null, acceptedAt: new Date().toISOString(), termsVersion: LEGAL_VERSIONS.terms, privacyVersion: LEGAL_VERSIONS.privacy, conditionsVersion: LEGAL_VERSIONS.conditions });
+        } catch { setMessage("تعذر تجهيز طلب إنشاء الحساب على هذا الجهاز. أعد المحاولة."); return; }
+      }
     }
+    if (process.env.NODE_ENV !== "production") { await beginLocalLogin(); return; }
     await beginOAuth(tab);
   };
   const biometricLogin = async () => {
@@ -94,9 +98,17 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     catch { setMessage("تعذر الوصول إلى البصمة أو بصمة الوجه على هذا الجهاز حاليًا."); }
     finally { setBusy(null); }
   };
-  const previewLogin = () => {
-    if (Platform.OS !== "web" || typeof window === "undefined") return;
-    window.location.href = `${getApiBaseUrl()}/api/dev/preview-login`;
+  const beginLocalLogin = async () => {
+    resetFeedback(); setBusy(tab);
+    try {
+      await startLocalLogin({ phone: contact, password: secret });
+      if (Platform.OS !== "web") {
+        await refresh();
+        router.replace("/workspace-gate");
+      }
+    } catch {
+      setMessage("تعذر الدخول محلياً. تأكد من تشغيل خادم التطوير على المنفذ 3000 ثم أعد المحاولة.");
+    } finally { setBusy(null); }
   };
   const fieldBorder = (key: string, invalid = false) => invalid ? C.error : focused === key ? C.primary : C.border;
   const label = method === "phone" ? "رقم الهاتف" : "البريد الإلكتروني";
@@ -123,7 +135,6 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
         {error ? <Feedback text={error} color={C.error} icon="error-outline" /> : null}{message ? <Feedback text={message} color={C.mint} icon="info-outline" /> : null}
       </Animated.View>
       <Pressable disabled={isBusy} accessibilityRole="button" accessibilityState={{ busy: isBusy }} onPress={() => void submit()} style={({ pressed }) => [styles.primaryWrap, { opacity: pressed || isBusy ? 0.68 : 1 }]}><LinearGradient colors={[C.primary, C.emerald, C.teal]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primary}>{busy === tab ? <ActivityIndicator color={C.white} /> : <MaterialIcons name="arrow-back" size={21} color={C.white} />}<Text style={styles.primaryText}>{busy === tab ? (tab === "login" ? "جارٍ فتح بوابة الدخول…" : "جارٍ بدء إنشاء الحساب…") : (tab === "login" ? "تسجيل الدخول" : "إنشاء حساب ومتابعة")}</Text></LinearGradient></Pressable>
-      {process.env.NODE_ENV !== "production" && Platform.OS === "web" ? <Pressable accessibilityRole="button" disabled={isBusy} onPress={previewLogin} style={({ pressed }) => [styles.previewButton, { borderColor: C.border, backgroundColor: C.surface, opacity: pressed || isBusy ? 0.68 : 1 }]}><MaterialIcons name="desktop-mac" size={16} color={C.mint} /><Text style={styles.previewText}>دخول المعاينة (محلي)</Text></Pressable> : null}
       {tab === "login" ? <View style={styles.bioArea}><View style={styles.bioWrap}><Animated.View style={[styles.bioPulse, { borderColor: biometricAvailable ? C.primary : C.border, transform: [{ scale: pulse }] }]} /><Pressable disabled={isBusy} accessibilityRole="button" accessibilityState={{ busy: isBusy }} accessibilityLabel="تسجيل الدخول السريع بالبصمة أو بصمة الوجه" onPress={() => void biometricLogin()} style={styles.bioButton}>{busy === "biometric" ? <ActivityIndicator color={C.primary} size="large" /> : <MaterialIcons name="fingerprint" size={42} color={biometricAvailable ? C.primary : C.label} />}</Pressable></View><Text style={styles.bioTitle}>تسجيل الدخول السريع بالبصمة</Text><Text style={styles.bioHint}>استخدم البصمة أو بصمة الوجه عند تفعيلها من أمان الحساب</Text></View> : null}
       <View style={styles.footer}><Text style={styles.footerText}>{tab === "login" ? "ليس لديك حساب؟" : "لديك حساب بالفعل؟"}</Text><Pressable accessibilityRole="link" onPress={() => changeTab(tab === "login" ? "register" : "login")}><Text style={styles.footerLink}>{tab === "login" ? "أنشئ حساباً جديداً" : "تسجيل الدخول"}</Text></Pressable></View>
       {isAuthenticated && tab === "login" ? <Pressable onPress={() => router.replace("/workspace-gate")} style={styles.workspace}><Text style={styles.footerLink}>الانتقال إلى منشآتي</Text></Pressable> : null}

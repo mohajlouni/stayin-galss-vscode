@@ -43,7 +43,12 @@ export function useAuth(options?: UseAuthOptions) {
       }
 
       const sessionToken = await Auth.getSessionToken();
-      setUser(sessionToken ? await Auth.getUserInfo() : null);
+      if (sessionToken) {
+        const stored = await Auth.getUserInfo();
+        setUser(stored ? { ...stored, lastSignedIn: stored.lastSignedIn ? new Date(stored.lastSignedIn) : new Date() } : null);
+      } else {
+        setUser(null);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error("Failed to restore authentication"));
       setUser(null);

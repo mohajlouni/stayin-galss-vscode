@@ -1,8 +1,9 @@
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { accountDeletionRequests, activeWorkspaces, InsertSuggestion, InsertUser, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
+import { accountDeletionRequests, activeWorkspaces, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { matchesSuperAdminIdentity } from "./_core/identity";
 import { MANAGER_PERMISSIONS, normalizeWorkspacePermissions, permissionsForWorkspaceRole, type WorkspacePermissions } from "../shared/workspace-permissions";
 import { DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, normalizeAppData } from "../lib/booking-model";
 
@@ -19,6 +20,89 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+/** إنشاء جدول الجلسات في قواعد البيانات القائمة (idempotent) بلا ترحيلات. */
+export async function ensureSessionsTable(): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot ensure sessions table: database not available");
+    return;
+  }
+  try {
+    await database.execute(sql`
+      CREATE TABLE IF NOT EXISTS stayInSessions (
+        jti varchar(191) NOT NULL PRIMARY KEY,
+        openId varchar(191) NOT NULL,
+        name varchar(255) NULL,
+        expiresAt timestamp NOT NULL,
+        revokedAt timestamp NULL,
+        createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (error) {
+    console.error("[Database] Failed to ensure sessions table:", error);
+  }
+}
+
+/** تسجيل جلسة مصدرة (jti) مع عمرها لتمكين الإبطال. */
+export async function createSessionRecord(input: { jti: string; openId: string; name?: string | null; expiresAt: Date }): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot store session record: database not available");
+    return;
+  }
+  try {
+    await database.insert(sessions).values({ jti: input.jti, openId: input.openId, name: input.name ?? null, expiresAt: input.expiresAt });
+  } catch (error) {
+    console.warn("[Database] Failed to store session record:", error);
+  }
+}
+
+export async function getSessionRecord(jti: string) {
+  const database = await getDb();
+  if (!database) return undefined;
+  const rows = await database.select().from(sessions).where(eq(sessions.jti, jti)).limit(1);
+  return rows[0];
+}
+
+/** إبطال جلسة بمعرّفها (idempotent). */
+export async function revokeSessionByJti(jti: string): Promise<boolean> {
+  const database = await getDb();
+  if (!database) return false;
+  try {
+    await database.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.jti, jti), isNull(sessions.revokedAt)));
+    return true;
+  } catch (error) {
+    console.warn("[Database] Failed to revoke session:", error);
+    return false;
+  }
+}
+
+/** إبطال كل جلسات مستخدم (تُستخدم عند حذف الحساب أو إجبار خروج). */
+export async function revokeUserSessions(openId: string): Promise<number> {
+  const database = await getDb();
+  if (!database) return 0;
+  try {
+    const result = await database.update(sessions).set({ revokedAt: new Date() }).where(and(eq(sessions.openId, openId), isNull(sessions.revokedAt)));
+    return result?.[0]?.affectedRows ?? 0;
+  } catch (error) {
+    console.warn("[Database] Failed to revoke user sessions:", error);
+    return 0;
+  }
+}
+
+/** حذف الجلسات المنتهية (صيانة دورية مقيدة الحجم). */
+export async function pruneExpiredSessions(): Promise<number> {
+  const database = await getDb();
+  if (!database) return 0;
+  try {
+    const result = await database.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+    return result?.[0]?.affectedRows ?? 0;
+  } catch (error) {
+    console.warn("[Database] Failed to prune expired sessions:", error);
+    return 0;
+  }
 }
 
 export async function upsertUser(user: InsertUser): Promise<void> {
@@ -38,7 +122,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     };
     const updateSet: Record<string, unknown> = {};
 
-    const textFields = ["name", "email", "loginMethod"] as const;
+    const textFields = ["name", "email", "phone", "loginMethod"] as const;
     type TextField = (typeof textFields)[number];
 
     const assignNullable = (field: TextField) => {
@@ -58,7 +142,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     if (user.role !== undefined) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
+    } else if (matchesSuperAdminIdentity({ openId: user.openId, phone: user.phone, email: user.email }, ENV.ownerOpenId)) {
       values.role = "admin";
       updateSet.role = "admin";
     }
@@ -312,6 +396,111 @@ export async function getQaSandboxStatus() {
       return { key: facility.key, workspaceId: facility.workspace?.id ?? null, name: facility.name, snapshotVersion: snapshot?.version ?? null, ...counts };
     }),
   };
+}
+
+const LOCAL_DEV_ADMIN_PHONE = "0790000001";
+const LOCAL_DEV_SINGLE_PHONE = "0790000002";
+
+type LocalDevPreset = { kind: "admin"; workspaceName: string } | { kind: "single"; workspaceName: string } | { kind: "fresh" };
+
+function localDevPreset(phoneDigits: string): LocalDevPreset {
+  const digits = phoneDigits.replace(/\D/g, "");
+  const normalized = digits.startsWith("962") && digits.length >= 12 ? `0${digits.slice(3)}` : digits;
+  if (normalized === LOCAL_DEV_ADMIN_PHONE) return { kind: "admin", workspaceName: "منشأة المعاينة الكاملة" };
+  if (normalized === LOCAL_DEV_SINGLE_PHONE) return { kind: "single", workspaceName: "شاليه النخلة" };
+  return { kind: "fresh" };
+}
+
+function localDevPayload(preset: Exclude<LocalDevPreset, { kind: "fresh" }>) {
+  const now = new Date().toISOString();
+  const day = qaSandboxDate(0);
+  const next1 = qaSandboxDate(1);
+  const next2 = qaSandboxDate(2);
+  const next3 = qaSandboxDate(3);
+  const next4 = qaSandboxDate(4);
+  const yesterday = qaSandboxDate(-1);
+  const chalets = preset.kind === "admin" ? [
+    { id: "lvp-1", name: "النخلة 1", referenceCode: "ن1", propertyType: "chalet" as const, color: "#0F8B83", location: "مدخل قرية النخلة", guardianName: "حارس النخلة", guardianPhone: "+962790000103", createdAt: now, shifts: [{ id: "lvp-day-1", name: "فترة نهارية", startTime: "09:00", endTime: "21:00", weekdayPrice: 120, weekendPrice: 150, isActive: true, color: "#0F8B83" }] },
+    { id: "lvp-2", name: "شاليه VIP", referenceCode: "ف2", propertyType: "villa" as const, color: "#FF6B47", location: "الجناح الملكي", guardianName: "حارس النخلة", guardianPhone: "+962790000103", createdAt: now, shifts: [{ id: "lvp-evening-2", name: "سهرة", startTime: "22:00", endTime: "09:00", weekdayPrice: 200, weekendPrice: 260, isActive: true, color: "#FF6B47" }] },
+    { id: "lvp-3", name: "الواحة الرئيسية", referenceCode: "و3", propertyType: "chalet" as const, color: "#7C3AED", location: "مدخل شاليهات الواحة", guardianName: "حارس الواحة", guardianPhone: "+962790000103", createdAt: now, shifts: [{ id: "lvp-day-3", name: "فترة نهارية", startTime: "10:00", endTime: "22:00", weekdayPrice: 110, weekendPrice: 140, isActive: true, color: "#7C3AED" }] },
+  ] : [
+    { id: "lvs-1", name: "شاليه النخلة", referenceCode: "ن1", propertyType: "chalet" as const, color: "#0F8B83", location: "مدخل قرية النخلة", guardianName: "حارس النخلة", guardianPhone: "+962790000103", createdAt: now, shifts: [{ id: "lvs-day-1", name: "فترة نهارية", startTime: "09:00", endTime: "21:00", weekdayPrice: 120, weekendPrice: 150, isActive: true, color: "#0F8B83" }, { id: "lvs-evening-1", name: "سهرة", startTime: "22:00", endTime: "09:00", weekdayPrice: 135, weekendPrice: 165, isActive: true, color: "#2563EB" }] },
+  ];
+  const primary = chalets[0];
+  const secondary = chalets[1] ?? chalets[0];
+  const third = chalets[2] ?? primary;
+  const bookingDay = (id: string, ref: string, customerName: string, phone: string, chalet: (typeof chalets)[0], shift: (typeof chalets)[0]["shifts"][0], startDate: string, endDate: string, price: number, status: "confirmed" | "awaiting-deposit" | "completed" | "cancelled", depositAmount = 0) => ({ id, bookingReference: ref, customerName, phone, chaletId: chalet.id, chaletName: chalet.name, startDate, endDate, bookingType: shift.startTime >= "22:00" ? "evening" as const : "morning" as const, shiftId: shift.id, shiftName: shift.name, shiftColor: shift.color, startTime: shift.startTime, endTime: shift.endTime, price, depositAmount, payments: status === "completed" ? [{ id: `${id}-payment`, amount: price, date: startDate, recordedAt: now, paymentMethod: "cash-owner" as const, recordedByName: "مدير المعاينة" }] : [], notes: `${preset.workspaceName} — حجز تجريبي معزول برقم الهاتف.`, status, createdAt: now, createdByName: "مدير المعاينة", createdByRole: "owner" as const });
+  const bookings = preset.kind === "admin"
+    ? [
+      bookingDay("lvp-b1", "#عA001", "سارة المعاينة", "+962790101010", primary, primary.shifts[0], day, next1, 120, "confirmed", 30),
+      bookingDay("lvp-b2", "#عA002", "رامي المعاينة", "+962790202020", secondary, secondary.shifts[0], next1, next2, 200, "awaiting-deposit"),
+      bookingDay("lvp-b3", "#عA003", "ليان المعاينة", "+962790303030", third, third.shifts[0], next2, next3, 110, "awaiting-deposit"),
+      bookingDay("lvp-b4", "#عA004", "عمر المعاينة", "+962790404040", primary, primary.shifts[0], next3, next4, 150, "confirmed", 45),
+      bookingDay("lvp-b5", "#عA005", "هدى المعاينة", "+962790505050", secondary, secondary.shifts[0], yesterday, day, 260, "completed"),
+      bookingDay("lvp-b6", "#عA006", "طارق المعاينة", "+962790606060", primary, primary.shifts[0], next1, next2, 150, "cancelled"),
+    ]
+    : [
+      bookingDay("lvs-b1", "#عS001", "سارة المعاينة", "+962790101010", primary, primary.shifts[0], day, next1, 120, "confirmed", 30),
+      bookingDay("lvs-b2", "#عS002", "رامي المعاينة", "+962790202020", primary, primary.shifts[1], next1, next2, 135, "awaiting-deposit"),
+      bookingDay("lvs-b3", "#عS003", "هدى المعاينة", "+962790303030", primary, primary.shifts[0], yesterday, day, 150, "completed"),
+    ];
+  const waitlist = preset.kind === "admin"
+    ? [
+      { id: "lvp-w1", customerName: "نور المعاينة", phone: "+962790707070", chaletId: primary.id, chaletName: primary.name, requestedDate: next3, bookingType: "morning" as const, shiftId: primary.shifts[0].id, shiftName: primary.shifts[0].name, shiftColor: primary.shifts[0].color, startTime: primary.shifts[0].startTime, endTime: primary.shifts[0].endTime, price: primary.shifts[0].weekendPrice, notes: "بانتظار توفر الفترة النهارية.", createdAt: now },
+      { id: "lvp-w2", customerName: "يزن المعاينة", phone: "+962790808080", chaletId: secondary.id, chaletName: secondary.name, requestedDate: next4, bookingType: "evening" as const, shiftId: secondary.shifts[0].id, shiftName: secondary.shifts[0].name, shiftColor: secondary.shifts[0].color, startTime: secondary.shifts[0].startTime, endTime: secondary.shifts[0].endTime, price: secondary.shifts[0].weekendPrice, notes: "ينتظر تأكيد التوفر على السهرة.", createdAt: now },
+    ]
+    : [
+      { id: "lvs-w1", customerName: "نور المعاينة", phone: "+962790707070", chaletId: primary.id, chaletName: primary.name, requestedDate: next3, bookingType: "morning" as const, shiftId: primary.shifts[0].id, shiftName: primary.shifts[0].name, shiftColor: primary.shifts[0].color, startTime: primary.shifts[0].startTime, endTime: primary.shifts[0].endTime, price: primary.shifts[0].weekendPrice, notes: "بانتظار إلغاء أو تنازل.", createdAt: now },
+    ];
+  const expenses = (preset.kind === "admin" ? [
+    { id: "lvp-e1", chaletId: primary.id, chaletName: primary.name, amount: 18, date: day, category: "cleaning-supplies" as const, note: "مواد تنظيف", paymentMethod: "cash" as const, createdAt: now, createdByName: "مدير المعاينة" },
+    { id: "lvp-e2", chaletId: secondary.id, chaletName: secondary.name, amount: 45, date: next1, category: "maintenance" as const, note: "صيانة السهرة", paymentMethod: "click" as const, createdAt: now, createdByName: "مدير المعاينة" },
+    { id: "lvp-e3", chaletId: third.id, chaletName: third.name, amount: 12, date: next2, category: "utilities" as const, note: "فاتورة مياه", paymentMethod: "cash" as const, createdAt: now, createdByName: "مدير المعاينة" },
+  ] : [
+    { id: "lvs-e1", chaletId: primary.id, chaletName: primary.name, amount: 20, date: day, category: "cleaning-supplies" as const, note: "مواد تنظيف", paymentMethod: "cash" as const, createdAt: now, createdByName: "مدير المعاينة" },
+  ]);
+  return normalizeAppData({
+    chalets,
+    bookings,
+    waitlist,
+    turnoverTasks: [],
+    expenses,
+    settings: { ...DEFAULT_SETTINGS, businessName: preset.workspaceName, businessPhone: "+962790000100", whatsAppEnabled: true, device: { ...DEFAULT_DEVICE_SETTINGS } },
+    specialPriceRules: [],
+    auditLog: [{ id: `${preset.kind}-seed-audit`, action: "booking-checked-in", subjectName: "بيانات المعاينة", details: `أُنشئت بيانات معزولة لحساب ${preset.workspaceName}.`, createdAt: now, actorName: "مدير المعاينة" }],
+  });
+}
+
+export async function ensureLocalDevAccess(input: { userId: number; displayName: string; phone: string }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const preset = localDevPreset(input.phone);
+  const qaStatus = await getQaSandboxStatus().catch(() => null);
+  const qaIds = (qaStatus?.facilities ?? []).map((facility) => facility.workspaceId).filter((id): id is number => id != null && id > 0);
+  if (qaIds.length) {
+    await database.delete(workspaceMembers).where(and(eq(workspaceMembers.userId, input.userId), inArray(workspaceMembers.workspaceId, qaIds)));
+    await database.delete(activeWorkspaces).where(and(eq(activeWorkspaces.userId, input.userId), inArray(activeWorkspaces.workspaceId, qaIds)));
+  }
+  if (preset.kind === "fresh") return;
+  const ownedWorkspaces = (await database.select().from(workspaces).where(and(eq(workspaces.ownerUserId, input.userId), eq(workspaces.name, preset.workspaceName))).limit(1))[0];
+  let workspaceId: number;
+  if (ownedWorkspaces) {
+    workspaceId = ownedWorkspaces.id;
+  } else {
+    const result = await database.insert(workspaces).values({ name: preset.workspaceName, ownerUserId: input.userId });
+    const created = (await database.select().from(workspaces).where(eq(workspaces.id, Number(result[0].insertId))).limit(1))[0];
+    if (!created) throw new Error("Local dev workspace could not be created");
+    workspaceId = created.id;
+  }
+  const ownerMember = (await database.select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, input.userId))).limit(1))[0];
+  if (!ownerMember) {
+    await database.insert(workspaceMembers).values({ workspaceId, userId: input.userId, displayName: input.displayName, phone: input.phone || "—", role: "owner", permissions: JSON.stringify(MANAGER_PERMISSIONS), status: "active" });
+  }
+  const stored = await getWorkspaceData(workspaceId);
+  if (!stored) {
+    await database.insert(workspaceData).values({ workspaceId, payload: JSON.stringify(localDevPayload(preset)), version: 1, updatedByUserId: input.userId });
+  }
+  await setActiveWorkspace(input.userId, workspaceId);
 }
 
 export async function previewQaSandbox(input: { actorUserId: number; actor: QaSandboxActor; workspaceId: number }) {

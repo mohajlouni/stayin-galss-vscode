@@ -4,9 +4,10 @@ import { DEFAULT_DEVICE_SETTINGS, dateLabel, formatBookingDate, formatCalendarMo
 import { gregorianMonthLabel } from "../lib/gregorian-calendar";
 
 describe("device and locale settings", () => {
-  it("defaults to Arabic Gregorian dates with an optional Hijri companion and 12-hour time", () => {
+  it("defaults to Arabic (not the device language) with Gregorian dates and 12-hour time", () => {
     expect(DEFAULT_DEVICE_SETTINGS).toMatchObject({
-      useDeviceLanguage: true,
+      useDeviceLanguage: false,
+      language: "ar",
       appearanceMode: "system",
       dateFormat: "arabic-gregorian",
       showHijriDate: false,

@@ -63,7 +63,7 @@ function useAuthSessionState() {
     return result.success;
   }, [auth.isAuthenticated, biometricAvailable, preferences.biometricsEnabled]);
 
-  const currentUser = useMemo<SessionUser | null>(() => auth.user ? { id: auth.user.id, fullName: auth.user.name?.trim() || "مستخدم StayIn", phone: auth.user.phone ?? null, email: auth.user.email ?? null, avatarUrl: auth.user.avatarUrl ?? null, createdAt: auth.user.lastSignedIn.toISOString() } : null, [auth.user]);
+  const currentUser = useMemo<SessionUser | null>(() => auth.user ? { id: auth.user.id, fullName: auth.user.name?.trim() || "مستخدم StayIn", phone: auth.user.phone ?? null, email: auth.user.email ?? null, avatarUrl: auth.user.avatarUrl ?? null, createdAt: auth.user.lastSignedIn ? new Date(auth.user.lastSignedIn).toISOString() : new Date().toISOString() } : null, [auth.user]);
   const active = routing.data?.activeWorkspace;
   const activePropertyGroup = useMemo<PropertyGroup | null>(() => active ? { id: active.workspace.id, name: active.workspace.name, logo: active.workspace.logoUrl ?? null, chaletsCount: null, currency: active.workspace.currency ?? null, timeZone: active.workspace.timeZone ?? null } : null, [active]);
   const membership = useMemo<SessionMembership | null>(() => active && currentUser ? { userId: currentUser.id, propertyGroupId: active.workspace.id, role: active.member.role === "admin" ? "manager" : active.member.role, permissions: Object.entries(active.member.permissions ?? {}).filter(([, allowed]) => allowed).map(([permission]) => permission) } : null, [active, currentUser]);

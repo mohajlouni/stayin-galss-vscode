@@ -7,6 +7,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { notifyOwner } from "./_core/notification";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { sdk, sessionTokenFromRequest } from "./_core/sdk";
 import { takeSuggestionSubmission } from "./suggestion-rate-limit";
 import { storagePut } from "./storage";
 import { normalizeInternationalPhone } from "../lib/phone-number";
@@ -44,7 +45,8 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      await sdk.revokeSessionToken(sessionTokenFromRequest(ctx.req));
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return {

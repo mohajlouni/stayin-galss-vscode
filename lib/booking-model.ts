@@ -187,7 +187,7 @@ export type DeviceSettings = {
   lastWhatsAppMessageModules: SavedWhatsAppMessageModule[];
 };
 export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
-  useDeviceLanguage: true,
+  useDeviceLanguage: false,
   language: "ar",
   appearanceMode: "system",
   hapticsEnabled: true,

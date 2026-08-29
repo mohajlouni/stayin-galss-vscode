@@ -69,6 +69,40 @@ export async function exchangeOAuthCode(
   return { sessionToken: result.app_session_id, user: result.user };
 }
 
+/**
+ * Local dev login: accepts any phone number and any password against the local
+ * API server (no identity portal). Web uses the cookie redirect flow; native
+ * stores the returned session token and user like the mobile OAuth exchange.
+ */
+export async function startLocalLogin(input: { phone: string; password: string }): Promise<boolean> {
+  if (Platform.OS === "web") {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams({ phone: input.phone, password: input.password });
+    window.location.href = `${getApiBaseUrl()}/api/dev/local-login?${params.toString()}`;
+    return true;
+  }
+
+  const result = await apiCall<{ sessionToken: string; user: AuthenticatedUser | null }>("/api/dev/local-login", {
+    method: "POST",
+    body: JSON.stringify({ phone: input.phone, password: input.password }),
+  });
+
+  await Auth.setSessionToken(result.sessionToken);
+  if (result.user) {
+    await Auth.setUserInfo({
+      id: result.user.id,
+      openId: result.user.openId,
+      name: result.user.name,
+      email: result.user.email,
+      phone: result.user.phone ?? null,
+      avatarUrl: result.user.avatarUrl ?? null,
+      loginMethod: result.user.loginMethod ?? null,
+      lastSignedIn: new Date(result.user.lastSignedIn),
+    });
+  }
+  return true;
+}
+
 export async function logout(): Promise<void> {
   await apiCall<void>("/api/auth/logout", { method: "POST" });
 }

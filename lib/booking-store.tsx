@@ -9,7 +9,8 @@ import { parseBackupData, parseStoredAppData, serializeBackup } from "./backup-i
 import { persistChaletImage, removeManagedChaletImage } from "./chalet-image";
 import { persistPaymentReceipt } from "./payment-receipt";
 import { syncCheckoutNotifications } from "./checkout-notifications";
-import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, bookingReferenceFor, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, EMPTY_DATA, Expense, expireElapsedRecords, findConflicts, getBookingOperationalState, isValidChaletReferenceCode, isValidPaymentMethod, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletReferenceCode, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, SpecialPriceRule, TurnoverTask, WaitlistEntry } from "./booking-model";
+import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, bookingReferenceFor, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, EMPTY_DATA, Expense, expireElapsedRecords, getBookingOperationalState, isValidChaletReferenceCode, isValidPaymentMethod, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, SpecialPriceRule, TurnoverTask, WaitlistEntry } from "./booking-model";
+import { findBookingConflicts } from "../services/availabilityService";
 import { trpc } from "./trpc";
 import { syncWaitlistPriorityNotifications } from "./waitlist-priority-notifications";
 import { useWorkspaceAccess } from "./workspace-access";
@@ -43,7 +44,7 @@ type BookingContextValue = AppData & {
   acknowledgeWaitlistPriority: (bookingId: string, waitlistId: string) => Promise<void>;
   cancelBooking: (id: string, reason?: string) => Promise<void>;
   deleteBooking: (id: string) => Promise<void>;
-  addChalet: (input: Pick<Chalet, "name" | "propertyType" | "referenceCode" | "color" | "imageUri" | "location" | "locationUrl" | "guardianName" | "guardianPhone" | "contactPhone" | "notes" | "weekendDays" | "shifts" | "periodPricing" | "periodTimes">) => Promise<Chalet>;
+  addChalet: (input: Pick<Chalet, "name" | "propertyType" | "referenceCode" | "color" | "imageUri" | "location" | "locationUrl" | "guardianName" | "guardianPhone" | "contactPhone" | "notes" | "weekendDays" | "shifts" | "periodPricing" | "periodTimes" | "latitude" | "longitude" | "googleMapsUrl" | "isPublished" | "isVerified">) => Promise<Chalet>;
   updateChalet: (chalet: Chalet) => Promise<void>;
   deleteChalet: (id: string) => Promise<void>;
   updateSettings: (settings: Settings) => Promise<void>;
@@ -370,7 +371,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!booking || !entry || entry.status !== "active" || isWaitlistExpired(entry)) throw new Error("waitlist-priority-not-found");
       const configuredStart = entry.startTime ?? data.settings.bookingTypes[entry.bookingType].startTime;
       const configuredEnd = entry.endTime ?? data.settings.bookingTypes[entry.bookingType].endTime;
-      const conflicts = findConflicts({ chaletId: entry.chaletId, chaletName: entry.chaletName, startDate: entry.requestedDate, endDate: entry.endDate ?? entry.requestedDate, bookingType: entry.bookingType, startTime: configuredStart, endTime: configuredEnd }, [booking]);
+      const conflicts = findBookingConflicts({ chaletId: entry.chaletId, chaletName: entry.chaletName, startDate: entry.requestedDate, endDate: entry.endDate ?? entry.requestedDate, bookingType: entry.bookingType, startTime: configuredStart, endTime: configuredEnd }, [booking]);
       if (!conflicts.some((item) => item.id === bookingId)) throw new Error("waitlist-priority-no-conflict");
       const acknowledgedAt = new Date().toISOString();
       const actorName = user?.name ?? "مستخدم التطبيق";
@@ -393,7 +394,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (data.chalets.some((chalet) => chalet.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("chalet-name-duplicate");
       if (data.chalets.some((chalet) => normalizeChaletReferenceCode(chalet.referenceCode) === referenceCode)) throw new Error("chalet-reference-code-duplicate");
       const id = `chalet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const chalet: Chalet = { id, name, propertyType: normalizePropertyType(input.propertyType), referenceCode, color: normalizeChaletColor(input.color), imageUri: await persistChaletImage(input.imageUri, id), location: input.location?.trim() || undefined, locationUrl: input.locationUrl?.trim() || undefined, guardianName: input.guardianName?.trim() || undefined, guardianPhone: input.guardianPhone?.trim() || undefined, contactPhone: input.contactPhone?.trim() || undefined, notes: input.notes?.trim() || undefined, weekendDays: input.weekendDays, shifts: input.shifts, periodPricing: input.periodPricing, periodTimes: input.periodTimes, createdAt: new Date().toISOString() };
+      const chalet: Chalet = { id, name, propertyType: normalizePropertyType(input.propertyType), referenceCode, color: normalizeChaletColor(input.color), imageUri: await persistChaletImage(input.imageUri, id), location: input.location?.trim() || undefined, locationUrl: input.locationUrl?.trim() || undefined, guardianName: input.guardianName?.trim() || undefined, guardianPhone: input.guardianPhone?.trim() || undefined, contactPhone: input.contactPhone?.trim() || undefined, notes: input.notes?.trim() || undefined, weekendDays: input.weekendDays, shifts: input.shifts, periodPricing: input.periodPricing, periodTimes: input.periodTimes, latitude: normalizeChaletLatitude(input.latitude), longitude: normalizeChaletLongitude(input.longitude), googleMapsUrl: normalizeOptionalText(input.googleMapsUrl), isPublished: normalizeChaletVisibility(input.isPublished), isVerified: normalizeChaletVisibility(input.isVerified), createdAt: new Date().toISOString() };
       await persist({ ...data, chalets: [...data.chalets, chalet] });
       return chalet;
     },
@@ -406,7 +407,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (data.chalets.some((item) => item.id !== chalet.id && normalizeChaletReferenceCode(item.referenceCode) === referenceCode)) throw new Error("chalet-reference-code-duplicate");
       const current = data.chalets.find((item) => item.id === chalet.id);
       const imageUri = chalet.imageUri === current?.imageUri ? current?.imageUri : await persistChaletImage(chalet.imageUri, chalet.id);
-      await persist({ ...data, chalets: data.chalets.map((item) => item.id === chalet.id ? { ...chalet, imageUri, name, propertyType: normalizePropertyType(chalet.propertyType), referenceCode, color: normalizeChaletColor(chalet.color, item.color), location: chalet.location?.trim() || undefined, locationUrl: chalet.locationUrl?.trim() || undefined, guardianName: chalet.guardianName?.trim() || undefined, guardianPhone: chalet.guardianPhone?.trim() || undefined, contactPhone: chalet.contactPhone?.trim() || undefined, notes: chalet.notes?.trim() || undefined } : item) });
+      await persist({ ...data, chalets: data.chalets.map((item) => item.id === chalet.id ? { ...chalet, imageUri, name, propertyType: normalizePropertyType(chalet.propertyType), referenceCode, color: normalizeChaletColor(chalet.color, item.color), location: chalet.location?.trim() || undefined, locationUrl: chalet.locationUrl?.trim() || undefined, guardianName: chalet.guardianName?.trim() || undefined, guardianPhone: chalet.guardianPhone?.trim() || undefined, contactPhone: chalet.contactPhone?.trim() || undefined, notes: chalet.notes?.trim() || undefined, latitude: normalizeChaletLatitude(chalet.latitude) ?? item.latitude, longitude: normalizeChaletLongitude(chalet.longitude) ?? item.longitude, googleMapsUrl: normalizeOptionalText(chalet.googleMapsUrl) ?? item.googleMapsUrl, isPublished: normalizeChaletVisibility(chalet.isPublished) ?? item.isPublished, isVerified: normalizeChaletVisibility(chalet.isVerified) ?? item.isVerified } : item) });
       if (current?.imageUri && current.imageUri !== imageUri) await removeManagedChaletImage(current.imageUri);
     },
     deleteChalet: async (id) => {

@@ -12,7 +12,8 @@ import { useAppPreferences } from "@/lib/app-preferences";
 import { useBookings } from "@/lib/booking-store";
 import { useChaletScope } from "@/lib/chalet-scope";
 import { useI18n } from "@/lib/i18n";
-import { Booking, Chalet, Settings, WaitlistEntry, bookingTypeLabel, chaletColor, chaletLabel, findConflicts, formatBookingReference, formatMoney, isWaitlistExpired, totalPaid, waitlistCountdownLabel, waitlistRemainingMilliseconds, weekdayLabel } from "@/lib/booking-model";
+import { Booking, Chalet, Settings, WaitlistEntry, bookingTypeLabel, chaletColor, chaletLabel, formatBookingReference, formatMoney, isWaitlistExpired, totalPaid, waitlistCountdownLabel, waitlistRemainingMilliseconds, weekdayLabel } from "@/lib/booking-model";
+import { findConflicts } from "@/services/availabilityService";
 
 type PendingAction = { kind: "promote" | "remove"; entry: WaitlistEntry };
 type WaitlistTab = "active" | "promoted" | "cancelled";

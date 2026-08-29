@@ -20,7 +20,6 @@ import {
   dateObjectUTC,
   parseISODate,
   propertyTypeIcon,
-  findConflicts,
   getActiveChaletShifts,
   PERIOD_COLORS,
   RESERVED_PERIOD_COLORS,
@@ -30,6 +29,7 @@ import {
   todayISO,
   typeColors,
 } from "@/lib/booking-model";
+import { findBookingConflicts } from "@/services/availabilityService";
 import { useBookings } from "@/lib/booking-store";
 import { indexCalendarBookingsByDate } from "@/lib/calendar-booking-index";
 import { useChaletScope } from "@/lib/chalet-scope";
@@ -167,7 +167,7 @@ function DayDetailsModal({ visible, date, bookings, waiting, chalets, selectedCh
   const compactDate = date.split("-").reverse().join("/");
   const selectedChalet = chalets.find((chalet) => chalet.id === selectedChaletId);
   const shifts = selectedChalet ? getActiveChaletShifts(selectedChalet, settings) : [];
-  const slotBookingsByShift = new Map(shifts.map((shift) => [shift.id, selectedChalet ? bookings.filter((booking) => findConflicts({ chaletId: selectedChalet.id, startDate: date, endDate: date, bookingType: bookingTypeForShift(shift.id), shiftId: shift.id, startTime: shift.startTime, endTime: shift.endTime }, [booking]).length > 0) : EMPTY_DAY_BOOKINGS]));
+  const slotBookingsByShift = new Map(shifts.map((shift) => [shift.id, selectedChalet ? bookings.filter((booking) => findBookingConflicts({ chaletId: selectedChalet.id, startDate: date, endDate: date, bookingType: bookingTypeForShift(shift.id), shiftId: shift.id, startTime: shift.startTime, endTime: shift.endTime }, [booking]).length > 0) : EMPTY_DAY_BOOKINGS]));
   const slotBookings = (shift: ChaletShift) => slotBookingsByShift.get(shift.id) ?? EMPTY_DAY_BOOKINGS;
   const openSlot = (shift: ChaletShift) => { if (!selectedChalet) return; onClose(); router.push({ pathname: "/booking-form", params: { date, chaletId: selectedChalet.id, bookingType: bookingTypeForShift(shift.id), shiftId: shift.id } } as never); };
   const availableShifts = shifts.filter((shift) => slotBookings(shift).length === 0);

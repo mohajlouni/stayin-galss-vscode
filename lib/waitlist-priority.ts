@@ -1,4 +1,5 @@
-import { type Booking, type WaitlistEntry, findConflicts, getBookingTimestampRange, isWaitlistExpired, totalPaid } from "./booking-model";
+import { type Booking, type WaitlistEntry, getBookingTimestampRange, isWaitlistExpired, totalPaid } from "./booking-model";
+import { findBookingConflicts } from "../services/availabilityService";
 
 export const WAITLIST_PRIORITY_LEAD_MS = 24 * 60 * 60 * 1000;
 
@@ -17,7 +18,7 @@ function waitlistConflictsWithBooking(entry: WaitlistEntry, booking: Booking, no
   if (entry.status !== "active" || isWaitlistExpired(entry, now)) return false;
   const configuredStart = entry.startTime ?? "09:00";
   const configuredEnd = entry.endTime ?? "21:00";
-  return findConflicts({ chaletId: entry.chaletId, chaletName: entry.chaletName, startDate: entry.requestedDate, endDate: entry.endDate ?? entry.requestedDate, bookingType: entry.bookingType, startTime: configuredStart, endTime: configuredEnd }, [booking]).some((conflict) => conflict.id === booking.id);
+  return findBookingConflicts({ chaletId: entry.chaletId, chaletName: entry.chaletName, startDate: entry.requestedDate, endDate: entry.endDate ?? entry.requestedDate, bookingType: entry.bookingType, startTime: configuredStart, endTime: configuredEnd }, [booking]).some((conflict) => conflict.id === booking.id);
 }
 
 /** Returns unpaid future bookings that compete with an active waitlist request for the same occupied time. */

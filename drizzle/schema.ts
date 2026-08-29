@@ -50,7 +50,15 @@ export const stayInSuggestions = mysqlTable("stayInSuggestions", {
 export const stayInWorkspaces = mysqlTable("stayInWorkspaces", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
+  /** host_id: مالك المنشأة هو هوية المضيف لحساب النشر والعمولة. */
   ownerUserId: int("ownerUserId").notNull(),
+  /** فئة الحساب: free = مجاني مع عمولة السوق، private_saas = اشتراك سنوي خاص. */
+  accountTier: mysqlEnum("accountTier", ["free", "private_saas"]).notNull().default("free"),
+  /** نسبة عمولة السوق المئوية المفروضة على الحجوزات العامة. */
+  marketplaceCommissionPercent: int("marketplaceCommissionPercent").notNull().default(0),
+  /** قفل لوحة التحكم عند مخالفة الشروط أو التهرب من العمولة. */
+  isAccountLocked: boolean("isAccountLocked").notNull().default(false),
+  lockReason: varchar("lockReason", { length: 255 }),
   logoUrl: text("logoUrl"),
   currency: varchar("currency", { length: 8 }),
   timeZone: varchar("timeZone", { length: 64 }),

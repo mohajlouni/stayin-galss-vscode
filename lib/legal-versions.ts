@@ -1,0 +1,1 @@
+export const LEGAL_VERSIONS = { terms: "2026-08-24", privacy: "2026-08-24", conditions: "2026-08-24" } as const;

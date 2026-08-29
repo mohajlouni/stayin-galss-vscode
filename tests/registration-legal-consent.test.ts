@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LEGAL_VERSIONS } from "../lib/legal-consent";
+import { LEGAL_VERSIONS } from "../lib/legal-versions";
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 

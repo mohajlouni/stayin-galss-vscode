@@ -192,7 +192,10 @@ function qaSandboxPayload(facility: typeof QA_SANDBOX_FACILITIES[number]) {
   const today = qaSandboxDate(0);
   const tomorrow = qaSandboxDate(1);
   const afterTomorrow = qaSandboxDate(2);
+  const yesterday = qaSandboxDate(-1);
+  const inFourDays = qaSandboxDate(4);
   const isPalm = facility.key === "palm";
+  const shiftBookingType = (shift: { startTime: string }) => shift.startTime >= "22:00" ? "evening" as const : "morning" as const;
   const chalets = isPalm
     ? [
       { id: "qa-palm-1", name: "النخلة 1", referenceCode: "ن1", propertyType: "chalet" as const, color: "#0F8B83", location: "مدخل قرية النخلة", guardianName: "حارس النخلة", guardianPhone: "+962790000103", createdAt: now, shifts: [{ id: "qa-day", name: "فترة نهارية", startTime: "09:00", endTime: "21:00", weekdayPrice: 120, weekendPrice: 150, isActive: true, color: "#0F8B83" }] },
@@ -206,13 +209,23 @@ function qaSandboxPayload(facility: typeof QA_SANDBOX_FACILITIES[number]) {
   const bookings = [
     { id: `qa-${facility.key}-booking-current`, bookingReference: isPalm ? "#ن1TEST1" : "#و1TEST1", customerName: isPalm ? "سارة التجريبية" : "عمر التجريبي", phone: "+962790101010", chaletId: primary.id, chaletName: primary.name, startDate: today, endDate: tomorrow, bookingType: "morning" as const, shiftId: primary.shifts[0].id, shiftName: primary.shifts[0].name, shiftColor: primary.shifts[0].color, startTime: primary.shifts[0].startTime, endTime: primary.shifts[0].endTime, price: isPalm ? 120 : 110, depositAmount: 30, payments: [{ id: `qa-${facility.key}-payment-1`, amount: isPalm ? 60 : 55, date: today, recordedAt: now, paymentMethod: "cash-owner" as const, recordedByName: "موظف الحجوزات التجريبي" }], notes: "حجز تجريبي لاختبار عزل المنشأة.", status: "confirmed" as const, createdAt: now, createdByName: "موظف الحجوزات التجريبي", createdByRole: "employee" as const },
     { id: `qa-${facility.key}-booking-upcoming`, bookingReference: isPalm ? "#ن2TEST2" : "#و1TEST2", customerName: isPalm ? "رامي التجريبي" : "ليان التجريبية", phone: "+962790202020", chaletId: secondary.id, chaletName: secondary.name, startDate: tomorrow, endDate: afterTomorrow, bookingType: "custom" as const, shiftId: secondary.shifts[0].id, shiftName: secondary.shifts[0].name, shiftColor: secondary.shifts[0].color, startTime: secondary.shifts[0].startTime, endTime: secondary.shifts[0].endTime, price: isPalm ? 165 : 140, payments: [], notes: "حجز قادم لعرض التقويم والحجوزات النشطة.", status: "awaiting-deposit" as const, createdAt: now, createdByName: "مالك الاختبار", createdByRole: "owner" as const },
+    { id: `qa-${facility.key}-booking-completed`, bookingReference: isPalm ? "#ن3TEST3" : "#و1TEST3", customerName: "هدى التجريبية", phone: "+962790303030", chaletId: primary.id, chaletName: primary.name, startDate: yesterday, endDate: today, bookingType: shiftBookingType(primary.shifts[0]), shiftId: primary.shifts[0].id, shiftName: primary.shifts[0].name, shiftColor: primary.shifts[0].color, startTime: primary.shifts[0].startTime, endTime: primary.shifts[0].endTime, price: primary.shifts[0].weekendPrice, depositAmount: 30, payments: [{ id: `qa-${facility.key}-payment-completed`, amount: primary.shifts[0].weekendPrice, date: yesterday, recordedAt: now, paymentMethod: "click" as const, recordedByName: "موظف الحجوزات التجريبي" }], notes: "حجز مكتمل ومؤرشف للعرض في التقارير المالية.", status: "completed" as const, createdAt: now, createdByName: "موظف الحجوزات التجريبي", createdByRole: "employee" as const },
+    { id: `qa-${facility.key}-booking-cancelled`, bookingReference: isPalm ? "#ن4TEST4" : "#و1TEST4", customerName: "طارق التجريبي", phone: "+962790404040", chaletId: secondary.id, chaletName: secondary.name, startDate: today, endDate: tomorrow, bookingType: shiftBookingType(secondary.shifts[0]), shiftId: secondary.shifts[0].id, shiftName: secondary.shifts[0].name, shiftColor: secondary.shifts[0].color, startTime: secondary.shifts[0].startTime, endTime: secondary.shifts[0].endTime, price: secondary.shifts[0].weekendPrice, depositAmount: 0, payments: [], notes: "حجز مُلغى للعرض ضمن سجل الإلغاءات.", status: "cancelled" as const, createdAt: now, createdByName: "موظف الحجوزات التجريبي", createdByRole: "employee" as const },
   ];
   return normalizeAppData({
     chalets,
     bookings,
-    waitlist: [],
-    turnoverTasks: [],
-    expenses: [{ id: `qa-${facility.key}-expense`, chaletId: primary.id, chaletName: primary.name, amount: isPalm ? 18 : 14, date: today, category: "cleaning-supplies", note: "مواد تنظيف تجريبية", paymentMethod: "cash", createdAt: now, createdByName: "موظف الحجوزات التجريبي" }],
+    waitlist: [
+      { id: `qa-${facility.key}-waitlist-1`, customerName: "نور التجريبية", phone: "+962790505050", chaletId: primary.id, chaletName: primary.name, requestedDate: afterTomorrow, bookingType: shiftBookingType(primary.shifts[0]), shiftId: primary.shifts[0].id, shiftName: primary.shifts[0].name, shiftColor: primary.shifts[0].color, startTime: primary.shifts[0].startTime, endTime: primary.shifts[0].endTime, price: primary.shifts[0].weekendPrice, notes: "بانتظار إلغاء أو تنازل لإتاحة الموقع.", createdAt: now },
+      { id: `qa-${facility.key}-waitlist-2`, customerName: "يزن التجريبي", phone: "+962790606060", chaletId: secondary.id, chaletName: secondary.name, requestedDate: inFourDays, bookingType: shiftBookingType(secondary.shifts[0]), shiftId: secondary.shifts[0].id, shiftName: secondary.shifts[0].name, shiftColor: secondary.shifts[0].color, startTime: secondary.shifts[0].startTime, endTime: secondary.shifts[0].endTime, price: secondary.shifts[0].weekendPrice, notes: "ينتظر تأكيد التوفر على فترة أطول.", createdAt: now },
+    ],
+    turnoverTasks: [
+      { id: `qa-${facility.key}-turnover`, checkoutBookingId: `qa-${facility.key}-booking-completed`, nextBookingId: `qa-${facility.key}-booking-current`, chaletId: primary.id, chaletName: primary.name, dueAt: new Date(`${today}T${primary.shifts[0].endTime}:00`).toISOString(), status: "pending" as const, createdAt: now },
+    ],
+    expenses: [
+      { id: `qa-${facility.key}-expense`, chaletId: primary.id, chaletName: primary.name, amount: isPalm ? 18 : 14, date: today, category: "cleaning-supplies", note: "مواد تنظيف تجريبية", paymentMethod: "cash", createdAt: now, createdByName: "موظف الحجوزات التجريبي" },
+      { id: `qa-${facility.key}-expense-maintenance`, chaletId: secondary.id, chaletName: secondary.name, amount: isPalm ? 25 : 20, date: afterTomorrow, category: "maintenance", note: "صيانة دورية تجريبية", paymentMethod: "click", createdAt: now, createdByName: "موظف الحجوزات التجريبي" },
+    ],
     settings: { ...DEFAULT_SETTINGS, businessName: facility.name, businessPhone: "+962790000100", whatsAppEnabled: true, device: { ...DEFAULT_DEVICE_SETTINGS, whatsAppBaseHeaderTemplate: `رسالة اختبار مستقلة لمنشأة ${facility.name}: {العميل} — {الشاليه}`, receiptMessageTemplate: `إيصال اختبار ${facility.name}: {العميل} — {الإجمالي}`, readyMessageTemplate: `تأكيد اختبار ${facility.name}: {العميل} — {الفترة}` } },
     specialPriceRules: [],
     auditLog: [{ id: `qa-${facility.key}-seed-audit`, action: "booking-checked-in", subjectName: "بيانات الاختبار", details: `أُنشئت البيانات التجريبية المعزولة لمنشأة ${facility.name}`, createdAt: now, actorName: "مدير النظام" }],
@@ -263,11 +276,15 @@ export async function seedQaSandbox(actorUserId: number) {
     await ensureQaSandboxMembership({ workspaceId: result.workspace.id, userId: staff.id, displayName: QA_SANDBOX_USERS.staff.name, phone: QA_SANDBOX_USERS.staff.phone, role: "staff" });
   }
   await ensureQaSandboxMembership({ workspaceId: workspaceResults[0].workspace.id, userId: guest.id, displayName: QA_SANDBOX_USERS.guest.name, phone: QA_SANDBOX_USERS.guest.phone, role: "guest" });
+  const [superAdmin] = (await database.select().from(users).where(eq(users.id, actorUserId)).limit(1));
   for (let index = 0; index < workspaceResults.length; index += 1) {
     const result = workspaceResults[index];
+    const nextPayload = JSON.stringify(qaSandboxPayload(QA_SANDBOX_FACILITIES[index]));
     const existingData = await getWorkspaceData(result.workspace.id);
-    if (!existingData) await database.insert(workspaceData).values({ workspaceId: result.workspace.id, payload: JSON.stringify(qaSandboxPayload(QA_SANDBOX_FACILITIES[index])), version: 1, updatedByUserId: actorUserId });
-    if (result.created) await database.insert(workspaceActivity).values({ workspaceId: result.workspace.id, actorUserId, action: "qa-sandbox-seeded", subject: result.workspace.name, details: "تم إنشاء منشأة اختبار معزولة وبياناتها الأولية" });
+    if (existingData) await database.update(workspaceData).set({ payload: nextPayload, version: existingData.version + 1, updatedByUserId: actorUserId }).where(eq(workspaceData.workspaceId, result.workspace.id));
+    else await database.insert(workspaceData).values({ workspaceId: result.workspace.id, payload: nextPayload, version: 1, updatedByUserId: actorUserId });
+    await ensureQaSandboxMembership({ workspaceId: result.workspace.id, userId: actorUserId, displayName: superAdmin?.name ?? "مدير النظام", phone: superAdmin?.phone ?? "", role: "admin" });
+    await database.insert(workspaceActivity).values({ workspaceId: result.workspace.id, actorUserId, action: "qa-sandbox-seeded", subject: result.workspace.name, details: existingData ? "تم تحديث بيانات منشأة الاختبار المعزولة" : "تم إنشاء منشأة اختبار معزولة وبياناتها الأولية" });
   }
   // Leaving the shared staff without an active facility guarantees the first demo routing path opens the selector.
   await database.delete(activeWorkspaces).where(eq(activeWorkspaces.userId, staff.id));
@@ -656,7 +673,7 @@ export async function getWorkspaceOwnerPinStatus(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const value = await database.select({ workspaceId: workspaceOwnerPins.workspaceId }).from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, workspaceId)).limit(1);
-  return { configured: Boolean(value[0]) };
+  return { configured: Boolean(value[0]), usesDefault: !value[0] };
 }
 
 export async function requireWorkspaceOwner(workspaceId: number, userId: number) {
@@ -682,10 +699,12 @@ export async function verifyWorkspaceOwnerPin(input: { workspaceId: number; pin:
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
-  if (!record) return { configured: false, verified: false };
+  if (!record) {
+    return { configured: false, usesDefault: true, verified: input.pin === "0000" };
+  }
   const provided = Buffer.from(ownerPinHash(input.pin, record.salt), "hex");
   const saved = Buffer.from(record.pinHash, "hex");
-  return { configured: true, verified: provided.length === saved.length && timingSafeEqual(provided, saved) };
+  return { configured: true, usesDefault: false, verified: provided.length === saved.length && timingSafeEqual(provided, saved) };
 }
 
 export async function saveOwnerEmergencySnapshot(input: { workspaceId: number; payload: string; actorUserId: number; action: string; subject: string; details: string }) {

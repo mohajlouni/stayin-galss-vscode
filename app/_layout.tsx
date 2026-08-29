@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { AppErrorBoundary } from "@/components/error-boundary";
 import { useColors } from "@/hooks/use-colors";
 import { AppPreferencesProvider } from "@/lib/app-preferences";
 import { BookingProvider, useBookings } from "@/lib/booking-store";
@@ -18,21 +19,23 @@ import { RouteAccessGate } from "@/components/route-access-gate";
 
 export default function RootLayout() {
   return (
-    <TrpcProvider>
-      <AuthSessionProvider>
-        <BookingProvider>
-          <ChaletScopeProvider>
-            <AppPreferencesProvider>
-              <ThemeProvider>
-                <RouteAccessGate>
-                  <AppNavigator />
-                </RouteAccessGate>
-              </ThemeProvider>
-            </AppPreferencesProvider>
-          </ChaletScopeProvider>
-        </BookingProvider>
-      </AuthSessionProvider>
-    </TrpcProvider>
+    <AppErrorBoundary>
+      <TrpcProvider>
+        <AuthSessionProvider>
+          <BookingProvider>
+            <ChaletScopeProvider>
+              <AppPreferencesProvider>
+                <ThemeProvider>
+                  <RouteAccessGate>
+                    <AppNavigator />
+                  </RouteAccessGate>
+                </ThemeProvider>
+              </AppPreferencesProvider>
+            </ChaletScopeProvider>
+          </BookingProvider>
+        </AuthSessionProvider>
+      </TrpcProvider>
+    </AppErrorBoundary>
   );
 }
 

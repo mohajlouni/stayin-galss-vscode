@@ -13,6 +13,7 @@ import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, configuredBookingPrice, daysCount, durationLabel, formatMoney, getChaletShifts, hasConflict, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, weekdayLabel } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
+import { validateBookingInput } from "@/lib/booking-validation";
 import { useChaletScope } from "@/lib/chalet-scope";
 import { useI18n } from "@/lib/i18n";
 import { COUNTRY_DIALING_CODES, countryForInternationalPhone, DEFAULT_COUNTRY_DIALING_CODE, normalizeInternationalPhone, type CountryDialingCode } from "@/lib/phone-number";
@@ -203,6 +204,11 @@ export default function BookingForm() {
   const saveConfirmed = async () => {
     try {
       await triggerHaptic();
+      const validation = validateBookingInput(draft);
+      if (!validation.ok) {
+        Alert.alert(language === "ar" ? "تعذر حفظ الحجز" : "Could not save booking", validation.message);
+        return;
+      }
       const next = savedBooking(existing?.id ?? `b-${Date.now()}`);
       if (existing) {
         await updateBooking(next);

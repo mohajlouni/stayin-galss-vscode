@@ -1,6 +1,6 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
-import { getUserByOpenId, upsertUser } from "../db";
+import { getDb, getUserByOpenId, upsertUser } from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
@@ -169,6 +169,46 @@ export function registerOAuthRoutes(app: Express) {
     } catch (error) {
       console.error("[Auth] /api/auth/session failed:", error);
       res.status(401).json({ error: "Invalid token" });
+    }
+  });
+
+  app.get("/api/dev/preview-login", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(404).json({ error: "Preview login is disabled in production" });
+      return;
+    }
+
+    const previewOpenId = "stay-in-preview-owner-v1";
+    const previewName = "مالك المعاينة (محلي)";
+
+    try {
+      const db = await getDb();
+      if (!db) throw new Error("Database is not available");
+
+      await upsertUser({
+        openId: previewOpenId,
+        name: previewName,
+        email: null,
+        loginMethod: "preview-local",
+        lastSignedIn: new Date(),
+      });
+
+      const sessionToken = await sdk.createSessionToken(previewOpenId, {
+        name: previewName,
+        expiresInMs: ONE_YEAR_MS,
+      });
+
+      const cookieOptions = getSessionCookieOptions(req);
+      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+      const frontendUrl =
+        process.env.EXPO_WEB_PREVIEW_URL ||
+        process.env.EXPO_PACKAGER_PROXY_URL ||
+        "http://localhost:8081";
+      res.redirect(302, frontendUrl);
+    } catch (error) {
+      console.error("[Preview] Preview login failed:", error);
+      res.status(500).json({ error: "Failed to create preview session" });
     }
   });
 }

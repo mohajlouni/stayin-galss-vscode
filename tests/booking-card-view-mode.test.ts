@@ -30,7 +30,7 @@ describe("booking card display modes", () => {
     expect(bookingsSource).toContain("<BookingViewToggle value={deviceSettings.bookingCardViewMode}");
     expect(homeSource).toContain("<View style={styles.scopeChalet}><ChaletSwitcher /></View>");
     expect(bookingsSource).toContain("<View style={styles.scopeChalet}><ChaletSwitcher /></View>");
-    expect(homeSource).toContain('styles.scopeBlock, { flexDirection: "row" }');
+    expect(homeSource).toContain("styles.scopeBlock, { flexDirection: row }");
     expect(bookingsSource).toContain("styles.scopeBlock, { flexDirection: row }");
     expect(homeSource).toContain("viewMode={deviceSettings.bookingCardViewMode}");
     expect(bookingsSource).toContain("viewMode={deviceSettings.bookingCardViewMode}");

@@ -61,6 +61,7 @@ export default function CalendarScreen() {
   const days = useMemo(() => gregorianMonthGrid(year, month), [month, year]);
   const isAllUnitsView = !selectedChaletId;
   const selectedChalet = useMemo(() => chalets.find((chalet) => chalet.id === selectedChaletId), [chalets, selectedChaletId]);
+  const selectedChaletAccent = selectedChalet?.color ?? colors.primary;
   const selectedChaletShifts = useMemo(() => selectedChalet ? getActiveChaletShifts(selectedChalet, settings) : [], [selectedChalet, settings]);
   const selectedShiftColors = useMemo(() => Object.fromEntries(selectedChaletShifts.map((shift) => [shift.id, { color: shift.color, label: shift.name }])), [selectedChaletShifts]);
   const selectedPeriodLegend = useMemo<Array<keyof typeof RESERVED_PERIOD_COLORS>>(() => {
@@ -118,7 +119,7 @@ export default function CalendarScreen() {
   return (
     <ScreenContainer edges={["top", "bottom", "left", "right"]}>
       <ScrollView style={[styles.scroll, { backgroundColor: "transparent" }]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <CompactScreenHeader title={language === "ar" ? "التقويم" : "Calendar"} logoUrl={settings.businessLogoUrl} icon="calendar-month" />
+        <CompactScreenHeader title={language === "ar" ? "التقويم" : "Calendar"} logoUrl={settings.businessLogoUrl} icon="calendar-month" accentColor={selectedChaletAccent} />
         <View style={styles.scopeWrap}><ChaletSwitcher /></View>
 
         <GlowGlassCard style={styles.calendarCard} contentStyle={styles.calendarCardContent}>

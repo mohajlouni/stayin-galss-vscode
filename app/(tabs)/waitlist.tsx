@@ -106,8 +106,8 @@ export default function WaitlistScreen() {
           <Text style={[styles.confirmTitle, { color: colors.foreground, textAlign: align }]}>{actionTitle}</Text>
           <Text style={[styles.confirmBody, { color: colors.muted, textAlign: align }]}>{actionBody}</Text>
           <View style={[styles.confirmActions, { flexDirection: row }]}>
-            <Pressable onPress={() => setPendingAction(null)} style={[styles.confirmButton, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><Text style={{ color: colors.foreground, fontWeight: "800" }}>{language === "ar" ? "رجوع" : "Back"}</Text></Pressable>
-            <Pressable onPress={() => void confirmAction()} style={[styles.confirmButton, { backgroundColor: isRemoval ? colors.error : colors.primary }]}><Text style={{ color: colors.background, fontWeight: "900" }}>{isRemoval ? (language === "ar" ? "تأكيد الإلغاء" : "Confirm cancellation") : (language === "ar" ? "فتح نموذج الحجز" : "Open booking form")}</Text></Pressable>
+            <Pressable onPress={() => setPendingAction(null)} style={({ pressed }) => [styles.confirmButton, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "800" }}>{language === "ar" ? "رجوع" : "Back"}</Text></Pressable>
+            <Pressable onPress={() => void confirmAction()} style={({ pressed }) => [styles.confirmButton, { backgroundColor: isRemoval ? colors.error : colors.primary, opacity: pressed ? 0.72 : 1 }]}><Text style={{ color: colors.background, fontWeight: "900" }}>{isRemoval ? (language === "ar" ? "تأكيد الإلغاء" : "Confirm cancellation") : (language === "ar" ? "فتح نموذج الحجز" : "Open booking form")}</Text></Pressable>
           </View>
         </View>
       </View>

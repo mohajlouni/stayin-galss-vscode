@@ -1,4 +1,5 @@
-import { type Booking, type BookingType, findConflicts } from "./booking-model";
+import { type Booking, type BookingType } from "./booking-model";
+import { findBookingConflicts } from "../services/availabilityService";
 import { normalizeInternationalPhone } from "./phone-number";
 import { z } from "zod";
 
@@ -56,5 +57,5 @@ export function validateBookingInput(input: BookingDraftInput): BookingValidatio
 
 /** نقطة دخول مركزية لفحص توفر الوحدة وتعارض الفترات (أساس خدمة الإتاحية المستقبلية). */
 export function findBookingDateConflicts(draft: Booking, others: Booking[], ignoreId?: string): Booking[] {
-  return findConflicts(draft, others, ignoreId);
+  return findBookingConflicts(draft, others, ignoreId);
 }

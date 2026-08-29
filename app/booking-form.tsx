@@ -11,7 +11,9 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, configuredBookingPrice, daysCount, durationLabel, formatMoney, getChaletShifts, hasConflict, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, weekdayLabel } from "@/lib/booking-model";
+import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, weekdayLabel } from "@/lib/booking-model";
+import { hasBookingConflict } from "@/services/availabilityService";
+import { configuredBookingPrice } from "@/services/pricingService";
 import { useBookings } from "@/lib/booking-store";
 import { validateBookingInput } from "@/lib/booking-validation";
 import { useChaletScope } from "@/lib/chalet-scope";
@@ -182,7 +184,7 @@ export default function BookingForm() {
     : language === "ar"
       ? `أكمل: ${missingItems.join("، ")}${!hasValidPrice && automaticPrice <= 0 ? " — أدخل السعر يدويًا أو حدده من الإعدادات" : ""}`
       : `Complete: ${missingItems.join(", ")}${!hasValidPrice && automaticPrice <= 0 ? " — enter a price or configure it in Settings" : ""}`;
-  const conflicts = useMemo(() => bookings.filter((booking) => booking.id !== existing?.id && booking.status !== "cancelled" && booking.status !== "waitlisted" && hasConflict(draft, [booking])), [bookings, draft, existing?.id]);
+  const conflicts = useMemo(() => bookings.filter((booking) => booking.id !== existing?.id && booking.status !== "cancelled" && booking.status !== "waitlisted" && hasBookingConflict(draft, [booking])), [bookings, draft, existing?.id]);
   useEffect(() => { if (!conflicts.length) setConflictDecision(null); }, [conflicts.length]);
   useEffect(() => {
     if (endDate === lastCheckedEndDate) return;

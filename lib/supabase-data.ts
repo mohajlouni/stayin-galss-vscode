@@ -285,6 +285,22 @@ export async function saveWorkspaceState(token: string, payload: unknown): Promi
   return unwrap(clientWithToken(token).rpc("app.save_workspace_state", { p_payload: payload }), "saveWorkspaceState");
 }
 
+// Resolves the caller's Supabase workspace id (uuid) from the custom session
+// token. Used for tenant-scoped realtime filters; the legacy numeric workspace
+// id from `useWorkspaceAccess()` does not match Supabase's uuid key.
+export async function getMyWorkspaceId(token: string): Promise<string> {
+  assertConfigured();
+  const { data, error } = await clientWithToken(token).rpc("app.my_workspace");
+  if (error) {
+    const message = error instanceof Error ? error.message : "Unknown Supabase error";
+    throw new SupabaseDataError(`getMyWorkspaceId: ${message}`, "QUERY_FAILED", { label: "getMyWorkspaceId" });
+  }
+  if (data == null) {
+    throw new SupabaseDataError("getMyWorkspaceId: no row returned", "EMPTY_RESULT", { label: "getMyWorkspaceId" });
+  }
+  return String(data);
+}
+
 // ---------------------------------------------------------------------------
 // Realtime
 // ---------------------------------------------------------------------------
@@ -294,7 +310,11 @@ export type RealtimeTable =
   | "chalets"
   | "customers"
   | "maintenance_tasks"
-  | "utility_readings";
+  | "utility_readings"
+  | "workspace_state"
+  | "settings"
+  | "waitlist"
+  | "assets";
 
 export interface RealtimeChange {
   eventType: string;

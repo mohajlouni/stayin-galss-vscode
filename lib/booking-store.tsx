@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Platform } from "react-native";
 
 import { parseBackupData, parseStoredAppData, serializeBackup } from "./backup-import";
@@ -22,6 +22,8 @@ import { trpc } from "./trpc";
 import { syncWaitlistPriorityNotifications } from "./waitlist-priority-notifications";
 import { useWorkspaceAccess } from "./workspace-access";
 import { isWorkspaceSessionError, isWorkspaceVersionConflict, mergeWorkspaceAppData } from "./workspace-sync";
+import * as Auth from "./_core/auth";
+import { getMyWorkspaceId, getWorkspaceState, isSupabaseConfigured, saveWorkspaceState, subscribeToTable } from "./supabase-data";
 
 const STORAGE_KEY = "arabic-booking-manager-data-v1";
 const RESCUE_BACKUP_KEY = "arabic-booking-manager-rescue-backup-v1";
@@ -132,6 +134,69 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const [lastDeleted, setLastDeleted] = useState<LastDeleted | null>(null);
   const remoteSyncStarted = useRef(false);
   const auditActorName = user?.name?.trim() || undefined;
+  // Custom session token forwarded to Supabase as X-StayIn-Token. Supabase writes
+  // are strictly additive and non-blocking: if Supabase is unavailable or no token
+  // is present, the existing tRPC path remains authoritative and nothing breaks.
+  const [supabaseToken, setSupabaseToken] = useState<string | null>(null);
+  const supabaseReady = isSupabaseConfigured && canSyncWorkspace && !!supabaseToken;
+
+  const applySupabaseSnapshot = useCallback(async (token: string) => {
+    try {
+      const state = await getWorkspaceState(token);
+      const payload = state.payload;
+      if (payload == null) return;
+      const remote = expireElapsedRecords(
+        parseStoredAppData(typeof payload === "string" ? payload : JSON.stringify(payload)),
+      );
+      setData((current) => {
+        const merged = mergeWorkspaceAppData(remote, current).data;
+        if (JSON.stringify(merged) === JSON.stringify(current)) return current;
+        void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(merged));
+        return merged;
+      });
+    } catch {
+      // Swallow: the Supabase mirror is optional. Local + tRPC remain authoritative.
+    }
+  }, [scopedStorageKey]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!canSyncWorkspace || !isSupabaseConfigured) {
+      setSupabaseToken(null);
+      return;
+    }
+    void Auth.getSessionToken().then((token) => {
+      if (mounted) setSupabaseToken(token ?? null);
+    });
+    return () => { mounted = false; };
+  }, [canSyncWorkspace, activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!supabaseReady || !supabaseToken) return;
+    let disposed = false;
+    const token = supabaseToken;
+    const refresh = () => { if (!disposed) void applySupabaseSnapshot(token); };
+    // Initial pull once the token is ready.
+    refresh();
+    // Realtime listener (fires on Supabase writes from any device) plus a
+    // token-scoped poll as the safe fallback for the custom-auth model.
+    let channel: ReturnType<typeof subscribeToTable> | undefined;
+    (async () => {
+      try {
+        const wsId = await getMyWorkspaceId(token);
+        if (disposed || !wsId) return;
+        channel = subscribeToTable("workspace_state", wsId, refresh);
+      } catch {
+        // Realtime unavailable (custom-token auth) — the poll below covers sync.
+      }
+    })();
+    const poll = setInterval(refresh, 15_000);
+    return () => {
+      disposed = true;
+      clearInterval(poll);
+      if (channel) { try { channel.unsubscribe(); } catch { /* noop */ } }
+    };
+  }, [supabaseReady, supabaseToken, applySupabaseSnapshot]);
 
   const recordSuccessfulSync = async (value: string | Date | null | undefined = new Date()) => {
     const parsed = value ? new Date(value) : new Date();
@@ -167,6 +232,15 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         await recordSuccessfulSync();
       } catch (error) {
         setSyncConflict(isWorkspaceVersionConflict(error));
+      }
+    }
+    // Mirror the workspace snapshot to Supabase (additive, non-blocking). On
+    // failure this is silently ignored; the tRPC + device copy remain source of truth.
+    if (supabaseReady && supabaseToken) {
+      try {
+        await saveWorkspaceState(supabaseToken, JSON.stringify(normalized));
+      } catch {
+        // Snapshot write failed — not fatal. Next successful sync will retry.
       }
     }
   };

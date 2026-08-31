@@ -14,6 +14,7 @@ export const themeColors: {
   success: { light: string; dark: string };
   warning: { light: string; dark: string };
   error: { light: string; dark: string };
+  sky: { light: string; dark: string };
 };
 
 declare const themeConfig: {

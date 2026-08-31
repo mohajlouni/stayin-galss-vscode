@@ -12,7 +12,7 @@ import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 
-const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided"];
+const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"];
 const TIME_RANGES = ["all", "today", "two-days", "week", "month"] as const;
 type TimeRange = (typeof TIME_RANGES)[number];
 
@@ -42,6 +42,20 @@ function actionPresentation(entry: AuditLogEntry | AuditAction, language: "ar" |
     "chalet-deleted": { label: language === "ar" ? "حذف شاليه" : "Chalet deleted", color: colors.error, icon: "holiday-village" as const },
     "payment-updated": { label: language === "ar" ? "تعديل دفعة" : "Payment updated", color: colors.warning, icon: "edit" as const },
     "payment-voided": { label: language === "ar" ? "إلغاء دفعة" : "Payment voided", color: colors.warning, icon: "money-off" as const },
+    "customer-created": { label: language === "ar" ? "إضافة عميل" : "Customer added", color: colors.success, icon: "person-add" as const },
+    "customer-updated": { label: language === "ar" ? "تحديث بيانات عميل" : "Customer updated", color: colors.warning, icon: "edit" as const },
+    "customer-blacklisted": { label: language === "ar" ? "حظر عميل" : "Customer blacklisted", color: colors.error, icon: "block" as const },
+    "customer-unblacklisted": { label: language === "ar" ? "رفع حظر عميل" : "Blacklist removed", color: colors.success, icon: "person-outline" as const },
+    "contract-signed": { label: language === "ar" ? "توقيع عقد إيجار" : "Lease signed", color: colors.primary, icon: "description" as const },
+    "asset-added": { label: language === "ar" ? "إضافة أصل" : "Asset added", color: colors.success, icon: "inventory-2" as const },
+    "asset-updated": { label: language === "ar" ? "تحديث أصل" : "Asset updated", color: colors.warning, icon: "edit" as const },
+    "asset-deleted": { label: language === "ar" ? "حذف أصل" : "Asset deleted", color: colors.error, icon: "delete-outline" as const },
+    "maintenance-task-updated": { label: language === "ar" ? "مهمة صيانة" : "Maintenance task", color: colors.warning, icon: "construction" as const },
+    "maintenance-task-completed": { label: language === "ar" ? "إنجاز صيانة" : "Maintenance done", color: colors.success, icon: "check-circle" as const },
+    "weather-log-updated": { label: language === "ar" ? "تحديث بيانات الطقس" : "Weather updated", color: colors.sky, icon: "wb-cloudy" as const },
+    "utility-reading-recorded": { label: language === "ar" ? "قراءة عدّاد" : "Meter reading", color: colors.warning, icon: "speed" as const },
+    "loyalty-points-awarded": { label: language === "ar" ? "إضافة نقاط ولاء" : "Loyalty points earned", color: colors.success, icon: "stars" as const },
+    "loyalty-points-redeemed": { label: language === "ar" ? "استرداد نقاط ولاء" : "Loyalty points redeemed", color: colors.primary, icon: "redeem" as const },
   } as const;
   return common[action];
 }
@@ -161,7 +175,7 @@ const styles = StyleSheet.create({
   listContent: { padding: 16, paddingTop: 11, paddingBottom: 42 },
   card: { borderRadius: 17, marginBottom: 10 },
   cardContent: { padding: 13 },
-  cardAccent: { position: "absolute", right: 0, top: 0, bottom: 0, width: 3 },
+  cardAccent: { position: "absolute", top: 0, bottom: 0, width: 3 },
   cardHeader: { alignItems: "center", justifyContent: "space-between", gap: 9 },
   actionBadge: { maxWidth: "68%", minHeight: 30, alignItems: "center", justifyContent: "center", gap: 5, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, flexShrink: 1 },
   chaletName: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: "900" },

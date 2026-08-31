@@ -5,6 +5,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { ChaletSwitcher } from "@/components/chalet-switcher";
+import { HomeTopWidget } from "@/components/home-top-widget";
 import { DailyOperationsPanel } from "@/components/daily-operations-panel";
 import { OperationalAlerts } from "@/components/operational-alerts";
 import { BookingViewToggle } from "@/components/booking-view-toggle";
@@ -13,14 +14,15 @@ import { BookingQuickActions } from "@/components/booking-quick-actions";
 import { AvailableSlotCard } from "@/components/available-slot-card";
 import { CheckInConfirmationSheet } from "@/components/check-in-confirmation-sheet";
 import { CheckOutConfirmationSheet } from "@/components/check-out-confirmation-sheet";
-import { CompactScreenHeader } from "@/components/compact-screen-header";
 import { ScreenContainer } from "@/components/screen-container";
 import { GlowGlassCard } from "@/components/glow-glass-card";
+import { BentoGlassCard } from "@/components/bento-glass-card";
 import { useColors } from "@/hooks/use-colors";
-import { APP_BRAND_NAME } from "@/lib/brand";
 import { Booking, BookingListFilter, PricedBookingType, availableSiblingSlotForBooking, chaletColor, chaletLabel, getBookingDisplayOperationalState, getBookingStayTimeline, isWaitlistExpired, remainingAmount, splitBookingsByCheckout, todayISO } from "@/lib/booking-model";
+import { unreadNotificationCount } from "@/lib/notification-center";
 import { getDailyOperations } from "@/lib/daily-operations";
 import { getTurnoverTaskCandidates } from "@/lib/turnover-tasks";
+import { upcomingJordanianHolidays } from "@/lib/jordan-holidays";
 import { useBookings } from "@/lib/booking-store";
 import { useChaletScope } from "@/lib/chalet-scope";
 import { useI18n } from "@/lib/i18n";
@@ -32,8 +34,9 @@ import { startOAuthLogin } from "@/constants/oauth";
 export default function HomeScreen() {
   const appRouter = useRouter();
   const { bookings, waitlist, turnoverTasks, chalets, settings, hydrated, markBookingCheckedIn, completeBookingStay } = useBookings();
+  const { notifications, assets } = useBookings();
   const { selectedChaletId } = useChaletScope();
-  const { isRTL, language, t } = useI18n();
+  const { isRTL, language } = useI18n();
   const { formatTime, formatDate, deviceSettings, updateDeviceSettings } = useAppPreferences();
   const { isAuthenticated } = useWorkspaceAccess();
   const colors = useColors();
@@ -73,6 +76,7 @@ export default function HomeScreen() {
   const remaining = useMemo(() => scopedBookings.reduce((sum, booking) => sum + remainingAmount(booking), 0), [scopedBookings]);
   const pendingWaitlist = useMemo(() => waitlist.filter((entry) => entry.status === "active" && !isWaitlistExpired(entry, clock) && (!selectedChaletId || entry.chaletId === selectedChaletId)), [clock, selectedChaletId, waitlist]);
   const dailyOperations = useMemo(() => getDailyOperations(bookings, waitlist, clock, selectedChaletId), [bookings, clock, selectedChaletId, waitlist]);
+  const upcomingHolidays = useMemo(() => upcomingJordanianHolidays(today, 7), [today]);
   const turnoverAttentionCount = useMemo(() => getTurnoverTaskCandidates(bookings, turnoverTasks, clock, selectedChaletId).filter((task) => task.status !== "completed").length, [bookings, clock, selectedChaletId, turnoverTasks]);
   const checkoutWarningCount = useMemo(() => activeOperationalBookings.filter((booking) => getBookingStayTimeline(booking, clock).phase === "checkout-warning").length, [activeOperationalBookings, clock]);
   const occupiedChaletCount = useMemo(() => new Set(todayBookings.map((booking) => booking.chaletId).filter(Boolean)).size, [todayBookings]);
@@ -137,22 +141,23 @@ export default function HomeScreen() {
     return undefined;
   };
 
+  const unreadCount = unreadNotificationCount(notifications ?? []);
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}>
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <CompactScreenHeader title={APP_BRAND_NAME} logoUrl={settings.businessLogoUrl} action={{ label: language === "ar" ? "حجز جديد" : "New booking", accessibilityLabel: t("addBooking"), onPress: () => appRouter.push("/booking-form" as never) }} />
-      <GlowGlassCard style={styles.quickSearchCard}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح البحث السريع" : "Open quick search"} onPress={() => appRouter.push("/quick-search" as never)} style={({ pressed }) => [styles.quickSearch, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="search" size={19} color={colors.primary} /><Text style={[styles.flex, { color: colors.muted, fontSize: 12, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "بحث سريع بالاسم أو الهاتف أو المرجع" : "Quick search by guest, phone, or reference"}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></GlowGlassCard>
+      <HomeTopWidget logoUrl={settings.businessLogoUrl} unreadCount={unreadCount} onNewBooking={() => appRouter.push("/booking-form" as never)} onNotifications={() => appRouter.push("/notifications" as never)} />
+      <BentoGlassCard radius={20} style={styles.quickSearchCard} contentStyle={{ padding: 0 }}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح البحث السريع" : "Open quick search"} onPress={() => appRouter.push("/quick-search" as never)} style={({ pressed }) => [styles.quickSearch, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="search" size={19} color={colors.primary} /><Text style={[styles.flex, { color: colors.muted, fontSize: 12, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "بحث سريع بالاسم أو الهاتف أو المرجع" : "Quick search by guest, phone, or reference"}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></BentoGlassCard>
 
       <View style={[styles.scopeBlock, { flexDirection: row }]}><View style={styles.scopeChalet}><ChaletSwitcher /></View><BookingViewToggle value={deviceSettings.bookingCardViewMode} onChange={(bookingCardViewMode) => void updateDeviceSettings({ bookingCardViewMode })} accentColor={selectedChaletAccent} /></View>
 
-      <GlowGlassCard style={styles.summaryBar} contentStyle={[styles.summaryBarContent, { flexDirection: row }]}> 
+      <BentoGlassCard radius={24} elevated accentColor={selectedChaletAccent} style={styles.summaryBar} contentStyle={[styles.summaryBarContent, { flexDirection: row }]}>
       <SummaryMetric label={language === "ar" ? "حجوزات اليوم" : "Today's bookings"} value={String(todayBookings.length)} icon="calendar-month" colors={colors} accent={colors.success} align={align} onPress={() => openFilteredBookings("today")} />
         <View style={[styles.summaryDivider, { backgroundColor: colors.surfaceMuted }]} />
         <SummaryMetric label={language === "ar" ? "نسبة الإشغال" : "Occupancy"} value={occupancyPercent === undefined ? "—" : `${occupancyPercent}%`} icon="percent" colors={colors} accent={colors.primary} align={align} onPress={() => appRouter.push("/(tabs)/calendar" as never)} />
         <View style={[styles.summaryDivider, { backgroundColor: colors.surfaceMuted }]} />
         <SummaryMetric label={language === "ar" ? "الرصيد المستحق" : "Outstanding balance"} value={remaining > 0 ? `${remaining.toFixed(2)} ${settings.currency}` : language === "ar" ? "لا يوجد" : "None"} icon="account-balance-wallet" colors={colors} accent={colors.warning} align={align} onPress={() => openFilteredBookings("balance")} />
-      </GlowGlassCard>
+      </BentoGlassCard>
       {restoreHintVisible ? <View accessibilityLiveRegion="polite" style={[styles.restoreDataHint, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}><MaterialIcons name="cloud-download" size={18} color={colors.primary} /><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تسجيل الدخول لاستعادة البيانات" : "Sign in to restore data"} onPress={() => void startOAuthLogin()} style={({ pressed }) => [styles.flex, { opacity: pressed ? 0.68 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "هل لديك بيانات منشأة محفوظة؟" : "Have saved workspace data?"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{language === "ar" ? "اضغط لتسجيل الدخول واستعادتها بأمان." : "Tap to sign in and restore it securely."}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إخفاء الإشعار" : "Dismiss notification"} onPress={() => setRestoreHintVisible(false)} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View> : null}
-      {deviceSettings.showDailyTasks ? <DailyOperationsPanel arrivals={dailyOperations.arrivals.length} checkouts={dailyOperations.checkouts.length} outstanding={dailyOperations.outstanding.length} waitlist={dailyOperations.waitlist.length} expanded={!deviceSettings.dailyOperationsCollapsed} onToggleExpanded={() => void updateDeviceSettings({ dailyOperationsCollapsed: !deviceSettings.dailyOperationsCollapsed })} onArrivalsPress={() => openFilteredBookings("today")} onCheckoutsPress={() => openFilteredBookings("today")} onOutstandingPress={() => openFilteredBookings("balance")} onWaitlistPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} onTurnoverPress={() => appRouter.push("/turnover-tasks" as never)} showTurnoverAction={deviceSettings.showTurnoverTasks} /> : null}
+      {deviceSettings.showDailyTasks ? <DailyOperationsPanel arrivals={dailyOperations.arrivals.length} checkouts={dailyOperations.checkouts.length} outstanding={dailyOperations.outstanding.length} waitlist={dailyOperations.waitlist.length} expanded={!deviceSettings.dailyOperationsCollapsed} onToggleExpanded={() => void updateDeviceSettings({ dailyOperationsCollapsed: !deviceSettings.dailyOperationsCollapsed })} onArrivalsPress={() => openFilteredBookings("today")} onCheckoutsPress={() => openFilteredBookings("today")} onOutstandingPress={() => openFilteredBookings("balance")} upcomingHolidays={upcomingHolidays} onHolidayPricingPress={(holiday) => appRouter.push({ pathname: "/booking-form", params: { date: holiday.date, holidayPricing: "1" } } as never)} onWaitlistPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} onTurnoverPress={() => appRouter.push("/turnover-tasks" as never)} showTurnoverAction={deviceSettings.showTurnoverTasks} /> : null}
       <OperationalAlerts turnoverCount={deviceSettings.showTurnoverTasks ? turnoverAttentionCount : 0} checkoutWarningCount={checkoutWarningCount} onTurnoverPress={() => appRouter.push("/turnover-tasks" as never)} onCheckoutsPress={() => openFilteredBookings("today")} />
       {pendingWaitlist.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "طلبات الانتظار المعلقة" : "Active waitlist requests"} onPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} style={({ pressed }) => [styles.waitlistIndicator, { backgroundColor: colors.warning + "12", flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="pending-actions" size={16} color={colors.warning} /><Text style={[styles.flex, { color: colors.warning, fontSize: 11, fontWeight: "900", textAlign: align }]}>{language === "ar" ? `${pendingWaitlist.length} طلب انتظار يحتاج متابعة` : `${pendingWaitlist.length} waitlist request${pendingWaitlist.length === 1 ? "" : "s"} need attention`}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.warning} /></Pressable> : null}
 
@@ -168,7 +173,7 @@ export default function HomeScreen() {
       {!hydrated ? <Text style={{ color: colors.muted, textAlign: "center", fontSize: 12, marginTop: 12 }}>{language === "ar" ? "جارٍ تحميل البيانات المحلية..." : "Loading local data..."}</Text> : null}
     </ScrollView>
     <CheckInConfirmationSheet booking={checkInBooking} visible={Boolean(checkInBooking)} saving={operationalSavingId === checkInBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} formatDate={formatDate} formatTime={formatTime} onClose={() => setCheckInBooking(null)} onConfirm={(confirmation) => { if (checkInBooking) saveOperationalAction(checkInBooking, "check-in", confirmation); }} />
-    <CheckOutConfirmationSheet booking={checkOutBooking} visible={Boolean(checkOutBooking)} saving={operationalSavingId === checkOutBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} onClose={() => setCheckOutBooking(null)} onConfirm={(confirmation) => { if (checkOutBooking) saveOperationalAction(checkOutBooking, "check-out", confirmation); }} />
+    <CheckOutConfirmationSheet booking={checkOutBooking} visible={Boolean(checkOutBooking)} saving={operationalSavingId === checkOutBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} assets={assets} onClose={() => setCheckOutBooking(null)} onConfirm={(confirmation) => { if (checkOutBooking) saveOperationalAction(checkOutBooking, "check-out", confirmation); }} />
     {operationalFeedback ? <View pointerEvents="none" accessibilityLiveRegion="polite" style={[styles.operationalToast, { backgroundColor: operationalFeedback.isError ? colors.error : colors.success }]}><MaterialIcons name={operationalFeedback.isError ? "error-outline" : "check-circle"} size={20} color="#FFFFFF" /><Text style={[styles.flex, { color: "#FFFFFF", fontSize: 12, fontWeight: "800", textAlign: align }]}>{operationalFeedback.message}</Text></View> : null}
   </ScreenContainer>;
 }
@@ -181,17 +186,19 @@ const styles = StyleSheet.create({
   scroll: { flex: 1, minHeight: 0 },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 188 },
   flex: { flex: 1, minWidth: 0 },
-  scopeBlock: { marginTop: 11, alignItems: "center", gap: 8 },
+  bellButton: { width: 43, height: 43, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  bellBadge: { position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
+  scopeBlock: { marginTop: 11, alignItems: "center", justifyContent: "space-between", gap: 8 },
   scopeChalet: { flex: 1, minWidth: 0 },
   quickSearchCard: { marginTop: 10, borderRadius: 20 },
-  quickSearch: { minHeight: 48, borderRadius: 20, paddingHorizontal: 14, alignItems: "center", gap: 8 },
+  quickSearch: { minHeight: 48, borderRadius: 20, paddingHorizontal: 14, alignItems: "center", justifyContent: "space-between", gap: 8 },
   summaryBar: { minHeight: 104, borderRadius: 24, marginTop: 12 },
-  summaryBarContent: { minHeight: 104, paddingVertical: 10, alignItems: "stretch" },
+  summaryBarContent: { minHeight: 104, paddingVertical: 10, alignItems: "stretch", justifyContent: "space-between" },
   summaryMetric: { flex: 1, minWidth: 0, paddingHorizontal: 9, justifyContent: "center" },
   summaryIcon: { width: 29, height: 29, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   summaryDivider: { width: StyleSheet.hairlineWidth, marginVertical: 5 },
-  restoreDataHint: { minHeight: 58, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 9, alignItems: "center", gap: 9, marginTop: 10 },
-  waitlistIndicator: { minHeight: 34, borderRadius: 14, alignItems: "center", gap: 7, paddingHorizontal: 10, marginTop: 8 },
+  restoreDataHint: { minHeight: 58, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 9, alignItems: "center", justifyContent: "space-between", gap: 9, marginTop: 10 },
+  waitlistIndicator: { minHeight: 34, borderRadius: 14, alignItems: "center", justifyContent: "space-between", gap: 7, paddingHorizontal: 10, marginTop: 8 },
   sectionHeader: { alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 21, marginBottom: 10 },
   sectionTitle: { fontWeight: "900", fontSize: 19 },
   sectionHint: { fontSize: 11, marginTop: 2 },

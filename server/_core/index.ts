@@ -7,7 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { ensureSessionsTable, pruneExpiredSessions } from "../db";
+import { ensureSessionsTable, pruneExpiredSessions, seedDemoData } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -61,6 +61,20 @@ async function startServer() {
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, timestamp: Date.now() });
+  });
+
+  app.post("/api/dev/seed", async (_req, res) => {
+    if (process.env.NODE_ENV === "production") {
+      res.status(404).json({ error: "Demo seeding disabled in production" });
+      return;
+    }
+    try {
+      await seedDemoData();
+      res.json({ ok: true, message: "Demo data seeded successfully" });
+    } catch (error) {
+      console.error("[Seed] Demo seeding failed:", error);
+      res.status(500).json({ error: "Failed to seed demo data" });
+    }
   });
 
   app.use(

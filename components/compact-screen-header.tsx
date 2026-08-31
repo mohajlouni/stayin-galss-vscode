@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Image } from "expo-image";
-import { type ComponentProps, useEffect, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useState } from "react";
 import { type Href } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -26,9 +26,10 @@ type CompactScreenHeaderProps = {
     onPress: () => void;
     icon?: ComponentProps<typeof MaterialIcons>["name"];
   };
+  accessory?: ReactNode;
 };
 
-export function CompactScreenHeader({ title, logoUrl, icon = "holiday-village", accentColor, plain = false, showDateTime = true, backHref, action }: CompactScreenHeaderProps) {
+export function CompactScreenHeader({ title, logoUrl, icon = "holiday-village", accentColor, plain = false, showDateTime = true, backHref, action, accessory }: CompactScreenHeaderProps) {
   const colors = useColors();
   const { isRTL, language } = useI18n();
   const { formatDate, formatTime } = useAppPreferences();
@@ -50,6 +51,7 @@ export function CompactScreenHeader({ title, logoUrl, icon = "holiday-village", 
       {showDateTime ? <LiveDateTime timestamp={clock} language={language} formatDate={formatDate} formatTime={formatTime} color={colors.muted} align={align} style={styles.liveDateTime} /> : null}
     </View>
     {action ? <Pressable accessibilityLabel={action.accessibilityLabel} onPress={action.onPress} style={({ pressed }) => [styles.action, { backgroundColor: colors.primary, opacity: pressed ? 0.76 : 1 }]}><MaterialIcons name={action.icon ?? "add"} size={20} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{action.label}</Text></Pressable> : null}
+    {accessory ? <>{accessory}</> : null}
   </>;
   if (plain) return <View style={[styles.plainContainer, { flexDirection: row }]}>{headerContent}</View>;
   return <GlowGlassCard style={styles.container} contentStyle={[styles.containerContent, { flexDirection: row }]}>{headerContent}</GlowGlassCard>;

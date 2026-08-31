@@ -45,6 +45,9 @@ type BookingCardProps = {
   manualCheckInMode?: boolean;
 };
 
+/** مستوى الزجاج الغائر — داخلي معتم شفاف للفقرات داخل البطاقة. */
+const SUNK = "rgba(0, 0, 0, 0.25)";
+
 function arabicWeekday(dateKey: string) {
   return ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][new Date(`${dateKey}T12:00:00`).getDay()] ?? "";
 }
@@ -142,24 +145,26 @@ export function BookingCard({ booking, chalets, colors, language, currency, form
   const depositTextColor = depositPending ? "#FBBF24" : depositState === "none" ? "#94A3B8" : "#34D399";
   const textAlign = isArabic ? "right" : "left";
 
-  return <GlowGlassCard glowColor={themeColor} radius={frameRadius} intensity={18} style={[styles.card, styles.unitGlowFrame, { borderRadius: frameRadius, borderColor: themeColor + frameGlow.border, shadowColor: themeColor, shadowOpacity: frameGlow.shadowOpacity }, isCompactView && styles.compactCard]}>
+  return <GlowGlassCard glowColor={themeColor} radius={frameRadius} intensity={18} style={[styles.card, styles.unitGlowFrame, { borderRadius: frameRadius, borderColor: themeColor + frameGlow.border, borderTopColor: "rgba(255, 255, 255, 0.15)", borderBottomColor: themeColor + "40", borderLeftColor: themeColor + "26", borderRightColor: themeColor + "26", borderWidth: 1, borderTopWidth: 1, borderBottomWidth: 1, borderLeftWidth: 0.5, borderRightWidth: 0.5, shadowColor: themeColor, shadowOpacity: frameGlow.shadowOpacity }, isCompactView && styles.compactCard]}>
     <Pressable accessibilityRole="button" accessibilityLabel={isArabic ? "فتح تفاصيل الحجز" : "Open booking details"} onPress={onPress ?? onDetailsPress} style={({ pressed }) => [styles.cardPressable, { opacity: pressed ? 0.76 : 1 }]}>
       <View style={styles.rowBetween}>
         <View style={styles.guestInfo}>
-          <Text numberOfLines={1} style={[styles.guestName, { color: colors.foreground, textAlign }]}>{isArabic ? `الاسم: ${booking.customerName}` : `Name: ${booking.customerName}`}</Text>
-          <View style={[styles.guestMeta, isArabic && styles.guestMetaArabic]}>
-            <Text numberOfLines={1} style={styles.guestMetaText}>{phoneText}</Text>
+          <View style={styles.guestStrip}>
+            <Text numberOfLines={1} style={[styles.guestName, { color: colors.foreground, textAlign }]}>{isArabic ? `الاسم: ${booking.customerName}` : `Name: ${booking.customerName}`}</Text>
+            <View style={[styles.guestMeta, isArabic && styles.guestMetaArabic]}>
+              <Text numberOfLines={1} style={styles.guestMetaText}>{phoneText}</Text>
+            </View>
           </View>
         </View>
         <View style={styles.chaletIdentity}><View style={[styles.chaletBadge, { backgroundColor: themeColor }]}><MaterialIcons name={propertyIcon} size={14} color="#FFFFFF" /><Text numberOfLines={1} style={styles.chaletBadgeText}>{chaletName}</Text></View><Text numberOfLines={1} style={[styles.propertyTypeText, { color: themeColor }]}>{propertyType}</Text><Text numberOfLines={1} style={[styles.bookingReference, { color: themeColor }]}>{referenceText}</Text></View>
       </View>
 
-      <View style={[styles.scheduleBox, isCompactView && styles.scheduleBoxCompact, { backgroundColor: colors.glassInset }]}>
+      <View style={[styles.scheduleBox, isCompactView && styles.scheduleBoxCompact, { backgroundColor: SUNK }]}>
         <View style={[styles.scheduleInfo, isCompactView && styles.scheduleInfoCompact]}>
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={[styles.scheduleDate, isCompactView && styles.scheduleDateCompact, { color: colors.foreground, textAlign: isCompactView ? "center" : isArabic ? "center" : textAlign }]}>{dateRange}</Text>
           {!isCompactView ? <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.64} style={[styles.scheduleDescription, { color: colors.muted, textAlign }]}>{scheduleDescription}</Text> : null}
         </View>
-        <Pressable disabled={!creatorKnown} accessibilityRole="button" accessibilityLabel={creatorKnown ? (isArabic ? `عرض سجل إجراءات ${createdByName}` : `View ${createdByName}'s activity`) : (isArabic ? "اسم منشئ الحجز غير متاح" : "Booking creator unavailable")} onPress={() => setCreatorActivityOpen(true)} style={({ pressed }) => [styles.creatorSlot, { backgroundColor: colors.glassInset, opacity: pressed && creatorKnown ? 0.68 : 1 }]}><MaterialIcons name={creatorRoleIcon} size={14} color={creatorRoleColor} /><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={[styles.creatorSlotText, { color: creatorKnown ? colors.foreground : colors.muted }]}>{createdByName}</Text></Pressable>
+        <Pressable disabled={!creatorKnown} accessibilityRole="button" accessibilityLabel={creatorKnown ? (isArabic ? `عرض سجل إجراءات ${createdByName}` : `View ${createdByName}'s activity`) : (isArabic ? "اسم منشئ الحجز غير متاح" : "Booking creator unavailable")} onPress={() => setCreatorActivityOpen(true)} style={({ pressed }) => [styles.creatorSlot, { backgroundColor: SUNK, opacity: pressed && creatorKnown ? 0.68 : 1 }]}><MaterialIcons name={creatorRoleIcon} size={14} color={creatorRoleColor} /><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={[styles.creatorSlotText, { color: creatorKnown ? colors.foreground : colors.muted }]}>{createdByName}</Text></Pressable>
       </View>
 
       <View style={styles.statusRow}>
@@ -168,13 +173,13 @@ export function BookingCard({ booking, chalets, colors, language, currency, form
       </View>
 
       {!isCompactView ? <View style={styles.financialRow}>
-        <FinancialSlot label={balanceLabel} icon={balance > 0 ? "account-balance-wallet" : "check-circle"} textColor={balance > 0 ? "#FBBF24" : "#34D399"} surfaceColor={colors.glassInset} />
-        <FinancialSlot label={depositLabel} icon={depositIcon} textColor={depositTextColor} surfaceColor={colors.glassInset} />
-        <FinancialSlot label={`${isArabic ? "الإجمالي" : "Total"}: ${compactAmount(booking.price)} ${currency}`} icon="payments" textColor={colors.foreground} surfaceColor={colors.glassInset} />
+        <FinancialSlot label={balanceLabel} icon={balance > 0 ? "account-balance-wallet" : "check-circle"} textColor={balance > 0 ? "#FBBF24" : "#34D399"} surfaceColor={SUNK} />
+        <FinancialSlot label={depositLabel} icon={depositIcon} textColor={depositTextColor} surfaceColor={SUNK} />
+        <FinancialSlot label={`${isArabic ? "الإجمالي" : "Total"}: ${compactAmount(booking.price)} ${currency}`} icon="payments" textColor={colors.foreground} surfaceColor={SUNK} />
       </View> : null}
     </Pressable>
     {footer && !isCompactView ? <View style={styles.footer}>{footer}</View> : null}
-    <Modal visible={creatorActivityOpen} transparent animationType="slide" onRequestClose={() => setCreatorActivityOpen(false)}><View style={styles.creatorActivityBackdrop}><View style={[styles.creatorActivitySheet, { backgroundColor: colors.surface }]}><View style={styles.creatorActivityHeader}><View style={[styles.creatorRoleIcon, { backgroundColor: creatorRoleColor + "18" }]}><MaterialIcons name={creatorRoleIcon} size={20} color={creatorRoleColor} /></View><View style={styles.creatorActivityTitle}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: isArabic ? "right" : "left" }}>{createdByName}</Text><Text style={{ color: creatorRoleColor, fontSize: 11, fontWeight: "800", marginTop: 2, textAlign: isArabic ? "right" : "left" }}>{creatorRoleLabel}</Text></View><Pressable accessibilityLabel={isArabic ? "إغلاق سجل الإجراءات" : "Close activity log"} onPress={() => setCreatorActivityOpen(false)} style={[styles.creatorActivityClose, { backgroundColor: colors.surfaceMuted }]}><MaterialIcons name="close" size={19} color={colors.muted} /></Pressable></View><ScrollView style={styles.creatorActivityScroll} contentContainerStyle={styles.creatorActivityContent} showsVerticalScrollIndicator={false}>{<View style={[styles.creatorActivityEntry, { backgroundColor: colors.surfaceMuted }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: isArabic ? "right" : "left" }}>{isArabic ? "سجّل هذا الحجز" : "Recorded this booking"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 4, textAlign: isArabic ? "right" : "left" }}>{new Date(booking.createdAt).toLocaleString(isArabic ? "ar-JO" : "en-GB")}</Text></View>}{creatorActivity.length ? creatorActivity.map((entry) => <View key={entry.id} style={[styles.creatorActivityEntry, { backgroundColor: colors.surfaceMuted }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: isArabic ? "right" : "left" }}>{entry.subjectName}</Text><Text style={{ color: colors.muted, fontSize: 10, lineHeight: 16, marginTop: 4, textAlign: isArabic ? "right" : "left" }}>{entry.details}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 5, textAlign: isArabic ? "right" : "left" }}>{new Date(entry.createdAt).toLocaleString(isArabic ? "ar-JO" : "en-GB")}</Text></View>) : <Text style={{ color: colors.muted, fontSize: 12, marginTop: 12, textAlign: isArabic ? "right" : "left" }}>{isArabic ? "لا توجد إجراءات إضافية مسجلة لهذا المستخدم بعد." : "No additional recorded actions for this user yet."}</Text>}</ScrollView></View></View></Modal>
+    <Modal visible={creatorActivityOpen} transparent animationType="slide" onRequestClose={() => setCreatorActivityOpen(false)}><View style={styles.creatorActivityBackdrop}><View style={[styles.creatorActivitySheet, { backgroundColor: colors.surface }]}><View style={styles.creatorActivityHeader}><View style={[styles.creatorRoleIcon, { backgroundColor: creatorRoleColor + "18" }]}><MaterialIcons name={creatorRoleIcon} size={20} color={creatorRoleColor} /></View><View style={styles.creatorActivityTitle}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: isArabic ? "right" : "left" }}>{createdByName}</Text><Text style={{ color: creatorRoleColor, fontSize: 11, fontWeight: "800", marginTop: 2, textAlign: isArabic ? "right" : "left" }}>{creatorRoleLabel}</Text></View><Pressable accessibilityLabel={isArabic ? "إغلاق سجل الإجراءات" : "Close activity log"} onPress={() => setCreatorActivityOpen(false)} style={[styles.creatorActivityClose, { backgroundColor: colors.surfaceMuted }]}><MaterialIcons name="close" size={19} color={colors.muted} /></Pressable></View><ScrollView style={styles.creatorActivityScroll} contentContainerStyle={styles.creatorActivityContent} showsVerticalScrollIndicator={false}>{<View style={[styles.creatorActivityEntry, { backgroundColor: colors.glassInset }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: isArabic ? "right" : "left" }}>{isArabic ? "سجّل هذا الحجز" : "Recorded this booking"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 4, textAlign: isArabic ? "right" : "left" }}>{new Date(booking.createdAt).toLocaleString(isArabic ? "ar-JO" : "en-GB")}</Text></View>}{creatorActivity.length ? creatorActivity.map((entry) => <View key={entry.id} style={[styles.creatorActivityEntry, { backgroundColor: colors.glassInset }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: isArabic ? "right" : "left" }}>{entry.subjectName}</Text><Text style={{ color: colors.muted, fontSize: 10, lineHeight: 16, marginTop: 4, textAlign: isArabic ? "right" : "left" }}>{entry.details}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 5, textAlign: isArabic ? "right" : "left" }}>{new Date(entry.createdAt).toLocaleString(isArabic ? "ar-JO" : "en-GB")}</Text></View>) : <Text style={{ color: colors.muted, fontSize: 12, marginTop: 12, textAlign: isArabic ? "right" : "left" }}>{isArabic ? "لا توجد إجراءات إضافية مسجلة لهذا المستخدم بعد." : "No additional recorded actions for this user yet."}</Text>}</ScrollView></View></View></Modal>
   </GlowGlassCard>;
 }
 
@@ -189,6 +194,7 @@ const styles = StyleSheet.create({
   cardPressable: { minHeight: 64 },
   rowBetween: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   guestInfo: { flex: 1, minWidth: 0, alignItems: "flex-end" },
+  guestStrip: { width: "100%", borderRadius: 16, paddingVertical: 8, paddingHorizontal: 11, overflow: "hidden", backgroundColor: "rgba(0, 0, 0, 0.25)" },
   guestName: { width: "100%", fontSize: 16, fontWeight: "800", writingDirection: "rtl" },
   guestMeta: { flexDirection: "row", alignItems: "center", minHeight: 18, gap: 3, marginTop: 3 },
   guestMetaArabic: { width: "100%", justifyContent: "flex-start", alignSelf: "flex-end" },
@@ -198,14 +204,14 @@ const styles = StyleSheet.create({
   chaletBadgeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800", textAlign: "center" },
   propertyTypeText: { fontSize: 9, fontWeight: "800", textAlign: "center" },
   bookingReference: { maxWidth: "100%", fontSize: 10, fontWeight: "900", writingDirection: "ltr", textAlign: "center" },
-  scheduleBox: { width: "100%", borderRadius: 16, paddingVertical: 9, marginTop: 9, alignItems: "center", justifyContent: "space-between", flexDirection: "row" },
+  scheduleBox: { width: "100%", borderRadius: 16, paddingVertical: 9, marginTop: 9, alignItems: "center", justifyContent: "space-between", flexDirection: "row", flexWrap: "wrap", gap: 8 },
   scheduleBoxCompact: { paddingVertical: 6 },
-  scheduleInfo: { width: "66%", minWidth: 0, paddingHorizontal: 8, alignItems: "flex-end" },
+  scheduleInfo: { flex: 1, minWidth: 120, paddingHorizontal: 8, alignItems: "flex-end" },
   scheduleInfoCompact: { flex: 1, width: undefined, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
   scheduleDate: { width: "100%", fontSize: 12, fontWeight: "800", writingDirection: "rtl" },
   scheduleDateCompact: { fontSize: 14, letterSpacing: 0.1 },
   scheduleDescription: { fontSize: 10, lineHeight: 15, marginTop: 2, letterSpacing: -0.18, writingDirection: "rtl" },
-  creatorSlot: { width: "32%", minHeight: 28, borderRadius: 12, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3, flexShrink: 0 },
+  creatorSlot: { flex: 1, minWidth: 100, maxWidth: "32%", minHeight: 28, borderRadius: 12, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3, flexShrink: 0 },
   creatorSlotText: { flex: 1, minWidth: 0, fontSize: 9, fontWeight: "900", textAlign: "center", writingDirection: "rtl" },
   creatorActivityBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(7, 20, 18, 0.58)" },
   creatorActivitySheet: { maxHeight: "72%", borderTopLeftRadius: 25, borderTopRightRadius: 25, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24 },
@@ -217,13 +223,13 @@ const styles = StyleSheet.create({
   creatorActivityContent: { paddingTop: 12, paddingBottom: 6 },
   creatorActivityEntry: { borderRadius: 14, padding: 10, marginTop: 8 },
   statusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
-  stayBanner: { width: "66%", minWidth: 0, minHeight: 28, borderRadius: 12, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
+  stayBanner: { flex: 1, minWidth: 120, maxWidth: "66%", minHeight: 28, borderRadius: 12, paddingHorizontal: 8, alignItems: "center", justifyContent: "center" },
   stayText: { fontSize: 9, fontWeight: "900", textAlign: "center", writingDirection: "rtl" },
-  periodTag: { width: "32%", minWidth: 0, minHeight: 28, borderRadius: 12, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 },
+  periodTag: { flex: 1, minWidth: 90, maxWidth: "32%", minHeight: 28, borderRadius: 12, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 },
   periodDot: { width: 6, height: 6, borderRadius: 3 },
   periodText: { fontSize: 10, fontWeight: "800", writingDirection: "rtl" },
-  financialRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
-  financialSlot: { width: "32%", minWidth: 0, minHeight: 30, borderRadius: 14, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 },
+  financialRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8 },
+  financialSlot: { flex: 1, minWidth: 90, maxWidth: "32%", minHeight: 30, borderRadius: 14, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0 },
   financialText: { flex: 1, minWidth: 0, fontSize: 9, fontWeight: "900", textAlign: "right", writingDirection: "rtl" },
   footer: { marginTop: 10 },
 });

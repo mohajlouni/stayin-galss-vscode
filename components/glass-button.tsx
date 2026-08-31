@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
+import { useAppPreferences } from "@/lib/app-preferences";
 
 type GlassButtonProps = {
   title: string;
@@ -20,8 +21,11 @@ type GlassButtonProps = {
 export function GlassButton({ title, onPress, variant = "primary", icon, style, disabled = false, accessibilityLabel, testID }: GlassButtonProps) {
   const colors = useColors();
   const { isRTL } = useI18n();
+  const { triggerHaptic } = useAppPreferences();
   const isPrimary = variant === "primary";
   const isDanger = variant === "danger";
+  const isDark = colors.background === "#070B10";
+  const rimTop = isDark ? colors.glassRimTopDark : colors.glassRimTopLight;
   const textColor = isPrimary ? "#FFFFFF" : isDanger ? colors.error : colors.foreground;
 
   const content = <>
@@ -29,8 +33,14 @@ export function GlassButton({ title, onPress, variant = "primary", icon, style, 
     <Text style={[styles.text, { color: textColor }]}>{title}</Text>
   </>;
 
-  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} testID={testID} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.base, { borderColor: isPrimary ? "rgba(255,255,255,0.28)" : colors.glassRim, opacity: disabled ? 0.48 : pressed ? 0.82 : 1, transform: [{ scale: pressed && !disabled ? 0.98 : 1 }] }, style]}>
-    {isPrimary ? <LinearGradient colors={[colors.primary + "D1", colors.secondary + "C2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.primaryFill, { flexDirection: isRTL ? "row-reverse" : "row" }]}>{content}</LinearGradient> : <View pointerEvents="none" style={[styles.secondaryFill, { flexDirection: isRTL ? "row-reverse" : "row", backgroundColor: isDanger ? colors.error + "18" : colors.glassInset, borderColor: colors.glassRim }]}>{content}</View>}
+  const handlePress = () => {
+    if (disabled) return;
+    void triggerHaptic();
+    onPress();
+  };
+
+  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? title} testID={testID} disabled={disabled} onPress={handlePress} style={({ pressed }) => [styles.base, { borderColor: isPrimary ? "rgba(255,255,255,0.28)" : colors.glassRim, borderTopColor: rimTop, shadowColor: isPrimary ? colors.primary : "#000000", shadowOpacity: isPrimary ? 0.35 : 0.18, shadowRadius: isPrimary ? 16 : 11, elevation: isPrimary ? 8 : 4, opacity: disabled ? 0.48 : pressed ? 0.82 : 1, transform: [{ scale: pressed && !disabled ? 0.98 : 1 }] }, style]}>
+    {isPrimary ? <LinearGradient colors={[colors.primary + "D1", colors.secondary + "C2"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.primaryFill, { flexDirection: isRTL ? "row-reverse" : "row", borderTopColor: rimTop }]}>{content}</LinearGradient> : <View pointerEvents="none" style={[styles.secondaryFill, { flexDirection: isRTL ? "row-reverse" : "row", backgroundColor: isDanger ? colors.error + "18" : colors.glassInset, borderColor: colors.glassRim, borderTopColor: rimTop }]}>{content}</View>}
   </Pressable>;
 }
 

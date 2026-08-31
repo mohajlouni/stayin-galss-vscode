@@ -1,8 +1,9 @@
 import { z } from "zod";
 
 import { AppData, Booking, BookingStatus, BookingType, Chalet, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, DepositRefund, Payment, Settings, WaitlistEntry, normalizeAppData } from "./booking-model";
+import { type LoyaltyAccount, type LoyaltyTransaction, type UtilityReading, type WeatherLog } from "./booking-model";
 
-export const BACKUP_VERSION = 7;
+export const BACKUP_VERSION = 8;
 
 type BackupEnvelope = AppData & { backupVersion?: number; exportedAt?: string };
 
@@ -142,6 +143,11 @@ const chaletSchema = z.object({
   contactPhone: optionalText,
   notes: optionalText,
   weekendDays: z.array(z.number().int().min(0).max(6)).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  googleMapsUrl: optionalText,
+  hasHeatedPool: z.boolean().optional(),
+  nearWater: z.boolean().optional(),
   periodPricing: chaletPeriodPricingSchema.optional(),
   periodTimes: z.object({
     morning: z.object({ startTime: timeSchema, endTime: timeSchema }).optional(),
@@ -185,8 +191,154 @@ const settingsSchema = z.object({
     dateFormat: z.enum(["gregory", "DD/MM/YYYY", "YYYY-MM-DD", "english-month", "arabic-gregorian"]).optional(),
     showHijriDate: z.boolean().optional(),
     timeFormat: z.enum(["12h", "24h"]).optional(),
+    guardReminderLeadMinutes: z.number().int().min(1).max(1440).optional(),
+    showLunarPhase: z.boolean().optional(),
   }).optional(),
+  utilityTracking: z.object({ enabled: z.boolean().optional(), rates: z.record(z.enum(["electricity", "water", "gas_fuel"]), moneySchema).optional(), thresholds: z.record(z.enum(["electricity", "water", "gas_fuel"]), moneySchema).optional() }).optional(),
+  loyaltyProgram: z.object({ enabled: z.boolean().optional(), pointsPerJod: moneySchema.optional(), jodPerPoint: moneySchema.optional(), silverMinStays: z.number().int().min(0).optional(), goldMinStays: z.number().int().min(0).optional(), platinumMinStays: z.number().int().min(0).optional(), silverMinSpendJod: moneySchema.optional(), goldMinSpendJod: moneySchema.optional() }).optional(),
+  holidayPricing: z.object({ enabled: z.boolean().optional(), upliftPercent: moneySchema.optional() }).optional(),
+  contractPolicy: z.object({ requireSignature: z.boolean().optional(), defaultDepositAmount: moneySchema.optional() }).optional(),
+  weatherAdvisory: z.object({ enabled: z.boolean().optional(), coldPoolThresholdC: moneySchema.optional(), recipients: z.object({ owner: z.boolean().optional(), manager: z.boolean().optional(), guard: z.boolean().optional() }).optional() }).optional(),
 }).passthrough();
+
+const customerSchema = z.object({
+  id: identifierSchema,
+  name: identifierSchema,
+  phone: z.string(),
+  e164: z.string(),
+  nationalId: optionalText,
+  totalBookingsCount: z.number().int().min(0),
+  totalSpent: moneySchema,
+  isBlacklisted: z.boolean(),
+  blacklistReason: optionalText,
+  notes: optionalText,
+  lastBookingDate: dateSchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+const leaseContractSchema = z.object({
+  id: identifierSchema,
+  bookingId: identifierSchema,
+  termsSnapshot: z.string(),
+  guestName: identifierSchema,
+  guestPhone: z.string(),
+  chaletName: z.string().optional(),
+  bookingReference: z.string().optional(),
+  bookingType: z.enum(bookingTypes),
+  startDate: dateSchema,
+  startTime: timeSchema.optional(),
+  endDate: dateSchema,
+  endTime: timeSchema.optional(),
+  rentalTotal: moneySchema,
+  depositAmount: moneySchema,
+  status: z.enum(["draft", "signed", "archived"]),
+  guestSignatureBase64: z.string().optional(),
+  signedAt: z.string().optional(),
+  signerIp: z.string().optional(),
+  signedByName: z.string().optional(),
+  createdAt: z.string(),
+});
+
+const assetSchema = z.object({
+  id: identifierSchema,
+  chaletId: identifierSchema,
+  chaletName: z.string().optional(),
+  name: identifierSchema,
+  category: z.string().default("other"),
+  serialNumber: optionalText,
+  condition: z.enum(["excellent", "good", "needs_service"]),
+  purchaseDate: dateSchema.optional(),
+  purchaseCost: moneySchema.optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+const maintenanceTaskSchema = z.object({
+  id: identifierSchema,
+  chaletId: identifierSchema,
+  chaletName: z.string().optional(),
+  assetId: z.string().optional(),
+  assetName: z.string().optional(),
+  title: identifierSchema,
+  frequency: z.enum(["daily", "weekly", "monthly", "custom"]),
+  nextDueDate: dateSchema,
+  lastCompletedDate: dateSchema.optional(),
+  assignedToStaffId: z.number().int().optional(),
+  assignedToStaffName: z.string().optional(),
+  status: z.enum(["pending", "in_progress", "completed"]),
+  cost: moneySchema.optional(),
+  note: optionalText,
+  customIntervalDays: z.number().int().min(1).optional(),
+  createdAt: z.string(),
+  completedAt: z.string().optional(),
+  completedByName: z.string().optional(),
+});
+
+const notificationSchema = z.object({
+  id: identifierSchema,
+  recipients: z.array(z.enum(["owner", "manager", "guard", "all"])),
+  type: z.enum(["new_booking", "payment_received", "checkin_alert", "maintenance_due", "contract_signed", "weather_advisory"]),
+  title: identifierSchema,
+  body: z.string(),
+  dataPayload: z.record(z.string(), z.string()).optional(),
+  isRead: z.boolean(),
+  readByIds: z.array(z.string()).optional(),
+  createdAt: z.string(),
+});
+
+const utilityReadingSchema = z.object({
+  id: identifierSchema,
+  bookingId: identifierSchema.optional(),
+  chaletId: identifierSchema,
+  type: z.enum(["electricity", "water", "gas_fuel"]),
+  checkInReading: moneySchema,
+  checkInPhotoUri: optionalText,
+  checkInRecordedAt: z.string(),
+  checkOutReading: moneySchema.optional(),
+  checkOutPhotoUri: optionalText,
+  checkOutRecordedAt: z.string().optional(),
+  consumedUnits: moneySchema.optional(),
+  unitRate: moneySchema,
+  totalCost: moneySchema.optional(),
+  isExcessive: z.boolean().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+});
+
+const weatherLogSchema = z.object({
+  id: identifierSchema,
+  chaletId: identifierSchema,
+  fetchedAt: z.string(),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  current: z.object({ temperature: z.number(), windSpeed: z.number().optional(), weatherCode: z.number().optional() }).optional(),
+  daily: z.array(z.object({ date: dateSchema, temperatureMax: z.number(), temperatureMin: z.number(), windSpeedMax: z.number(), precipitationProbabilityMax: z.number().min(0).max(100), uvIndexMax: z.number().min(0), weatherCode: z.number() })),
+  generatedAt: z.string(),
+});
+
+const loyaltyAccountSchema = z.object({
+  id: identifierSchema,
+  customerId: identifierSchema,
+  pointsBalance: z.number().int().min(0),
+  tier: z.enum(["bronze", "silver", "gold", "platinum"]),
+  lifetimeEarned: z.number().int().min(0),
+  lifetimeRedeemed: z.number().int().min(0),
+  updatedAt: z.string(),
+  createdAt: z.string(),
+});
+
+const loyaltyTransactionSchema = z.object({
+  id: identifierSchema,
+  customerId: identifierSchema,
+  type: z.enum(["earn", "redeem"]),
+  points: z.number().int().min(0),
+  amount: moneySchema,
+  bookingId: identifierSchema.optional(),
+  bookingReference: z.string().optional(),
+  note: optionalText,
+  createdAt: z.string(),
+});
 
 const backupSchema = z.object({
   backupVersion: z.number().int().min(1).max(BACKUP_VERSION).optional(),
@@ -195,7 +347,16 @@ const backupSchema = z.object({
   waitlist: z.array(waitlistSchema).optional(),
   chalets: z.array(chaletSchema).optional(),
   specialPriceRules: z.array(z.object({ id: z.string(), name: z.string(), startDate: dateSchema, endDate: dateSchema, price: moneySchema, kind: z.enum(["season", "occasion"]), createdAt: z.string() })).optional(),
-  auditLog: z.array(z.object({ id: z.string(), action: z.enum(["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided"]), subjectName: z.string(), details: z.string(), createdAt: z.string(), actorName: z.string().optional(), bookingId: z.string().optional() })).optional(),
+  auditLog: z.array(z.object({ id: z.string(), action: z.enum(["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"]), subjectName: z.string(), details: z.string(), createdAt: z.string(), actorName: z.string().optional(), bookingId: z.string().optional() })).optional(),
+  customers: z.array(customerSchema).optional(),
+  contracts: z.array(leaseContractSchema).optional(),
+  assets: z.array(assetSchema).optional(),
+  maintenanceTasks: z.array(maintenanceTaskSchema).optional(),
+  notifications: z.array(notificationSchema).optional(),
+  weatherLogs: z.array(weatherLogSchema).optional(),
+  utilityReadings: z.array(utilityReadingSchema).optional(),
+  loyaltyAccounts: z.array(loyaltyAccountSchema).optional(),
+  loyaltyTransactions: z.array(loyaltyTransactionSchema).optional(),
   settings: settingsSchema,
 });
 
@@ -271,6 +432,15 @@ export function parseBackupData(raw: string): AppData {
     waitlist: imported.waitlist ?? [],
     chalets: imported.chalets,
     auditLog: imported.auditLog ?? [],
+    customers: imported.customers ?? [],
+    contracts: imported.contracts ?? [],
+    assets: imported.assets ?? [],
+    maintenanceTasks: imported.maintenanceTasks ?? [],
+    notifications: imported.notifications ?? [],
+    weatherLogs: imported.weatherLogs as unknown as WeatherLog[],
+    utilityReadings: imported.utilityReadings as unknown as UtilityReading[],
+    loyaltyAccounts: imported.loyaltyAccounts as unknown as LoyaltyAccount[],
+    loyaltyTransactions: imported.loyaltyTransactions as unknown as LoyaltyTransaction[],
     settings: mergeSettings(imported.settings),
   });
 }

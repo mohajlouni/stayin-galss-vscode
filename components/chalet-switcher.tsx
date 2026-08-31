@@ -8,9 +8,21 @@ import { useChaletScope } from "@/lib/chalet-scope";
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { propertyTypeIcon } from "@/lib/booking-model";
+import { effectiveWeatherAdvisory } from "@/lib/booking-model";
+import { weatherCodeLabel, weatherIconName } from "@/lib/weather";
+
+const WEATHER_ICONS: Record<ReturnType<typeof weatherIconName>, React.ComponentProps<typeof MaterialIcons>["name"]> = {
+  sunny: "wb-sunny",
+  "partly-cloudy-day": "cloud",
+  cloud: "cloud",
+  rainy: "grain",
+  snowing: "ac-unit",
+  thunderstorm: "thunderstorm",
+  foggy: "dehaze",
+};
 
 export function ChaletSwitcher() {
-  const { chalets } = useBookings();
+  const { chalets, weatherLogs, settings } = useBookings();
   const { selectedChalet, selectedChaletId, setSelectedChaletId } = useChaletScope();
   const { isRTL, language } = useI18n();
   const colors = useColors();
@@ -20,11 +32,15 @@ export function ChaletSwitcher() {
   const allLabel = language === "ar" ? "جميع الوحدات" : "All properties";
   const selectedName = selectedChalet?.name ?? allLabel;
   const select = (id: string | null) => { void setSelectedChaletId(id); setOpen(false); };
+  const weatherConfig = effectiveWeatherAdvisory(settings);
+  const weatherLog = selectedChalet ? weatherLogs?.find((log) => log.chaletId === selectedChalet.id) : undefined;
+  const weatherNow = weatherLog?.current;
+  const showWeather = weatherConfig.enabled && selectedChalet != null && weatherNow != null && (typeof selectedChalet.latitude === "number" && typeof selectedChalet.longitude === "number");
 
   return <>
     <GlowGlassCard radius={20} intensity={32} style={styles.triggerGlass}><Pressable accessibilityLabel={language === "ar" ? "تغيير الوحدة الحالية" : "Change current property"} onPress={() => setOpen(true)} style={({ pressed }) => [styles.trigger, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}>
       <MaterialIcons name={selectedChalet ? propertyTypeIcon(selectedChalet.propertyType) : "home-work"} size={21} color={selectedChalet?.color ?? colors.primary} />
-      <View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", textAlign: align }}>{language === "ar" ? "الوحدة الحالية" : "Current property"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 15, fontWeight: "800", marginTop: 2, textAlign: align }}>{selectedName}</Text></View>
+      <View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", textAlign: align }}>{language === "ar" ? "الوحدة الحالية" : "Current property"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 15, fontWeight: "800", marginTop: 2, textAlign: align }}>{selectedName}</Text>{showWeather ? <View style={[styles.weatherSubCell, { flexDirection: row }]}><MaterialIcons name={WEATHER_ICONS[weatherIconName(weatherNow.weatherCode)]} size={10} color={colors.muted} /><Text numberOfLines={1} style={[styles.weatherSubText, { color: colors.muted, textAlign: align }]}>{Math.round(weatherNow.temperature)}° · {weatherCodeLabel(weatherNow.weatherCode, language)}</Text></View> : null}</View>
       <MaterialIcons name="keyboard-arrow-down" size={22} color={colors.primary} />
     </Pressable></GlowGlassCard>
     <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -45,4 +61,4 @@ function ScopeRow({ label, icon, color, selected, onPress, colors, row, align }:
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.scopeRow, { flexDirection: row, backgroundColor: selected ? colors.primary : colors.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={icon} size={19} color={color} /><Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: selected ? "#FFFFFF" : colors.foreground, fontSize: 16, fontWeight: selected ? "800" : "700", textAlign: align }}>{label}</Text>{selected ? <MaterialIcons name="check-circle" size={22} color="#FFFFFF" /> : <View style={styles.trailingSpace} />}</Pressable>;
 }
 
-const styles = StyleSheet.create({ triggerGlass: { width: "100%" }, trigger: { width: "100%", minHeight: 58, borderRadius: 20, alignItems: "center", gap: 10, paddingHorizontal: 13 }, flex: { flex: 1, minWidth: 0 }, dot: { width: 11, height: 11, borderRadius: 6, flexShrink: 0 }, backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(3,18,16,0.64)" }, sheet: { width: "100%", borderTopLeftRadius: 28, borderTopRightRadius: 28 }, sheetContent: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 30 }, sheetHeader: { alignItems: "flex-start", gap: 12, marginBottom: 13 }, close: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }, scopeRow: { width: "100%", minHeight: 58, borderRadius: 18, alignItems: "center", gap: 12, paddingHorizontal: 14, marginTop: 8 }, trailingSpace: { width: 22, height: 22 } });
+const styles = StyleSheet.create({ triggerGlass: { width: "100%" }, trigger: { width: "100%", minHeight: 58, borderRadius: 20, alignItems: "center", gap: 10, paddingHorizontal: 13 }, flex: { flex: 1, minWidth: 0 }, dot: { width: 11, height: 11, borderRadius: 6, flexShrink: 0 }, weatherSubCell: { marginTop: 2, alignSelf: "flex-start", minHeight: 15, borderRadius: 7, backgroundColor: "rgba(0,0,0,0.22)", borderWidth: 0.5, borderColor: "rgba(255,255,255,0.08)", paddingHorizontal: 6, paddingVertical: 2, flexDirection: "row", alignItems: "center", gap: 3, maxWidth: "100%" }, weatherSubText: { fontSize: 9, fontWeight: "700", flexShrink: 1, marginStart: 0, marginEnd: 0 }, backdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(3,18,16,0.64)" }, sheet: { width: "100%", borderTopLeftRadius: 28, borderTopRightRadius: 28 }, sheetContent: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 30 }, sheetHeader: { alignItems: "flex-start", gap: 12, marginBottom: 13 }, close: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }, scopeRow: { width: "100%", minHeight: 58, borderRadius: 18, alignItems: "center", gap: 12, paddingHorizontal: 14, marginTop: 8 }, trailingSpace: { width: 22, height: 22 } });

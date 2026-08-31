@@ -39,9 +39,9 @@ describe("BookingCard RTL structure", () => {
     expect(source).toContain("guestMetaArabic");
     expect(source).toContain('scheduleDate: { width: "100%", fontSize: 12, fontWeight: "800", writingDirection: "rtl" }');
     expect(source).toContain('textAlign: isCompactView ? "center" : isArabic ? "center" : textAlign');
-    expect(source).toContain('creatorSlot: { width: "32%"');
-    expect(source).toContain('periodTag: { width: "32%"');
-    expect(source).toContain('financialSlot: { width: "32%"');
+    expect(source).toContain('creatorSlot: { flex: 1, minWidth: 100, maxWidth: "32%"');
+    expect(source).toContain('periodTag: { flex: 1, minWidth: 90, maxWidth: "32%"');
+    expect(source).toContain('financialSlot: { flex: 1, minWidth: 90, maxWidth: "32%"');
     expect(source).toContain('financialText: { flex: 1, minWidth: 0, fontSize: 9, fontWeight: "900", textAlign: "right", writingDirection: "rtl" }');
     expect(source).toContain("تأمين مسترد:");
     expect(source).toContain("دفعة:");

@@ -919,3 +919,245 @@ export async function exportMasterWorkspaceSnapshot(workspaceId: number, actorUs
   await createSuperAdminAudit({ actorUserId, action: "workspace-exported", targetWorkspaceId: workspaceId, details: JSON.stringify({ version: snapshot?.version ?? 0 }) });
   return { exportedAt: new Date().toISOString(), workspace: { id: workspace[0].id, name: workspace[0].name, currency: workspace[0].currency, timeZone: workspace[0].timeZone }, version: snapshot?.version ?? 0, payload: snapshot?.payload ?? null };
 }
+
+/**
+ * إنشاء بيانات تجريبية واقعية للمعاينة والتطوير.
+ * البنية العادية (المستخدم/المساحة/العضو/حمولة workspaceData) على مستوى الصفوف،
+ * بينما الشاليهات والحجوزات وكل محتوى المعاينة يُخزَّن داخل حمولة workspaceData
+ * الموحّدة عبر normalizeAppData.
+ */
+export async function seedDemoData(): Promise<void> {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+
+  // البحث عن مستخدم المالك أو إنشاء واحد
+  const ownerPhone = "0797402940";
+  let owner = (await database.select().from(users).where(eq(users.phone, ownerPhone)).limit(1))[0];
+
+  if (!owner) {
+    const result = await database.insert(users).values({
+      openId: "stay-in-preview-owner-v1",
+      name: "مالك StayIn (سوبر أدمن)",
+      phone: ownerPhone,
+      email: "moh.ajlouni.90@gmail.com",
+      loginMethod: "local-dev",
+      role: "admin",
+      lastSignedIn: new Date(),
+    });
+    owner = (await database.select().from(users).where(eq(users.id, Number(result[0].insertId))).limit(1))[0];
+  }
+
+  if (!owner) throw new Error("Owner user could not be created");
+
+  // إنشاء مساحة المعاينة
+  const workspaceName = "مجموعة المعاينة";
+  let workspace = (await database.select().from(workspaces).where(and(eq(workspaces.ownerUserId, owner.id), eq(workspaces.name, workspaceName))).limit(1))[0];
+
+  if (!workspace) {
+    const result = await database.insert(workspaces).values({ name: workspaceName, ownerUserId: owner.id });
+    workspace = (await database.select().from(workspaces).where(eq(workspaces.id, Number(result[0].insertId))).limit(1))[0];
+  }
+
+  if (!workspace) throw new Error("Workspace could not be created");
+
+  // إضافة العضو كمالك
+  const existingMember = (await database.select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspace.id), eq(workspaceMembers.userId, owner.id))).limit(1))[0];
+  if (!existingMember) {
+    await database.insert(workspaceMembers).values({
+      workspaceId: workspace.id,
+      userId: owner.id,
+      displayName: "مالك المعاينة",
+      phone: ownerPhone,
+      role: "owner",
+      permissions: JSON.stringify(MANAGER_PERMISSIONS),
+      status: "active",
+    });
+  }
+
+  // إنشاء حمولة المعاينة داخل workspaceData فقط (لا توجد جداول منفصلة للشاليهات/الحجوزات).
+  // المساحة هنا مساحة معاينة معزولة، لذا يُعاد كتابة الحمولة تجريبيةً عند كل بذر.
+
+  const now = new Date().toISOString();
+  const localDate = (offsetDays: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offsetDays);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const dom = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${dom}`;
+  };
+  const yesterday = localDate(-1);
+  const day = localDate(0);
+  const next1 = localDate(1);
+  const next2 = localDate(2);
+  const next3 = localDate(3);
+  const next4 = localDate(4);
+
+  const chalets = [
+    {
+      id: "demo-chalet-1",
+      name: "شاليه النخيل 1",
+      referenceCode: "01",
+      propertyType: "chalet" as const,
+      color: "#0F8B83",
+      location: "مدخل قرية النخيل",
+      guardianName: "حارس النخيل",
+      guardianPhone: "+962790000103",
+      createdAt: now,
+      shifts: [
+        {
+          id: "morning",
+          name: "صباحي",
+          startTime: "09:00",
+          endTime: "21:00",
+          weekdayPrice: 120,
+          weekendPrice: 150,
+          isActive: true,
+          periodKind: "morning" as const,
+          color: "#0284C7",
+        },
+        {
+          id: "evening",
+          name: "سهرة",
+          startTime: "22:00",
+          endTime: "09:00",
+          weekdayPrice: 180,
+          weekendPrice: 220,
+          isActive: true,
+          periodKind: "evening" as const,
+          color: "#4F46E5",
+        },
+      ],
+    },
+    {
+      id: "demo-chalet-2",
+      name: "فيلا النخيل VIP",
+      referenceCode: "02",
+      propertyType: "villa" as const,
+      color: "#4379D8",
+      location: "الجناح الملكي",
+      guardianName: "حارس النخيل",
+      guardianPhone: "+962790000103",
+      createdAt: now,
+      shifts: [
+        {
+          id: "morning",
+          name: "صباحي",
+          startTime: "09:00",
+          endTime: "21:00",
+          weekdayPrice: 200,
+          weekendPrice: 240,
+          isActive: true,
+          periodKind: "morning" as const,
+          color: "#0284C7",
+        },
+        {
+          id: "evening",
+          name: "سهرة",
+          startTime: "22:00",
+          endTime: "09:00",
+          weekdayPrice: 260,
+          weekendPrice: 320,
+          isActive: true,
+          periodKind: "evening" as const,
+          color: "#4F46E5",
+        },
+      ],
+    },
+    {
+      id: "demo-chalet-3",
+      name: "شاليه الواحة",
+      referenceCode: "03",
+      propertyType: "chalet" as const,
+      color: "#7C3AED",
+      location: "مدخل شاليهات الواحة",
+      guardianName: "حارس الواحة",
+      guardianPhone: "+962790000106",
+      createdAt: now,
+      shifts: [
+        {
+          id: "morning",
+          name: "صباحي",
+          startTime: "10:00",
+          endTime: "22:00",
+          weekdayPrice: 110,
+          weekendPrice: 140,
+          isActive: true,
+          periodKind: "morning" as const,
+          color: "#0284C7",
+        },
+      ],
+    },
+  ];
+
+  const bookings = [
+    { id: "demo-b1", customerName: "سارة المعاينة", phone: "+962790101010", chaletId: "demo-chalet-1", startDate: day, endDate: next1, bookingType: "morning" as const, shiftId: "morning", startTime: "09:00", endTime: "21:00", price: 120, depositAmount: 30, depositPaymentMethod: "cash-owner" as const, depositPaymentRecordedAt: now, payments: [], notes: "بيانات المعاينة — حجز تجريبي", status: "confirmed" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+    { id: "demo-b2", customerName: "رامي المعاينة", phone: "+962790202020", chaletId: "demo-chalet-2", startDate: next1, endDate: next2, bookingType: "evening" as const, shiftId: "evening", startTime: "22:00", endTime: "09:00", price: 260, depositAmount: 0, payments: [], notes: "بيانات المعاينة — حجز تجريبي", status: "awaiting-deposit" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+    { id: "demo-b3", customerName: "ليان المعاينة", phone: "+962790303030", chaletId: "demo-chalet-3", startDate: next2, endDate: next3, bookingType: "morning" as const, shiftId: "morning", startTime: "10:00", endTime: "22:00", price: 110, depositAmount: 0, payments: [], notes: "بيانات المعاينة — حجز تجريبي", status: "awaiting-deposit" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+    { id: "demo-b4", customerName: "عمر المعاينة", phone: "+962790404040", chaletId: "demo-chalet-1", startDate: next3, endDate: next4, bookingType: "morning" as const, shiftId: "morning", startTime: "09:00", endTime: "21:00", price: 150, depositAmount: 45, depositPaymentMethod: "click" as const, depositPaymentRecordedAt: now, payments: [], notes: "بيانات المعاينة — حجز تجريبي", status: "confirmed" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+    { id: "demo-b5", customerName: "هدى المعاينة", phone: "+962790505050", chaletId: "demo-chalet-2", startDate: yesterday, endDate: day, bookingType: "evening" as const, shiftId: "evening", startTime: "22:00", endTime: "09:00", price: 260, depositAmount: 0, payments: [{ id: "demo-b5-p1", amount: 260, date: day, recordedAt: now, paymentMethod: "cash-owner" as const, recordedByName: "مالك المعاينة" }], notes: "بيانات المعاينة — حجز مكتمل", status: "completed" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+    { id: "demo-b6", customerName: "طارق المعاينة", phone: "+962790606060", chaletId: "demo-chalet-1", startDate: next1, endDate: next2, bookingType: "morning" as const, shiftId: "morning", startTime: "09:00", endTime: "21:00", price: 120, depositAmount: 0, payments: [], notes: "بيانات المعاينة — حجز ملغي", status: "cancelled" as const, createdAt: now, createdByName: "مالك المعاينة", createdByRole: "owner" as const },
+  ];
+
+  const waitlist = [
+    { id: "demo-w1", customerName: "نور المعاينة", phone: "+962790707070", chaletId: "demo-chalet-1", requestedDate: next3, bookingType: "morning" as const, shiftId: "morning", startTime: "09:00", endTime: "21:00", price: 120, notes: "بانتظار توفر الفترة النهارية.", status: "active" as const, createdAt: now },
+    { id: "demo-w2", customerName: "يزن المعاينة", phone: "+962790808080", chaletId: "demo-chalet-2", requestedDate: next4, bookingType: "evening" as const, shiftId: "evening", startTime: "22:00", endTime: "09:00", price: 260, notes: "ينتظر تأكيد التوفر على السهرة.", status: "active" as const, createdAt: now },
+  ];
+
+  const turnoverTasks = [
+    { id: "demo-tt1", checkoutBookingId: "demo-b5", nextBookingId: "demo-b1", chaletId: "demo-chalet-2", dueAt: `${day}T09:00:00.000Z`, status: "pending" as const, createdAt: now },
+    { id: "demo-tt2", checkoutBookingId: "demo-b1", nextBookingId: "demo-b4", chaletId: "demo-chalet-1", dueAt: `${next3}T09:00:00.000Z`, status: "pending" as const, createdAt: now },
+  ];
+
+  const expenses = [
+    { id: "demo-e1", chaletId: "demo-chalet-1", amount: 18, date: day, category: "cleaning-supplies" as const, note: "مواد تنظيف", paymentMethod: "cash" as const, createdAt: now, createdByName: "مالك المعاينة" },
+    { id: "demo-e2", chaletId: "demo-chalet-2", amount: 45, date: next1, category: "maintenance" as const, note: "صيانة السهرة", paymentMethod: "click" as const, createdAt: now, createdByName: "مالك المعاينة" },
+    { id: "demo-e3", chaletId: "demo-chalet-3", amount: 12, date: next2, category: "utilities" as const, note: "فاتورة مياه", paymentMethod: "cash" as const, createdAt: now, createdByName: "مالك المعاينة" },
+  ];
+
+  const payload = normalizeAppData({
+    chalets,
+    bookings,
+    waitlist,
+    turnoverTasks,
+    expenses,
+    settings: {
+      ...DEFAULT_SETTINGS,
+      businessName: workspaceName,
+      businessPhone: "+962790000100",
+      whatsAppEnabled: true,
+      ownerPhone,
+      device: { ...DEFAULT_DEVICE_SETTINGS },
+    },
+    specialPriceRules: [],
+    auditLog: [
+      {
+        id: "demo-seed-audit",
+        action: "booking-checked-in",
+        subjectName: "بيانات المعاينة",
+        details: `أُنشئت بيانات معزولة لحساب ${workspaceName}.`,
+        createdAt: now,
+        actorName: "مالك المعاينة",
+      },
+    ],
+  });
+
+  await database
+    .insert(workspaceData)
+    .values({
+      workspaceId: workspace.id,
+      payload: JSON.stringify(payload),
+      version: 1,
+      updatedByUserId: owner.id,
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        payload: JSON.stringify(payload),
+        version: sql`${workspaceData.version} + 1`,
+        updatedByUserId: owner.id,
+      },
+    });
+
+  await setActiveWorkspace(owner.id, workspace.id);
+  console.log("[Seed] Demo data seeded successfully");
+}

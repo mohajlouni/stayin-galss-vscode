@@ -1,9 +1,11 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { GlowGlassCard } from "@/components/glow-glass-card";
-import { type Booking, type CheckoutConfirmation, formatMoney, paymentMethodLabel, remainingRefundableDeposit, type PaymentMethod, PAYMENT_METHODS } from "@/lib/booking-model";
+import { UtilityMeterCapture } from "@/components/utility-meter-capture";
+import { type Asset, type Booking, type CheckoutConfirmation, formatMoney, paymentMethodLabel, remainingRefundableDeposit, type PaymentMethod, type UtilityMeterInput, PAYMENT_METHODS, effectiveUtilityTracking } from "@/lib/booking-model";
+import { useBookings } from "@/lib/booking-store";
 
 type Palette = { background: string; foreground: string; muted: string; primary: string; success: string; surface: string; surfaceMuted: string; warning: string; error: string };
 
@@ -15,15 +17,20 @@ const methodIcons: Record<PaymentMethod, keyof typeof MaterialIcons.glyphMap> = 
   wallet: "account-balance-wallet",
 };
 
-export function CheckOutConfirmationSheet({ booking, colors, currency, language, isRTL, visible, saving, onClose, onConfirm }: { booking: Booking | null; colors: Palette; currency: string; language: "ar" | "en"; isRTL: boolean; visible: boolean; saving: boolean; onClose: () => void; onConfirm: (confirmation: CheckoutConfirmation) => void }) {
+export function CheckOutConfirmationSheet({ booking, colors, currency, language, isRTL, visible, saving, onClose, onConfirm, assets = [] }: { booking: Booking | null; colors: Palette; currency: string; language: "ar" | "en"; isRTL: boolean; visible: boolean; saving: boolean; onClose: () => void; onConfirm: (confirmation: CheckoutConfirmation) => void; assets?: Asset[] }) {
+  const { settings } = useBookings();
+  const utilityTrackingEnabled = effectiveUtilityTracking(settings).enabled;
   const [inspectionPassed, setInspectionPassed] = useState(false);
+  const [assetResults, setAssetResults] = useState<Record<string, boolean>>({});
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState<PaymentMethod | null>(null);
   const [note, setNote] = useState("");
+  const [meterInput, setMeterInput] = useState<UtilityMeterInput | undefined>();
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const depositHeld = booking ? remainingRefundableDeposit(booking) : 0;
+  const chaletAssets = booking ? assets.filter((asset) => !asset.chaletId || asset.chaletId === booking.chaletId) : [];
 
   useEffect(() => {
     if (!visible) return;
@@ -32,6 +39,8 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
     setRefundAmount(depositHeld > 0.005 ? String(depositHeld) : "");
     setRefundMethod(null);
     setNote("");
+    setMeterInput(undefined);
+    setAssetResults(Object.fromEntries(chaletAssets.map((asset) => [asset.id, true])));
   }, [visible, booking?.id, depositHeld]);
 
   if (!booking) return null;
@@ -39,12 +48,14 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
   const refundExceedsHeld = amount > depositHeld + 0.005;
   const validRefund = !refundDeposit || (Boolean(refundMethod) && Number.isFinite(amount) && amount > 0 && !refundExceedsHeld);
   const ready = inspectionPassed && validRefund;
+  const failedCount = chaletAssets.filter((asset) => assetResults[asset.id] === false).length;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !saving && onClose()} statusBarTranslucent>
       <View style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} disabled={saving} onPress={onClose} />
         <GlowGlassCard radius={28} intensity={34} style={styles.sheet} contentStyle={styles.sheetContent}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 6 }}>
           <View style={[styles.header, { flexDirection: row }]}>
             <View style={[styles.icon, { backgroundColor: colors.primary + "18" }]}><MaterialIcons name="fact-check" size={22} color={colors.primary} /></View>
             <View style={styles.flex}>
@@ -61,6 +72,21 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
               <Text style={{ color: colors.muted, fontSize: 10, lineHeight: 16, marginTop: 3, textAlign: align }}>{language === "ar" ? "يلزم هذا التأكيد قبل نقل الحجز إلى منتهي الإقامة." : "This confirmation is required before ending the stay."}</Text>
             </View>
           </Pressable>
+
+          {chaletAssets.length > 0 ? <View style={[styles.assetSection, { backgroundColor: colors.surfaceMuted }]}>
+            <View style={[styles.assetSectionHeader, { flexDirection: row }]}><View style={[styles.icon, styles.smallIcon, { backgroundColor: colors.primary + "16" }]}><MaterialIcons name="inventory" size={18} color={colors.primary} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "فحص الأصول التفصيلي" : "Asset-level inspection"}</Text><Text style={{ color: failedCount ? colors.error : colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{failedCount ? (language === "ar" ? `${failedCount} أصل بحاجة للصيانة — سيُنشأ أمر إصلاح تلقائيًا` : `${failedCount} asset(s) need service — an auto repair task will be created`) : (language === "ar" ? "حدد الأصول المتضررة إن وُجدت" : "Mark any damaged assets")}</Text></View></View>
+            {chaletAssets.map((asset) => {
+              const passed = assetResults[asset.id] !== false;
+              return <View key={asset.id} style={[styles.assetRow, { backgroundColor: colors.surface, borderColor: passed ? colors.surfaceMuted : colors.error + "66", flexDirection: row }]}>
+                <View style={[styles.assetIcon, { backgroundColor: passed ? colors.success + "14" : colors.error + "14" }]}><MaterialIcons name={passed ? "check-circle" : "warning"} size={16} color={passed ? colors.success : colors.error} /></View>
+                <Text numberOfLines={1} style={[styles.flex, { color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }]}>{asset.name}</Text>
+                <View style={[styles.assetToggle, { flexDirection: row }]}>
+                  <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={language === "ar" ? `${asset.name} سليم` : `${asset.name} passed`} onPress={() => setAssetResults((current) => ({ ...current, [asset.id]: true }))} style={({ pressed }) => [styles.assetChipPass, { backgroundColor: passed ? colors.success : colors.surfaceMuted, opacity: pressed || saving ? 0.7 : 1 }]}><MaterialIcons name="thumb-up" size={12} color={passed ? "#FFFFFF" : colors.muted} /><Text style={{ color: passed ? "#FFFFFF" : colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سليم" : "OK"}</Text></Pressable>
+                  <Pressable disabled={saving} accessibilityRole="button" accessibilityLabel={language === "ar" ? `${asset.name} متضرر` : `${asset.name} damaged`} onPress={() => setAssetResults((current) => ({ ...current, [asset.id]: false }))} style={({ pressed }) => [styles.assetChipFail, { backgroundColor: !passed ? colors.error : colors.surfaceMuted, opacity: pressed || saving ? 0.7 : 1 }]}><MaterialIcons name="report" size={12} color={!passed ? "#FFFFFF" : colors.muted} /><Text style={{ color: !passed ? "#FFFFFF" : colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "متضرر" : "Damage"}</Text></Pressable>
+                </View>
+              </View>;
+            })}
+          </View> : null}
 
           {depositHeld > 0.005 ? <>
             <Pressable disabled={saving} accessibilityRole="checkbox" accessibilityState={{ checked: refundDeposit }} onPress={() => setRefundDeposit((value) => !value)} style={({ pressed }) => [styles.inspection, { backgroundColor: refundDeposit ? colors.success + "18" : colors.surfaceMuted, flexDirection: row, opacity: pressed || saving ? 0.7 : 1 }]}>
@@ -83,10 +109,12 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
 
           <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", marginTop: 13, textAlign: align }}>{language === "ar" ? "ملاحظة الفحص أو سبب الاحتجاز (اختياري)" : "Inspection note or hold reason (optional)"}</Text>
           <TextInput value={note} onChangeText={setNote} editable={!saving} multiline maxLength={240} placeholder={language === "ar" ? "مثال: تم التسليم بحالة جيدة" : "Example: handed over in good condition"} placeholderTextColor={colors.muted} textAlignVertical="top" style={[styles.note, { color: colors.foreground, backgroundColor: colors.surfaceMuted, textAlign: align }]} />
+          {utilityTrackingEnabled ? <UtilityMeterCapture colors={colors} language={language} isRTL={isRTL} saving={saving} value={meterInput} onChange={setMeterInput} title={language === "ar" ? "قراءة العداد النهائية" : "Closing meter reading"} /> : null}
           <View style={[styles.actions, { flexDirection: row }]}>
             <Pressable disabled={saving} onPress={onClose} style={({ pressed }) => [styles.secondary, { backgroundColor: colors.surfaceMuted, opacity: pressed || saving ? 0.58 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "900" }}>{language === "ar" ? "رجوع" : "Back"}</Text></Pressable>
-            <Pressable disabled={!ready || saving} onPress={() => onConfirm({ inspectionPassed: true, inspectionNote: note.trim() || undefined, depositRefund: refundDeposit && refundMethod ? { amount, paymentMethod: refundMethod, note: note.trim() || undefined } : undefined })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !ready || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "logout"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "اعتماد المغادرة" : "Confirm checkout")}</Text></Pressable>
+            <Pressable disabled={!ready || saving} onPress={() => onConfirm({ inspectionPassed: true, inspectionNote: note.trim() || undefined, assetInspections: chaletAssets.length ? chaletAssets.map((asset) => ({ assetId: asset.id, assetName: asset.name, passed: assetResults[asset.id] !== false })) : undefined, depositRefund: refundDeposit && refundMethod ? { amount, paymentMethod: refundMethod, note: note.trim() || undefined } : undefined, utilityReading: meterInput })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !ready || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "logout"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "اعتماد المغادرة" : "Confirm checkout")}</Text></Pressable>
           </View>
+          </ScrollView>
         </GlowGlassCard>
       </View>
     </Modal>
@@ -100,8 +128,16 @@ const styles = StyleSheet.create({
   header: { alignItems: "center", gap: 10 },
   flex: { flex: 1 },
   icon: { width: 42, height: 42, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  smallIcon: { width: 32, height: 32, borderRadius: 11 },
   close: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   inspection: { alignItems: "center", gap: 10, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 11, marginTop: 13 },
+  assetSection: { borderRadius: 18, padding: 11, marginTop: 9 },
+  assetSectionHeader: { alignItems: "center", gap: 9, marginBottom: 8 },
+  assetRow: { alignItems: "center", gap: 8, borderRadius: 13, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 8, marginTop: 7 },
+  assetIcon: { width: 26, height: 26, borderRadius: 9, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  assetToggle: { gap: 5, alignItems: "center" },
+  assetChipPass: { minHeight: 28, borderRadius: 9, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
+  assetChipFail: { minHeight: 28, borderRadius: 9, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
   refundPanel: { borderRadius: 18, padding: 11, marginTop: 9 },
   input: { minHeight: 42, borderRadius: 14, paddingHorizontal: 10, marginTop: 7, fontSize: 13 },
   methods: { gap: 6, marginTop: 9, flexWrap: "wrap" },

@@ -43,7 +43,7 @@ const config: ExpoConfig = {
   slug: env.appSlug,
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/images/icon.png",
+  icon: "./assets/images/stayin-logo.jpg",
   scheme: env.scheme,
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
@@ -58,7 +58,7 @@ const config: ExpoConfig = {
   android: {
     adaptiveIcon: {
       backgroundColor: "#FFFDF8",
-      foregroundImage: "./assets/images/android-icon-foreground.png",
+      foregroundImage: "./assets/images/stayin-logo.jpg",
       backgroundImage: "./assets/images/android-icon-background.png",
       monochromeImage: "./assets/images/android-icon-monochrome.png",
     },
@@ -83,7 +83,7 @@ const config: ExpoConfig = {
   web: {
     bundler: "metro",
     output: "single",
-    favicon: "./assets/images/favicon.png",
+    favicon: "./assets/images/stayin-logo.jpg",
   },
   plugins: [
     "expo-router",
@@ -119,7 +119,7 @@ const config: ExpoConfig = {
     [
       "expo-splash-screen",
       {
-        image: "./assets/images/splash-icon.png",
+        image: "./assets/images/stayin-logo.jpg",
         imageWidth: 200,
         resizeMode: "contain",
         backgroundColor: "#ffffff",

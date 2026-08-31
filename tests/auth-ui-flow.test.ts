@@ -20,7 +20,7 @@ describe("auth UI test flow", () => {
     expect(auth).toContain('edges={["top", "bottom", "left", "right"]}');
     expect(auth).toContain("phoneShell");
     expect(auth).toContain("phoneInput");
-    expect(auth).toContain("right: 0");
+    expect(auth).toContain('[isRTL ? "left" : "right"]: 0');
     expect(auth).toContain("validateName");
     expect(auth).toContain("validateContact");
     expect(auth).toContain("nameLiveError");
@@ -38,9 +38,8 @@ describe("auth UI test flow", () => {
     const auth = source("components/unified-auth-screen.tsx");
     const login = source("app/auth/login.tsx");
     const root = source("app/_layout.tsx");
-    expect(auth).toContain('bg: "#070B10"');
-    expect(auth).toContain('surface: "rgba(15, 22, 33, 0.30)"');
-    expect(auth).toContain('primary: "#FF6B47"');
+    expect(auth).toContain("useColors()");
+    expect(auth).toContain("makeStyles(colors, isRTL)");
     expect(auth).toContain('containerClassName="bg-transparent"');
     expect(auth).toContain('accessibilityRole="tab"');
     expect(auth).toContain("changeTab");

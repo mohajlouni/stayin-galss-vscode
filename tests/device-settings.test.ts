@@ -15,8 +15,8 @@ describe("device and locale settings", () => {
       bookingCardViewMode: "expanded",
       reduceMotion: false,
       glassBackgroundLevel: "standard",
-      glassSurfaceOpacity: "balanced",
-      glassGlowIntensity: "balanced",
+      glassSurfaceOpacity: "transparent",
+      glassGlowIntensity: "vivid",
       quietGlassBackground: false,
       lastWhatsAppSendItems: ["confirmation"],
     });

@@ -2,6 +2,20 @@ const GREGORIAN_MONTHS_AR = ["يناير", "فبراير", "مارس", "أبري
 const GREGORIAN_MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 export const GREGORIAN_MONTHS = GREGORIAN_MONTHS_AR;
 
+export type WeekdayFormat = "ar-short" | "ar-letter" | "en-short" | "en-letter";
+
+/** تسميات أيام الأسبوع القابلة للتهيئة، بترتيب يبدأ من الأحد (فهرس 0) حتى السبت. */
+export const WEEKDAY_LABELS: Record<WeekdayFormat, string[]> = {
+  "ar-short": ["سب", "أح", "إث", "ثلا", "أرب", "خم", "جم"],
+  "ar-letter": ["س", "ح", "ن", "ث", "ر", "خ", "ج"],
+  "en-short": ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"],
+  "en-letter": ["S", "S", "M", "T", "W", "T", "F"],
+};
+
+export function normalizeWeekdayFormat(value: unknown): WeekdayFormat {
+  return value === "ar-short" || value === "ar-letter" || value === "en-short" || value === "en-letter" ? value : "ar-short";
+}
+
 export function gregorianMonthLabel(year: number, month: number, language: "ar" | "en" = "ar") {
   const months = language === "ar" ? GREGORIAN_MONTHS_AR : GREGORIAN_MONTHS_EN;
   return `${month} - ${months[month - 1]} ${year}`;

@@ -15,6 +15,7 @@ import { CheckOutConfirmationSheet } from "@/components/check-out-confirmation-s
 import { CompactScreenHeader } from "@/components/compact-screen-header";
 import { ScreenContainer } from "@/components/screen-container";
 import { GlowGlassCard } from "@/components/glow-glass-card";
+import { BentoGlassCard } from "@/components/bento-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { Booking, BookingListFilter, PricedBookingType, WaitlistEntry, availableSiblingSlotForBooking, bookingMatchesSearch, chaletColor, chaletLabel, getBookingOperationalState, isWaitlistExpired, remainingAmount, splitBookingsByCheckout, waitlistCountdownLabel, waitlistRemainingMilliseconds } from "@/lib/booking-model";
@@ -85,7 +86,7 @@ function matchesDateRange(booking: Booking, fromDate: string, toDate: string) {
 }
 
 export default function BookingsScreen() {
-  const { bookings, waitlist, chalets, settings, hydrated, refreshWorkspaceData, acknowledgeWaitlistPriority, markBookingCheckedIn, completeBookingStay, archiveBookingAsNoShow } = useBookings();
+  const { bookings, waitlist, chalets, settings, hydrated, assets, refreshWorkspaceData, acknowledgeWaitlistPriority, markBookingCheckedIn, completeBookingStay, archiveBookingAsNoShow } = useBookings();
   const { selectedChaletId } = useChaletScope();
   const { activeWorkspaceId } = useWorkspaceAccess();
   const { t, isRTL, language } = useI18n();
@@ -348,12 +349,12 @@ const clearAppliedFilters = () => {
             <Pressable onPress={() => selectTab("active")} style={({ pressed }) => [styles.segment, { flexDirection: row, backgroundColor: activeTab === "active" ? selectionColor : "transparent", opacity: pressed ? 0.78 : 1 }]}><MaterialIcons name="event-available" size={16} color={activeTab === "active" ? "#FFFFFF" : colors.muted} /><Text style={{ color: activeTab === "active" ? "#FFFFFF" : colors.foreground, fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "الحجوزات النشطة" : "Active"}</Text></Pressable>
             <Pressable onPress={() => selectTab("history")} style={({ pressed }) => [styles.segment, { flexDirection: row, backgroundColor: activeTab === "history" ? selectionColor : "transparent", opacity: pressed ? 0.78 : 1 }]}><MaterialIcons name="check-circle" size={16} color={activeTab === "history" ? "#FFFFFF" : colors.muted} /><Text style={{ color: activeTab === "history" ? "#FFFFFF" : colors.foreground, fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "منتهي الإقامة" : "Ended stays"}</Text></Pressable>
           </View>
-          <GlowGlassCard style={styles.search}><View style={[styles.searchContent, { flexDirection: row }]}> 
+          <BentoGlassCard radius={20} style={styles.search} contentStyle={{ padding: 0 }}><View style={[styles.searchContent, { flexDirection: row }]}>
             <MaterialIcons name="search" size={20} color={colors.muted} />
             <TextInput value={query} onChangeText={setQuery} placeholder={language === "ar" ? "ابحث بالاسم أو الهاتف أو الشاليه أو المرجع" : "Search name, phone, chalet or reference"} placeholderTextColor={colors.muted} style={{ flex: 1, color: colors.foreground, textAlign: align, paddingVertical: 0 }} />
             {activeFilterCount ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح كل الفلاتر" : "Clear all filters"} onPress={clearAppliedFilters} style={({ pressed }) => [styles.clearFilter, { flexDirection: row, backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="close" size={14} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800" }}>{language === "ar" ? "مسح" : "Clear"}</Text></Pressable> : null}
             <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح الفلاتر" : "Open filters"} onPress={openFilterSheet} style={({ pressed }) => [styles.paymentFilter, { flexDirection: row, backgroundColor: activeFilterCount ? selectionColor : colors.surfaceMuted, opacity: pressed ? 0.68 : 1 }]}><MaterialIcons name="filter-alt" size={16} color={activeFilterCount ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: activeFilterCount ? "#FFFFFF" : colors.muted, fontSize: 10, fontWeight: "800" }}>{language === "ar" ? "فلترة" : "Filter"}</Text>{activeFilterCount ? <View style={[styles.filterCount, { backgroundColor: colors.surface }]}><Text style={{ color: selectionColor, fontSize: 9, fontWeight: "900" }}>{activeFilterCount}</Text></View> : null}</Pressable>
-          </View></GlowGlassCard>
+          </View></BentoGlassCard>
         </View>
 
         <FlatList
@@ -379,7 +380,7 @@ const clearAppliedFilters = () => {
         />
         <BookingFilterSheet visible={filterSheetVisible} colors={colors} language={language} isRTL={isRTL} showStatusFilter={!isHistoryView} timeFilter={draftTimeFilter} statusFilter={draftStatusFilter} paymentFilter={draftPaymentView} dateFrom={draftDateFrom} dateTo={draftDateTo} defaultRange={isHistoryView ? deviceSettings.endedStayDefaultRange : deviceSettings.activeBookingDefaultRange} defaultRangeScope={isHistoryView ? "history" : "active"} onSetDefault={() => void updateDeviceSettings(isHistoryView ? { endedStayDefaultRange: draftTimeFilter as typeof deviceSettings.endedStayDefaultRange } : { activeBookingDefaultRange: draftTimeFilter })} onTimeChange={setDraftTimeFilter} onStatusChange={setDraftStatusFilter} onPaymentChange={setDraftPaymentView} onDateFromChange={setDraftDateFrom} onDateToChange={setDraftDateTo} onReset={resetFilters} onClose={() => setFilterSheetVisible(false)} onApply={applyFilters} />
         <CheckInConfirmationSheet booking={checkInBooking} visible={Boolean(checkInBooking)} saving={operationalSavingId === checkInBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} formatDate={formatDate} formatTime={formatTime} onClose={() => setCheckInBooking(null)} onConfirm={(confirmation) => { if (checkInBooking) saveOperationalAction(checkInBooking, "check-in", confirmation); }} />
-        <CheckOutConfirmationSheet booking={checkOutBooking} visible={Boolean(checkOutBooking)} saving={operationalSavingId === checkOutBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} onClose={() => setCheckOutBooking(null)} onConfirm={(confirmation) => { if (checkOutBooking) saveOperationalAction(checkOutBooking, "check-out", confirmation); }} />
+        <CheckOutConfirmationSheet booking={checkOutBooking} visible={Boolean(checkOutBooking)} saving={operationalSavingId === checkOutBooking?.id} colors={colors} currency={settings.currency} language={language} isRTL={isRTL} assets={assets} onClose={() => setCheckOutBooking(null)} onConfirm={(confirmation) => { if (checkOutBooking) saveOperationalAction(checkOutBooking, "check-out", confirmation); }} />
         {operationalFeedback ? <View pointerEvents="none" accessibilityLiveRegion="polite" style={[styles.operationalToast, { flexDirection: row, backgroundColor: operationalFeedback.isError ? colors.error : colors.success }]}><MaterialIcons name={operationalFeedback.isError ? "error-outline" : "check-circle"} size={20} color="#FFFFFF" /><Text style={[styles.flex, { color: "#FFFFFF", fontSize: 12, fontWeight: "800", textAlign: align }]}>{operationalFeedback.message}</Text></View> : null}
       </View>
     </ScreenContainer>

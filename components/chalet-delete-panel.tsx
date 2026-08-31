@@ -80,7 +80,7 @@ export function ChaletDeletePanel({ chaletName, linkedBookingCount, language, is
         {hasBookings ? <Text style={[styles.bookingNotice, { color: colors.warning, backgroundColor: colors.warning + "14" }]}>{language === "ar" ? "لن تُحذف الحجوزات أو دفعاتها؛ ستبقى في السجل للرجوع إليها." : "Bookings and payments will not be deleted; they remain in history."}</Text> : null}
         <Text style={[styles.holdHint, { color: colors.muted }]}>{language === "ar" ? "اضغط باستمرار 3 ثوانٍ لتأكيد الحذف." : "Hold for 3 seconds to confirm deletion."}</Text>
         <Pressable disabled={isDeleting} onPressIn={beginHold} onPressOut={cancelHold} style={({ pressed }) => [styles.holdButton, { backgroundColor: colors.error, opacity: isDeleting ? 0.72 : pressed ? 0.86 : 1 }]}>
-          <View style={[styles.holdProgress, { width: `${holdProgress * 100}%`, backgroundColor: "#0000002E" }]} />
+          <View style={[styles.holdProgress, { width: `${holdProgress * 100}%`, backgroundColor: "#0000002E", [isRTL ? "right" : "left"]: 0 }]} />
           <MaterialIcons name="delete-forever" size={20} color="#FFFFFF" /><Text style={styles.holdText}>{isDeleting ? (language === "ar" ? "جارٍ الحذف…" : "Deleting…") : (language === "ar" ? "اضغط مطولًا للحذف" : "Hold to delete")}</Text>
         </Pressable>
         <Pressable disabled={isDeleting} onPress={close} style={styles.cancelButton}><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "900" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   bookingNotice: { overflow: "hidden", borderRadius: 10, fontSize: 11, lineHeight: 18, fontWeight: "700", paddingHorizontal: 11, paddingVertical: 8, marginTop: 12, textAlign: "center" },
   holdHint: { fontSize: 11, lineHeight: 18, marginTop: 15, textAlign: "center" },
   holdButton: { width: "100%", minHeight: 52, borderRadius: 14, overflow: "hidden", marginTop: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
-  holdProgress: { position: "absolute", top: 0, bottom: 0, left: 0 },
+  holdProgress: { position: "absolute", top: 0, bottom: 0 },
   holdText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900" },
   cancelButton: { minHeight: 42, marginTop: 6, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
 });

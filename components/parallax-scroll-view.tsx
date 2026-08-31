@@ -54,8 +54,8 @@ export default function ParallaxScrollView({
       style={{ backgroundColor: colors.background, flex: 1 }}
       contentContainerStyle={{
         paddingBottom: insets.bottom,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
+        paddingStart: insets.left,
+        paddingEnd: insets.right,
       }}
       scrollEventThrottle={16}
     >

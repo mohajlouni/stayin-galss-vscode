@@ -7,6 +7,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { CompactScreenHeader } from "@/components/compact-screen-header";
 import { ScreenContainer } from "@/components/screen-container";
 import { GlowGlassCard } from "@/components/glow-glass-card";
+import { BentoGlassCard } from "@/components/bento-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useBookings } from "@/lib/booking-store";
 import { useAuthSession } from "@/lib/auth-session";
@@ -15,8 +16,8 @@ import { useInternetAvailability } from "@/lib/network-status";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 
-type MenuRoute = "/(tabs)/settings" | "/(tabs)/waitlist" | "/suggestions" | "/audit-log" | "/chalet-management" | "/user-management" | "/workspace-select" | "/whatsapp-templates" | "/profile" | "/admin/master-control" | "/settings/advanced-tools" | "/payment-methods";
-type MenuIcon = "settings" | "format-list-bulleted" | "lightbulb-outline" | "history" | "holiday-village" | "home-work" | "group" | "business" | "chat" | "login" | "person" | "admin-panel-settings" | "health-and-safety" | "payments";
+type MenuRoute = "/(tabs)/settings" | "/(tabs)/waitlist" | "/suggestions" | "/audit-log" | "/chalet-management" | "/user-management" | "/workspace-select" | "/whatsapp-templates" | "/profile" | "/admin/master-control" | "/settings/advanced-tools" | "/payment-methods" | "/maintenance-dashboard" | "/notifications" | "/(tabs)/crm" | "/loyalty";
+type MenuIcon = "settings" | "format-list-bulleted" | "lightbulb-outline" | "history" | "holiday-village" | "home-work" | "group" | "business" | "chat" | "login" | "person" | "admin-panel-settings" | "health-and-safety" | "payments" | "build" | "notifications" | "workspace-premium";
 type MenuEntry = { title: string; description: string; icon: MenuIcon; route: MenuRoute };
 const MORE_TAB_ROUTES = new Set<MenuRoute>(["/(tabs)/settings", "/(tabs)/waitlist"]);
 
@@ -70,6 +71,7 @@ export default function MoreScreen() {
   ];
   const financialItems: MenuEntry[] = [
     ...(isManager ? [{ title: language === "ar" ? "طرق الدفع والحسابات المالية" : "Payment methods & financial accounts", description: language === "ar" ? "طرق التحصيل وحسابات CliQ وIBAN للإيجار والتأمين" : "Collection methods and CliQ/IBAN accounts for rent and deposits", icon: "payments" as const, route: "/payment-methods" as const }] : []),
+    ...(can("view_financial_reports") ? [{ title: language === "ar" ? "برنامج الولاء والنقاط" : "Loyalty program & points", description: language === "ar" ? "أرصدة العملاء والطبقات والاسترداد على الحجوزات" : "Customer balances, tiers, and booking redemptions", icon: "workspace-premium" as const, route: "/loyalty" as const }] : []),
   ];
   const teamSecurityItems: MenuEntry[] = [
     ...(isManager ? [{ title: language === "ar" ? "إدارة المستخدمين والصلاحيات" : "User management & permissions", description: language === "ar" ? "فريق العمل والموظفون والدعوات والصلاحيات" : "Staff, employees, invitations, and permissions", icon: "group" as const, route: "/user-management" as const }] : []),
@@ -79,18 +81,24 @@ export default function MoreScreen() {
   ];
   const communicationPreferenceItems: MenuEntry[] = [
     ...(isManager ? [{ title: language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates", description: language === "ar" ? "تخصيص القوالب والرسائل الذكية" : "Customize templates and smart messages", icon: "chat" as const, route: "/whatsapp-templates" as const }] : []),
-    { title: language === "ar" ? "الإعدادات العامة والمزامنة" : "General settings & sync", description: language === "ar" ? "المظهر وحالة الاتصال والمزامنة والنسخ الاحتياطي" : "Appearance, connection, sync, and backup", icon: "settings", route: "/(tabs)/settings" },
+    { title: language === "ar" ? "الإعدادات العامة والمزامنة" : "General settings & sync", description: language === "ar" ? "المنشأة والوحدات، التقويم والتسعير، العقود، الولاء، الطقس والإشعارات، النظام والمزامنة" : "Property, calendar & pricing, contracts, loyalty, weather/alerts, system & sync", icon: "settings", route: "/(tabs)/settings" },
+  ];
+  const qualityOperationsItems: MenuEntry[] = [
+    { title: language === "ar" ? "قاعدة العملاء وإدارة العلاقات" : "Customer relations (CRM)", description: language === "ar" ? "سجل العملاء والولاء والحظر وفئة VIP" : "Customer records, loyalty, blacklist, and VIP tier", icon: "group", route: "/(tabs)/crm" },
+    ...(isManager ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),
+    { title: language === "ar" ? "مركز الإشعارات" : "Notifications center", description: language === "ar" ? "الإشعارات الداخلية والفلاتر وحالة القراءة" : "In-app notifications, filters, and read status", icon: "notifications", route: "/notifications" },
   ];
   const suggestion: MenuEntry = { title: language === "ar" ? "مركز الاقتراحات والمساعدة" : "Suggestions & help center", description: language === "ar" ? "شارك فكرة أو اطلب مساعدة لتطوير تجربتك" : "Share an idea or ask for help", icon: "lightbulb-outline", route: "/suggestions" };
 
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}>
     <ScrollView style={{ flex: 1, minHeight: 0, backgroundColor: "transparent" }} contentContainerStyle={[styles.content, { backgroundColor: "transparent" }]} showsVerticalScrollIndicator={false}>
       <CompactScreenHeader title={t("more")} icon="more-horiz" plain showDateTime={false} />
-      {isAuthenticated && currentUser ? <GlowGlassCard style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => router.push("/workspace-select")} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="business" size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة النشطة" : "Active property group"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", marginTop: 2, textAlign: align }}>{activePropertyGroup?.name ?? (language === "ar" ? "اختيار مجموعة منشآت" : "Choose a property group")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></GlowGlassCard> : null}
-      {propertyOperationsItems.length ? <MenuSection title={language === "ar" ? "إدارة المنشأة والتشغيل" : "Property operations"} items={propertyOperationsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
-      {financialItems.length ? <MenuSection title={language === "ar" ? "الإعدادات المالية" : "Financial settings"} items={financialItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => router.push("/workspace-select")} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="business" size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة النشطة" : "Active property group"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", marginTop: 2, textAlign: align }}>{activePropertyGroup?.name ?? (language === "ar" ? "اختيار مجموعة منشآت" : "Choose a property group")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></BentoGlassCard> : null}
+      {propertyOperationsItems.length ? <MenuSection title={language === "ar" ? "المنشأة والوحدات" : "Chalet & property"} items={propertyOperationsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {financialItems.length ? <MenuSection title={language === "ar" ? "المالية والتسعير الذكي" : "Finance & smart pricing"} items={financialItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
       {teamSecurityItems.length ? <MenuSection title={language === "ar" ? "الفريق والأمان" : "Staff & security"} items={teamSecurityItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
-      <MenuSection title={language === "ar" ? "التواصل والتفضيلات" : "Communication & preferences"} items={communicationPreferenceItems} colors={colors} row={row} align={align} isRTL={isRTL} />
+      <MenuSection title={language === "ar" ? "العقود والتواصل" : "Contracts & messaging"} items={communicationPreferenceItems} colors={colors} row={row} align={align} isRTL={isRTL} />
+      <MenuSection title={language === "ar" ? "العملاء والأتمتة والطقس" : "CRM, automation & weather"} items={qualityOperationsItems} colors={colors} row={row} align={align} isRTL={isRTL} />
       <MenuSection title={language === "ar" ? "الدعم والمساعدة" : "Support"} items={[]} colors={colors} row={row} align={align} isRTL={isRTL} beforeItems={<SuggestionRow item={suggestion} colors={colors} row={row} align={align} isRTL={isRTL} />} />
       {isAuthenticated ? <CompactSyncIndicator colors={colors} row={row} align={align} internetReachable={internetReachable} lastSyncLabel={lastSyncLabel} syncRefreshing={syncRefreshing} canRefresh={isManager} onRefresh={() => void refreshDataNow()} language={language} /> : null}
     </ScrollView>
@@ -98,7 +106,7 @@ export default function MoreScreen() {
 }
 
 function MenuSection({ title, items, colors, row, align, isRTL, beforeItems }: { title: string; items: MenuEntry[]; colors: ReturnType<typeof useColors>; row: "row" | "row-reverse"; align: "left" | "right"; isRTL: boolean; beforeItems?: ReactNode }) {
-  return <View style={styles.section}><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{title}</Text>{beforeItems ? <View style={styles.sectionAccessory}>{beforeItems}</View> : null}{items.length ? <GlowGlassCard style={styles.group}>{items.map((item, index) => <Fragment key={item.title}><MenuRow item={item} colors={colors} row={row} align={align} isRTL={isRTL} />{index < items.length - 1 ? <View style={[styles.divider, { backgroundColor: colors.glassInset }]} /> : null}</Fragment>)}</GlowGlassCard> : null}</View>;
+  return <View style={styles.section}><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{title}</Text>{beforeItems ? <View style={styles.sectionAccessory}>{beforeItems}</View> : null}{items.length ? <BentoGlassCard radius={22} style={styles.group} contentStyle={{ padding: 0 }}>{items.map((item, index) => <Fragment key={item.title}><MenuRow item={item} colors={colors} row={row} align={align} isRTL={isRTL} />{index < items.length - 1 ? <View style={[styles.divider, { backgroundColor: colors.glassInset }]} /> : null}</Fragment>)}</BentoGlassCard> : null}</View>;
 }
 
 function MenuRow({ item, colors, row, align, isRTL }: { item: MenuEntry; colors: ReturnType<typeof useColors>; row: "row" | "row-reverse"; align: "left" | "right"; isRTL: boolean }) {
@@ -127,16 +135,16 @@ const styles = StyleSheet.create({
   section: { marginTop: 18 },
   sectionTitle: { fontSize: 14, lineHeight: 22, fontWeight: "900", marginBottom: 7 },
   group: { borderRadius: 22, overflow: "hidden" },
-  menuRow: { minHeight: 72, alignItems: "center", gap: 12, paddingHorizontal: 13, paddingVertical: 10 },
+  menuRow: { minHeight: 72, alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 13, paddingVertical: 10 },
   suggestionCard: { borderRadius: 22 },
-  suggestionRow: { minHeight: 72, alignItems: "center", gap: 12, paddingHorizontal: 13, paddingVertical: 10 },
+  suggestionRow: { minHeight: 72, alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 13, paddingVertical: 10 },
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 13 },
   iconBox: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   sectionAccessory: { marginBottom: 8 },
-  syncStatusCard: { minHeight: 72, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 10, alignItems: "center", gap: 10 },
+  syncStatusCard: { minHeight: 72, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 10, alignItems: "center", justifyContent: "space-between", gap: 10 },
   refreshNowButton: { minHeight: 38, borderRadius: 11, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
   compactSyncIndicator: { minHeight: 52, borderRadius: 18, marginTop: 16 },
-  compactSyncIndicatorContent: { minHeight: 52, paddingHorizontal: 11, paddingVertical: 8, alignItems: "center", gap: 8 },
+  compactSyncIndicatorContent: { minHeight: 52, paddingHorizontal: 11, paddingVertical: 8, alignItems: "center", justifyContent: "space-between", gap: 8 },
   compactRefreshButton: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   flex: { flex: 1, minWidth: 0 },
   menuTitle: { fontSize: 16, lineHeight: 22, fontWeight: "900" },

@@ -2,10 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCalendars, getLocales } from "expo-localization";
 import * as Haptics from "expo-haptics";
 import { Appearance, I18nManager, Platform, useColorScheme as useSystemColorScheme } from "react-native";
+import * as Updates from "expo-updates";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { useBookings } from "@/lib/booking-store";
 import { type AppLanguage, type AppearanceMode, type DateFormat, type DeviceSettings, DEFAULT_DEVICE_SETTINGS, formatBookingDate, formatCalendarMonth, formatTime12, hijriDateLabel, hijriMonthLabel, normalizeGlassBackgroundLevel, normalizeGlassGlowIntensity, normalizeGlassSurfaceOpacity } from "@/lib/booking-model";
+import { normalizeWeekdayFormat } from "@/lib/gregorian-calendar";
 
 type AppPreferencesValue = {
   language: AppLanguage;
@@ -27,9 +29,14 @@ type AppPreferencesValue = {
   formatHijriMonth: (year: number, month: number) => string;
   updateDeviceSettings: (patch: Partial<DeviceSettings>) => Promise<void>;
   triggerHaptic: (style?: Haptics.ImpactFeedbackStyle) => Promise<void>;
+  languageChangeStatus: LanguageChangeStatus;
+  acknowledgeLanguageChange: () => void;
+  restartApp: () => Promise<void>;
 };
 
 const PreferencesContext = createContext<AppPreferencesValue | null>(null);
+
+type LanguageChangeStatus = "none" | "pending" | "acknowledged";
 
 function detectDeviceLanguage(): AppLanguage {
   const locale = getLocales()[0]?.languageCode?.toLowerCase() ?? "en";
@@ -54,7 +61,11 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
     timezone: detectDeviceTimezone(),
   });
   const [fontScale, setFontScale] = useState(1);
+  const [languageChangeStatus, setLanguageChangeStatus] = useState<LanguageChangeStatus>("none");
   const deviceLanguage = useMemo(detectDeviceLanguage, []);
+
+  const previousLanguageRef = React.useRef<string | null>(null);
+
   const deviceTimezone = useMemo(detectDeviceTimezone, []);
 
   useEffect(() => {
@@ -67,6 +78,7 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
       ...current,
       ...(settings.device ?? {}),
       dateFormat: storedDateFormat === "gregory" ? DEFAULT_DEVICE_SETTINGS.dateFormat : (storedDateFormat as DateFormat | undefined) ?? current.dateFormat,
+      weekdayFormat: normalizeWeekdayFormat(settings.device?.weekdayFormat),
       showHijriDate: settings.device?.showHijriDate ?? current.showHijriDate,
       timezone: settings.device?.timezone || current.timezone || deviceTimezone,
       bookingCardViewMode: settings.device?.bookingCardViewMode === "compact" ? "compact" : "expanded",
@@ -112,6 +124,11 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
       I18nManager.allowRTL(true);
       I18nManager.forceRTL(isRTL);
     }
+
+    if (previousLanguageRef.current !== null && previousLanguageRef.current !== language) {
+      setLanguageChangeStatus("pending");
+    }
+    previousLanguageRef.current = language;
   }, [direction, isRTL, language]);
 
   useEffect(() => {
@@ -136,6 +153,18 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
     }
   }, [deviceSettings.hapticsEnabled]);
 
+  const acknowledgeLanguageChange = useCallback(() => {
+    setLanguageChangeStatus("acknowledged");
+  }, []);
+
+  const restartApp = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      await Updates.reloadAsync();
+    } else {
+      window.location.reload();
+    }
+  }, []);
+
   const value = useMemo<AppPreferencesValue>(() => ({
     language,
     direction,
@@ -156,7 +185,10 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
     formatHijriMonth,
     updateDeviceSettings,
     triggerHaptic,
-  }), [appearanceMode, colorScheme, deviceLanguage, deviceSettings, deviceTimezone, direction, fontScale, formatDate, formatHijriDate, formatHijriMonth, formatMonth, formatTime, isRTL, language, systemScheme, triggerHaptic, updateDeviceSettings]);
+    languageChangeStatus,
+    acknowledgeLanguageChange,
+    restartApp,
+  }), [appearanceMode, colorScheme, deviceLanguage, deviceSettings, deviceTimezone, direction, fontScale, formatDate, formatHijriDate, formatHijriMonth, formatMonth, formatTime, isRTL, language, systemScheme, triggerHaptic, updateDeviceSettings, languageChangeStatus, acknowledgeLanguageChange, restartApp]);
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
@@ -171,3 +203,4 @@ export function useAppPreferences() {
 export const useSettings = useAppPreferences;
 
 export { AsyncStorage };
+export type { LanguageChangeStatus };

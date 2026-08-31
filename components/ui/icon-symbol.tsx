@@ -31,6 +31,7 @@ const MAPPING = {
   "close": "close",
   "more": "more-horiz",
   "queue": "format-list-bulleted",
+  "group": "group",
 };
 
 /**

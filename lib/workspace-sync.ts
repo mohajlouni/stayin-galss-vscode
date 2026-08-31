@@ -33,7 +33,7 @@ function deviceSettingsOverrides(device: AppData["settings"]["device"]): Partial
 }
 
 function hasUserData(data: AppData) {
-  return Boolean(data.bookings.length || data.waitlist.length || data.chalets.length || data.expenses?.length || data.specialPriceRules.length || data.auditLog.length || Object.keys(deviceSettingsOverrides(data.settings.device)).length);
+  return Boolean(data.bookings.length || data.waitlist.length || data.chalets.length || data.expenses?.length || data.specialPriceRules.length || data.auditLog.length || data.customers?.length || data.contracts?.length || data.assets?.length || data.maintenanceTasks?.length || data.notifications?.length || data.weatherLogs?.length || data.utilityReadings?.length || data.loyaltyAccounts?.length || data.loyaltyTransactions?.length || Object.keys(deviceSettingsOverrides(data.settings.device)).length);
 }
 
 /**
@@ -52,6 +52,15 @@ export function mergeWorkspaceAppData(workspaceData: AppData, deviceData: AppDat
     chalets: mergeById(workspaceData.chalets, deviceData.chalets),
     specialPriceRules: mergeById(workspaceData.specialPriceRules, deviceData.specialPriceRules),
     auditLog: mergeById(workspaceData.auditLog, deviceData.auditLog),
+    customers: mergeById(workspaceData.customers ?? [], deviceData.customers ?? []),
+    contracts: mergeById(workspaceData.contracts ?? [], deviceData.contracts ?? []),
+    assets: mergeById(workspaceData.assets ?? [], deviceData.assets ?? []),
+    maintenanceTasks: mergeById(workspaceData.maintenanceTasks ?? [], deviceData.maintenanceTasks ?? []),
+    notifications: mergeById(workspaceData.notifications ?? [], deviceData.notifications ?? []),
+    weatherLogs: mergeById(workspaceData.weatherLogs ?? [], deviceData.weatherLogs ?? []),
+    utilityReadings: mergeById(workspaceData.utilityReadings ?? [], deviceData.utilityReadings ?? []),
+    loyaltyAccounts: mergeById(workspaceData.loyaltyAccounts ?? [], deviceData.loyaltyAccounts ?? []),
+    loyaltyTransactions: mergeById(workspaceData.loyaltyTransactions ?? [], deviceData.loyaltyTransactions ?? []),
     settings: { ...workspaceData.settings, device: { ...DEFAULT_DEVICE_SETTINGS, ...workspaceData.settings.device, ...localDeviceOverrides } },
   });
   const mergedChanged = JSON.stringify(merged) !== JSON.stringify(workspaceData);

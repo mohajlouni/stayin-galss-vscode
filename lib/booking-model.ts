@@ -1,3 +1,5 @@
+import { normalizeWeekdayFormat, type WeekdayFormat } from "./gregorian-calendar";
+import { jordanianHolidayOn } from "./jordan-holidays";
 export type BookingType = "morning" | "evening" | "24h" | "custom" | "multi-day";
 export type BookingStatus = "confirmed" | "awaiting-deposit" | "cancelled" | "completed" | "waitlisted";
 export type WaitlistStatus = "active" | "cancelled" | "promoted";
@@ -109,15 +111,140 @@ export function activePaymentMethods(settings: Pick<Settings, "paymentMethods"> 
 }
 export type Payment = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; recipientType?: PaymentRecipientType; handlerUserId?: number; handlerName?: string; recipientAccountLabel?: string; calculatedCommission?: number; commissionType?: CommissionType; receiptUri?: string; voidedAt?: string; voidReason?: string; recordedByUserId?: number; recordedByName?: string; updatedByUserId?: number; updatedByName?: string; voidedByUserId?: number; voidedByName?: string };
 export type DepositRefund = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod };
-export type CheckInConfirmation = { actualArrivalAt: string; rentalBalanceVerified: boolean; rentalBalancePaymentMethod?: PaymentMethod; securityDepositVerified: boolean; securityDepositPaymentMethod?: PaymentMethod; identityNote?: string; identityImageUri?: string };
-export type CheckoutConfirmation = { inspectionPassed: boolean; inspectionNote?: string; depositRefund?: { amount: number; paymentMethod: PaymentMethod; note?: string } };
+export type CheckInConfirmation = { actualArrivalAt: string; rentalBalanceVerified: boolean; rentalBalancePaymentMethod?: PaymentMethod; securityDepositVerified: boolean; securityDepositPaymentMethod?: PaymentMethod; identityNote?: string; identityImageUri?: string; utilityReading?: UtilityMeterInput };
+export type CheckoutConfirmation = { inspectionPassed: boolean; inspectionNote?: string; depositRefund?: { amount: number; paymentMethod: PaymentMethod; note?: string }; assetInspections?: AssetInspectionItem[]; utilityReading?: UtilityMeterInput };
 export type ManualStayCorrection = { checkedInAt?: string; checkedOutAt?: string; restoreNoShow?: boolean; note?: string };
 export type ChaletShift = { id: string; name: string; startTime: string; endTime: string; weekdayPrice: number; weekendPrice: number; isActive: boolean; color: string; /** نوع الفترة هو مصدر لونها المحجوز. */ periodKind?: ReservedPeriodColorKey };
-export type Chalet = { id: string; name: string; propertyType?: PropertyType; referenceCode?: string; color: string; imageUri?: string; location?: string; locationUrl?: string; /** إحداثيات النشر لخرائط الضيوف. */ latitude?: number; longitude?: number; googleMapsUrl?: string; /** حالة الظهور للجمهور في تطبيق الضيوف. */ isPublished?: boolean; /** حالة الاعتماد والتوثيق من المنصة. */ isVerified?: boolean; guardianName?: string; guardianPhone?: string; contactPhone?: string; notes?: string; weekendDays?: number[]; shifts?: ChaletShift[]; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodPricing?: PeriodPricingSettings; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodTimes?: Partial<Record<PricedBookingType, { startTime: string; endTime: string }>>; createdAt: string };
-export type Booking = { id: string; bookingReference?: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; startDate: string; endDate: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime: string; endTime: string; price: number; discountAmount?: number; depositAmount?: number; /** طريقة استلام التأمين مستقلة عن دفعات الإيجار. */ depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; depositCollection?: Payment; payments: Payment[]; depositRefunds?: DepositRefund[]; notes: string; status: BookingStatus; createdAt: string; checkedInAt?: string; checkInConfirmation?: CheckInConfirmation; checkedOutAt?: string; noShowAt?: string; createdByUserId?: number; createdByName?: string; createdByRole?: "owner" | "employee"; /** مصدر الحجز: يدوي من المالك أو عبر تطبيق الضيوف. */ bookingSource?: BookingSource; /** نسبة عمولة المنصة على الحجز. */ commissionRate?: number; /** مبلغ عمولة المنصة المحتسب. */ commissionAmount?: number; /** حالة تحويل العمولة للمنصة. */ payoutStatus?: PayoutStatus; updatedByUserId?: number; updatedByName?: string; waitlistPriorityAcknowledgedForId?: string; waitlistPriorityAcknowledgedAt?: string; waitlistPriorityAcknowledgedByName?: string };
+export type Chalet = { id: string; name: string; propertyType?: PropertyType; referenceCode?: string; color: string; imageUri?: string; location?: string; locationUrl?: string; /** إحداثيات النشر لخرائط الضيوف. */ latitude?: number; longitude?: number; googleMapsUrl?: string; /** حالة الظهور للجمهور في تطبيق الضيوف. */ isPublished?: boolean; /** حالة الاعتماد والتوثيق من المنصة. */ isVerified?: boolean;   /** تمتلك مسبحًا قابلًا للتدفئة (تنبيهات الطقس البارد). */ hasHeatedPool?: boolean; /** تقع بالقرب من مسطح مائي (تنبيهات المدّ). */ nearWater?: boolean; guardianName?: string; guardianPhone?: string; contactPhone?: string; notes?: string; weekendDays?: number[]; shifts?: ChaletShift[]; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodPricing?: PeriodPricingSettings; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodTimes?: Partial<Record<PricedBookingType, { startTime: string; endTime: string }>>; createdAt: string };
+export type Booking = { id: string; bookingReference?: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; startDate: string; endDate: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime: string; endTime: string; price: number; discountAmount?: number; depositAmount?: number; /** طريقة استلام التأمين مستقلة عن دفعات الإيجار. */ depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; depositCollection?: Payment; payments: Payment[]; depositRefunds?: DepositRefund[]; notes: string; status: BookingStatus; createdAt: string; checkedInAt?: string; checkInConfirmation?: CheckInConfirmation; checkedOutAt?: string; noShowAt?: string; createdByUserId?: number; createdByName?: string; createdByRole?: "owner" | "employee"; /** مصدر الحجز: يدوي من المالك أو عبر تطبيق الضيوف. */ bookingSource?: BookingSource; /** نسبة عمولة المنصة على الحجز. */ commissionRate?: number; /** مبلغ عمولة المنصة المحتسب. */ commissionAmount?: number; /** حالة تحويل العمولة للمنصة. */ payoutStatus?: PayoutStatus; updatedByUserId?: number; updatedByName?: string; waitlistPriorityAcknowledgedForId?: string; waitlistPriorityAcknowledgedAt?: string; waitlistPriorityAcknowledgedByName?: string; /** نتائج فحص الأصول عند إنهاء الإقامة. */ assetInspections?: AssetInspectionItem[] };
 export type WaitlistEntry = { id: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; requestedDate: string; endDate?: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime?: string; endTime?: string; price?: number; discountAmount?: number; depositAmount?: number; depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; payments?: Payment[]; notes: string; status?: WaitlistStatus; cancelledAt?: string; cancellationReason?: "manual" | "start-time"; promotedAt?: string; promotedByUserId?: number; promotedByName?: string; promotedBookingId?: string; promotedBookingReference?: string; promotedReplacedCustomerNames?: string; createdAt: string };
 export type TurnoverTask = { id: string; checkoutBookingId: string; nextBookingId: string; chaletId?: string; chaletName?: string; dueAt: string; status: TurnoverTaskStatus; createdAt: string; startedAt?: string; completedAt?: string; completedByName?: string };
 export type ExpenseAllocation = { chaletId: string; chaletName: string; amount: number };
+export type Customer = {
+  id: string;
+  name: string;
+  phone: string;
+  /** E.164 canonical phone used as the deduplication key across establishments. */
+  e164: string;
+  nationalId?: string;
+  totalBookingsCount: number;
+  totalSpent: number;
+  isBlacklisted: boolean;
+  blacklistReason?: string;
+  notes?: string;
+  lastBookingDate?: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+export type ContractStatus = "draft" | "signed" | "archived";
+export type LeaseContract = {
+  id: string;
+  bookingId: string;
+  termsSnapshot: string;
+  guestName: string;
+  guestPhone: string;
+  chaletName?: string;
+  bookingReference?: string;
+  bookingType: BookingType;
+  startDate: string;
+  startTime?: string;
+  endDate: string;
+  endTime?: string;
+  rentalTotal: number;
+  depositAmount: number;
+  status: ContractStatus;
+  /** Base64 of the JSON stroke points captured by the signature pad. */
+  guestSignatureBase64?: string;
+  signedAt?: string;
+  signerIp?: string;
+  signedByName?: string;
+  createdAt: string;
+};
+export type AssetCondition = "excellent" | "good" | "needs_service";
+export type MaintenanceFrequency = "daily" | "weekly" | "monthly" | "custom";
+export type MaintenanceTaskStatus = "pending" | "in_progress" | "completed";
+export type Asset = {
+  id: string;
+  chaletId: string;
+  chaletName?: string;
+  name: string;
+  category: string;
+  serialNumber?: string;
+  condition: AssetCondition;
+  purchaseDate?: string;
+  purchaseCost?: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+export type MaintenanceTask = {
+  id: string;
+  chaletId: string;
+  chaletName?: string;
+  assetId?: string;
+  assetName?: string;
+  title: string;
+  frequency: MaintenanceFrequency;
+  nextDueDate: string;
+  lastCompletedDate?: string;
+  assignedToStaffId?: number;
+  assignedToStaffName?: string;
+  status: MaintenanceTaskStatus;
+  cost?: number;
+  note?: string;
+  /** Days used when frequency is "custom"; day/week/month infer 1/7/30. */
+  customIntervalDays?: number;
+  createdAt: string;
+  completedAt?: string;
+  completedByName?: string;
+};
+export type NotificationRecipient = "owner" | "manager" | "guard" | "all";
+export type NotificationType = "new_booking" | "payment_received" | "checkin_alert" | "maintenance_due" | "contract_signed" | "weather_advisory";
+export type InAppNotification = {
+  id: string;
+  recipients: NotificationRecipient[];
+  type: NotificationType;
+  title: string;
+  body: string;
+  dataPayload?: Record<string, string>;
+  isRead: boolean;
+  readByIds?: string[];
+  createdAt: string;
+};
+/** Result of the end-of-stay asset inspection performed during checkout. */
+export type AssetInspectionItem = { assetId?: string; assetName: string; passed: boolean; note?: string; photoUri?: string };
+/** Meter capture bundled with the guard check-in/check-out confirmation. */
+export type UtilityMeterInput = { type: UtilityReadingType; reading: number; photoUri?: string };
+export type UtilityReadingType = "electricity" | "water" | "gas_fuel";
+export type UtilityReading = {
+  id: string;
+  /** Booking the reading belongs to (undefined when logged while the chalet is vacant). */
+  bookingId?: string;
+  chaletId: string;
+  type: UtilityReadingType;
+  checkInReading: number;
+  checkInPhotoUri?: string;
+  checkInRecordedAt: string;
+  checkOutReading?: number;
+  checkOutPhotoUri?: string;
+  checkOutRecordedAt?: string;
+  /** Computed as checkOutReading - checkInReading when the checkout reading is recorded. */
+  consumedUnits?: number;
+  /** Cost per unit (kWh/m³/L) used to compute totalCost. */
+  unitRate: number;
+  /** Computed as consumedUnits * unitRate. */
+  totalCost?: number;
+  /** True when consumption exceeds the service threshold for the unit. */
+  isExcessive?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+export type WeatherDaily = { date: string; temperatureMax: number; temperatureMin: number; windSpeedMax: number; precipitationProbabilityMax: number; uvIndexMax: number; weatherCode: number };
+export type WeatherCurrent = { temperature: number; windSpeed: number; weatherCode: number };
+/** Cached Open-Meteo forecast snapshot per chalet (refresh cadence enforced by the widget). */
+export type WeatherLog = { id: string; chaletId: string; fetchedAt: string; latitude: number; longitude: number; current?: WeatherCurrent; daily: WeatherDaily[]; generatedAt: string };
+export type LoyaltyTier = "bronze" | "silver" | "gold" | "platinum";
+export type LoyaltyAccount = { id: string; customerId: string; pointsBalance: number; tier: LoyaltyTier; lifetimeEarned: number; lifetimeRedeemed: number; updatedAt: string; createdAt: string };
+export type LoyaltyTransaction = { id: string; customerId: string; type: "earn" | "redeem"; points: number; /** Cashback value in JOD deducted from the booking total. */ amount: number; bookingId?: string; bookingReference?: string; note?: string; createdAt: string };
 export type Expense = { id: string; chaletId?: string; chaletName?: string; amount: number; date: string; category: ExpenseCategory; note?: string; paymentMethod?: ExpensePaymentMethod; receiptUri?: string; /** حصص ثابتة لقيد مصروف عام، تحفظ وقت تسجيله. */ generalAllocations?: ExpenseAllocation[]; createdAt: string; createdByName?: string };
 export type AppLanguage = "ar" | "en";
 export type AppearanceMode = "light" | "dark" | "system";
@@ -160,6 +287,7 @@ export type DeviceSettings = {
   dateFormat: DateFormat;
   showHijriDate: boolean;
   timeFormat: "12h" | "24h";
+  weekdayFormat: WeekdayFormat;
   bookingCardViewMode: BookingCardViewMode;
   showGuestCheckIn: boolean;
   guestCheckInModeHistory: GuestCheckInModeChange[];
@@ -185,6 +313,10 @@ export type DeviceSettings = {
   checkoutMessageBlockTemplate: string;
   contractMessageBlockTemplate: string;
   lastWhatsAppMessageModules: SavedWhatsAppMessageModule[];
+  /** تذكير الحارس قبل الوصول/المغادرة (بالدقائق). */
+  guardReminderLeadMinutes: number;
+  /** عرض لوحة القمر والتقويم الهجري ضمن البطاقة الموحّدة في الرئيسية. */
+  showLunarPhase: boolean;
 };
 export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   useDeviceLanguage: false,
@@ -193,8 +325,8 @@ export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   hapticsEnabled: true,
   reduceMotion: false,
   glassBackgroundLevel: "standard",
-  glassSurfaceOpacity: "balanced",
-  glassGlowIntensity: "balanced",
+  glassSurfaceOpacity: "transparent",
+  glassGlowIntensity: "vivid",
   quietGlassBackground: false,
   notificationsEnabled: true,
   respectFontScale: true,
@@ -202,6 +334,7 @@ export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   dateFormat: "arabic-gregorian",
   showHijriDate: false,
   timeFormat: "12h",
+  weekdayFormat: "ar-short",
   bookingCardViewMode: "expanded",
   showGuestCheckIn: true,
   guestCheckInModeHistory: [],
@@ -225,6 +358,8 @@ export const DEFAULT_DEVICE_SETTINGS: DeviceSettings = {
   checkoutMessageBlockTemplate: "🚪 *تذكير المغادرة:*\nيرجى تسليم الشاليه في وقت المغادرة المتفق عليه وبالحالة المناسبة. شكرًا لاختياركم لنا.",
   contractMessageBlockTemplate: "📄 *إقرار الإقامة:*\nيُعد استمرار الحجز موافقة على تفاصيل الحجز وشروط الإقامة المبينة أعلاه.",
   lastWhatsAppMessageModules: [],
+  guardReminderLeadMinutes: 120,
+  showLunarPhase: true,
 };
 export type WhatsAppMessageOptions = { includeGuestAndChalet: boolean; includeSchedule: boolean; includeFinancials: boolean; includeLocation: boolean; includeContacts: boolean };
 export const DEFAULT_WHATSAPP_MESSAGE_OPTIONS: WhatsAppMessageOptions = { includeGuestAndChalet: true, includeSchedule: true, includeFinancials: true, includeLocation: true, includeContacts: true };
@@ -236,12 +371,87 @@ export const PRICED_BOOKING_TYPES: PricedBookingType[] = ["morning", "evening", 
 export const DEFAULT_PERIOD_PRICING: PeriodPricingSettings = { morning: { weekdayPrice: 0, weekendPrice: 0 }, evening: { weekdayPrice: 0, weekendPrice: 0 }, "24h": { weekdayPrice: 0, weekendPrice: 0 } };
 export const LEGACY_SHIFT_IDS: Record<PricedBookingType, string> = { morning: "legacy-morning", evening: "legacy-evening", "24h": "legacy-24h" };
 export type SpecialPriceRule = { id: string; name: string; startDate: string; endDate: string; price: number; kind: "season" | "occasion"; createdAt: string };
-export type AuditAction = "waitlist-promoted" | "waitlist-deleted" | "waitlist-cancelled" | "booking-deleted" | "booking-cancelled" | "booking-checked-in" | "booking-checked-out" | "booking-status-corrected" | "turnover-task-updated" | "expense-added" | "expense-deleted" | "booking-waitlist-priority-confirmed" | "chalet-deleted" | "payment-updated" | "payment-voided";
+export type AuditAction = "waitlist-promoted" | "waitlist-deleted" | "waitlist-cancelled" | "booking-deleted" | "booking-cancelled" | "booking-checked-in" | "booking-checked-out" | "booking-status-corrected" | "turnover-task-updated" | "expense-added" | "expense-deleted" | "booking-waitlist-priority-confirmed" | "chalet-deleted" | "payment-updated" | "payment-voided" | "customer-created" | "customer-updated" | "customer-blacklisted" | "customer-unblacklisted" | "contract-signed" | "asset-added" | "asset-updated" | "asset-deleted" | "maintenance-task-updated" | "maintenance-task-completed" | "weather-log-updated" | "utility-reading-recorded" | "loyalty-points-awarded" | "loyalty-points-redeemed";
 export type AuditLogEntry = { id: string; action: AuditAction; subjectName: string; details: string; createdAt: string; actorName?: string; bookingId?: string };
-export type Settings = { businessName: string; businessLogoUrl?: string; businessPhone: string; currency: string; weekendPrice?: number; weekendDays?: number[]; periodPricing?: PeriodPricingSettings; bookingTypes: Record<BookingType, { label: string; startTime: string; endTime: string }>; paymentMethods?: PaymentMethodOption[]; paymentRouting?: PaymentRoutingSettings; device?: DeviceSettings; whatsAppEnabled?: boolean; ownerPhone?: string; enableDisclaimer?: boolean; disclaimerText?: string; whatsAppOptions?: WhatsAppMessageOptions };
-export type AppData = { bookings: Booking[]; waitlist: WaitlistEntry[]; turnoverTasks: TurnoverTask[]; expenses?: Expense[]; chalets: Chalet[]; settings: Settings; specialPriceRules: SpecialPriceRule[]; auditLog: AuditLogEntry[] };
+export type UtilityRatesConfig = { enabled: boolean; rates: Partial<Record<UtilityReadingType, number>>; thresholds: Partial<Record<UtilityReadingType, number>> };
+export type LoyaltyProgramConfig = { enabled: boolean; pointsPerJod: number; jodPerPoint: number; silverMinStays: number; goldMinStays: number; platinumMinStays: number; silverMinSpendJod: number; goldMinSpendJod: number };
+export type HolidayPricingConfig = { enabled: boolean; upliftPercent: number };
+export type ContractPolicyConfig = { requireSignature: boolean; defaultDepositAmount: number };
+export type WeatherAdvisoryConfig = { enabled: boolean; coldPoolThresholdC: number; recipients: Record<"owner" | "manager" | "guard", boolean> };
+export type Settings = { businessName: string; businessLogoUrl?: string; businessPhone: string; currency: string; weekendPrice?: number; weekendDays?: number[]; periodPricing?: PeriodPricingSettings; bookingTypes: Record<BookingType, { label: string; startTime: string; endTime: string }>; paymentMethods?: PaymentMethodOption[]; paymentRouting?: PaymentRoutingSettings; device?: DeviceSettings; whatsAppEnabled?: boolean; ownerPhone?: string; enableDisclaimer?: boolean; disclaimerText?: string; whatsAppOptions?: WhatsAppMessageOptions; utilityTracking?: Partial<UtilityRatesConfig>; loyaltyProgram?: Partial<LoyaltyProgramConfig>; holidayPricing?: Partial<HolidayPricingConfig>; contractPolicy?: Partial<ContractPolicyConfig>; weatherAdvisory?: Partial<WeatherAdvisoryConfig> };
+export type AppData = { bookings: Booking[]; waitlist: WaitlistEntry[]; turnoverTasks: TurnoverTask[]; expenses?: Expense[]; chalets: Chalet[]; settings: Settings; specialPriceRules: SpecialPriceRule[]; auditLog: AuditLogEntry[]; customers?: Customer[]; contracts?: LeaseContract[]; assets?: Asset[]; maintenanceTasks?: MaintenanceTask[]; notifications?: InAppNotification[]; weatherLogs?: WeatherLog[]; utilityReadings?: UtilityReading[]; loyaltyAccounts?: LoyaltyAccount[]; loyaltyTransactions?: LoyaltyTransaction[] };
 export const DEFAULT_SETTINGS: Settings = { businessName: "منشأتي للحجوزات", businessPhone: "", currency: "د.أ", weekendPrice: 0, weekendDays: [5, 6], periodPricing: DEFAULT_PERIOD_PRICING, paymentMethods: DEFAULT_PAYMENT_METHOD_OPTIONS, whatsAppEnabled: false, ownerPhone: "", enableDisclaimer: true, disclaimerText: DEFAULT_WHATSAPP_DISCLAIMER, whatsAppOptions: DEFAULT_WHATSAPP_MESSAGE_OPTIONS, bookingTypes: { morning: { label: "صباحي", startTime: "09:00", endTime: "21:00" }, evening: { label: "سهرة", startTime: "22:00", endTime: "09:00" }, "24h": { label: "24 ساعة", startTime: "09:00", endTime: "09:00" }, custom: { label: "فترة مخصصة", startTime: "09:00", endTime: "17:00" }, "multi-day": { label: "عدة أيام", startTime: "09:00", endTime: "21:00" } } };
-export const EMPTY_DATA: AppData = { bookings: [], waitlist: [], turnoverTasks: [], expenses: [], chalets: [], settings: DEFAULT_SETTINGS, specialPriceRules: [], auditLog: [] };
+export const EMPTY_DATA: AppData = { bookings: [], waitlist: [], turnoverTasks: [], expenses: [], chalets: [], settings: DEFAULT_SETTINGS, specialPriceRules: [], auditLog: [], customers: [], contracts: [], assets: [], maintenanceTasks: [], notifications: [], weatherLogs: [], utilityReadings: [], loyaltyAccounts: [], loyaltyTransactions: [] };
+export const DEFAULT_UTILITY_TRACKING_CONFIG: UtilityRatesConfig = { enabled: true, rates: { electricity: 0.12, water: 0.75, gas_fuel: 0.9 }, thresholds: { electricity: 200, water: 40, gas_fuel: 100 } };
+export const DEFAULT_LOYALTY_PROGRAM_CONFIG: LoyaltyProgramConfig = { enabled: true, pointsPerJod: 10, jodPerPoint: 0.1, silverMinStays: 3, goldMinStays: 6, platinumMinStays: 10, silverMinSpendJod: 500, goldMinSpendJod: 1200 };
+export const DEFAULT_HOLIDAY_PRICING_CONFIG: HolidayPricingConfig = { enabled: false, upliftPercent: 20 };
+export const DEFAULT_CONTRACT_POLICY_CONFIG: ContractPolicyConfig = { requireSignature: true, defaultDepositAmount: 30 };
+export const DEFAULT_WEATHER_ADVISORY_CONFIG: WeatherAdvisoryConfig = { enabled: true, coldPoolThresholdC: 18, recipients: { owner: true, manager: true, guard: true } };
+
+export function clampNonNegative(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+export function effectiveUtilityTracking(settings: Settings = DEFAULT_SETTINGS): UtilityRatesConfig {
+  const partial = settings.utilityTracking ?? {};
+  return {
+    enabled: partial.enabled !== false,
+    rates: {
+      electricity: clampNonNegative(partial.rates?.electricity, DEFAULT_UTILITY_TRACKING_CONFIG.rates.electricity),
+      water: clampNonNegative(partial.rates?.water, DEFAULT_UTILITY_TRACKING_CONFIG.rates.water),
+      gas_fuel: clampNonNegative(partial.rates?.gas_fuel, DEFAULT_UTILITY_TRACKING_CONFIG.rates.gas_fuel),
+    },
+    thresholds: {
+      electricity: clampNonNegative(partial.thresholds?.electricity, DEFAULT_UTILITY_TRACKING_CONFIG.thresholds.electricity),
+      water: clampNonNegative(partial.thresholds?.water, DEFAULT_UTILITY_TRACKING_CONFIG.thresholds.water),
+      gas_fuel: clampNonNegative(partial.thresholds?.gas_fuel, DEFAULT_UTILITY_TRACKING_CONFIG.thresholds.gas_fuel),
+    },
+  };
+}
+
+export function effectiveLoyaltyProgram(settings: Settings = DEFAULT_SETTINGS): LoyaltyProgramConfig {
+  const partial = settings.loyaltyProgram ?? {};
+  return {
+    enabled: partial.enabled !== false,
+    pointsPerJod: clampNonNegative(partial.pointsPerJod, DEFAULT_LOYALTY_PROGRAM_CONFIG.pointsPerJod),
+    jodPerPoint: clampNonNegative(partial.jodPerPoint, DEFAULT_LOYALTY_PROGRAM_CONFIG.jodPerPoint),
+    silverMinStays: clampNonNegative(partial.silverMinStays, DEFAULT_LOYALTY_PROGRAM_CONFIG.silverMinStays),
+    goldMinStays: clampNonNegative(partial.goldMinStays, DEFAULT_LOYALTY_PROGRAM_CONFIG.goldMinStays),
+    platinumMinStays: clampNonNegative(partial.platinumMinStays, DEFAULT_LOYALTY_PROGRAM_CONFIG.platinumMinStays),
+    silverMinSpendJod: clampNonNegative(partial.silverMinSpendJod, DEFAULT_LOYALTY_PROGRAM_CONFIG.silverMinSpendJod),
+    goldMinSpendJod: clampNonNegative(partial.goldMinSpendJod, DEFAULT_LOYALTY_PROGRAM_CONFIG.goldMinSpendJod),
+  };
+}
+
+export function effectiveHolidayPricing(settings: Settings = DEFAULT_SETTINGS): HolidayPricingConfig {
+  const partial = settings.holidayPricing ?? {};
+  return {
+    enabled: partial.enabled === true,
+    upliftPercent: clampNonNegative(partial.upliftPercent, DEFAULT_HOLIDAY_PRICING_CONFIG.upliftPercent),
+  };
+}
+
+export function effectiveContractPolicy(settings: Settings = DEFAULT_SETTINGS): ContractPolicyConfig {
+  const partial = settings.contractPolicy ?? {};
+  return {
+    requireSignature: partial.requireSignature !== false,
+    defaultDepositAmount: clampNonNegative(partial.defaultDepositAmount, DEFAULT_CONTRACT_POLICY_CONFIG.defaultDepositAmount),
+  };
+}
+
+export function effectiveWeatherAdvisory(settings: Settings = DEFAULT_SETTINGS): WeatherAdvisoryConfig {
+  const partial = settings.weatherAdvisory ?? {};
+  return {
+    enabled: partial.enabled !== false,
+    coldPoolThresholdC: clampNonNegative(partial.coldPoolThresholdC, DEFAULT_WEATHER_ADVISORY_CONFIG.coldPoolThresholdC),
+    recipients: {
+      owner: partial.recipients?.owner !== false,
+      manager: partial.recipients?.manager !== false,
+      guard: partial.recipients?.guard !== false,
+    },
+  };
+}
 export const CHALET_COLORS = ["#0F8B83", "#4379D8", "#A56DD1", "#C87947", "#2B95A4", "#C9587A", "#E11D48", "#EA580C", "#0D9488", "#2563EB", "#7C3AED", "#BE123C", "#0891B2", "#4D7C0F"] as const;
 /**
  * لوحة ألوان محجوزة للفترات فقط. لا تشارك ألوان الوحدات ولا تقبل لون HEX حرًا.
@@ -445,7 +655,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   };
   const legacySettings = (data.settings ?? {}) as Partial<Settings> & { guardPhone?: string; locationUrl?: string };
   const { guardPhone: legacyGuardPhone, locationUrl: legacyLocationUrl, ...incomingSettings } = legacySettings;
-  const migratedChalets = referencedChalets.map((chalet) => ({ ...chalet, propertyType: normalizePropertyType(chalet.propertyType), locationUrl: chalet.locationUrl || legacyLocationUrl?.trim() || undefined, latitude: normalizeChaletLatitude(chalet.latitude), longitude: normalizeChaletLongitude(chalet.longitude), googleMapsUrl: normalizeOptionalText(chalet.googleMapsUrl) ?? undefined, isPublished: normalizeChaletVisibility(chalet.isPublished), isVerified: normalizeChaletVisibility(chalet.isVerified), guardianPhone: chalet.guardianPhone || legacyGuardPhone?.trim() || undefined }));
+  const migratedChalets = referencedChalets.map((chalet) => ({ ...chalet, propertyType: normalizePropertyType(chalet.propertyType), locationUrl: chalet.locationUrl || legacyLocationUrl?.trim() || undefined, latitude: normalizeChaletLatitude(chalet.latitude), longitude: normalizeChaletLongitude(chalet.longitude), googleMapsUrl: normalizeOptionalText(chalet.googleMapsUrl) ?? undefined, isPublished: normalizeChaletVisibility(chalet.isPublished), isVerified: normalizeChaletVisibility(chalet.isVerified), hasHeatedPool: chalet.hasHeatedPool === true || undefined, nearWater: chalet.nearWater === true || undefined, guardianPhone: chalet.guardianPhone || legacyGuardPhone?.trim() || undefined }));
   const legacyWeekendPrice = Math.max(0, Number(incomingSettings.weekendPrice || 0));
   const rawPeriodPricing = incomingSettings.periodPricing ?? DEFAULT_PERIOD_PRICING;
   const periodPricing = PRICED_BOOKING_TYPES.reduce((pricing, type) => ({ ...pricing, [type]: { weekdayPrice: Math.max(0, Number(rawPeriodPricing[type]?.weekdayPrice || 0)), weekendPrice: Math.max(0, Number(rawPeriodPricing[type]?.weekendPrice ?? legacyWeekendPrice)) } }), {} as PeriodPricingSettings);
@@ -457,15 +667,21 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     const match = entry.details.match(/(?:من\s+)?([0-9]+(?:\.[0-9]+)?)\s*(?:د\.أ)?\s*(?:←|إلى)\s*([0-9]+(?:\.[0-9]+)?)/);
     return Boolean(match && Math.abs(Number(match[1]) - Number(match[2])) < 0.0001);
   };
-  const auditLog = Array.isArray(data.auditLog) ? data.auditLog.filter((entry): entry is AuditLogEntry => Boolean(entry?.id && entry?.subjectName && entry?.details && entry?.createdAt && ["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided"].includes(entry.action))).filter((entry) => !isNoChangePaymentAudit(entry)).map((entry) => ({ ...entry, actorName: entry.actorName?.trim() || undefined })) : [];
+  const auditLog = Array.isArray(data.auditLog) ? data.auditLog.filter((entry): entry is AuditLogEntry => Boolean(entry?.id && entry?.subjectName && entry?.details && entry?.createdAt && ["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"].includes(entry.action))).filter((entry) => !isNoChangePaymentAudit(entry)).map((entry) => ({ ...entry, actorName: entry.actorName?.trim() || undefined })) : [];
   const normalizeRecordedAt = (value: unknown) => typeof value === "string" && !Number.isNaN(new Date(value).getTime()) ? value : undefined;
   const normalizePayment = (payment: Payment): Payment => {
     const paymentMethod = normalizePaymentMethodId(payment.paymentMethod);
     return { ...payment, amount: Math.max(0, Number(payment.amount || 0)), recordedAt: normalizeRecordedAt(payment.recordedAt), note: payment.note?.trim() || undefined, paymentMethod, recipientType: normalizePaymentRecipientType(payment.recipientType), handlerUserId: Number.isInteger(payment.handlerUserId) ? payment.handlerUserId : undefined, handlerName: payment.handlerName?.trim().slice(0, 255) || undefined, recipientAccountLabel: payment.recipientAccountLabel?.trim().slice(0, 180) || undefined, calculatedCommission: Math.max(0, Number(payment.calculatedCommission || 0)) || undefined, commissionType: payment.commissionType === "fixed" ? "fixed" : payment.commissionType === "percent" ? "percent" : undefined, receiptUri: payment.receiptUri?.trim() || undefined, voidedAt: normalizeRecordedAt(payment.voidedAt), voidReason: payment.voidReason?.trim() || undefined, recordedByUserId: Number.isInteger(payment.recordedByUserId) ? payment.recordedByUserId : undefined, recordedByName: payment.recordedByName?.trim() || undefined, updatedByUserId: Number.isInteger(payment.updatedByUserId) ? payment.updatedByUserId : undefined, updatedByName: payment.updatedByName?.trim() || undefined, voidedByUserId: Number.isInteger(payment.voidedByUserId) ? payment.voidedByUserId : undefined, voidedByName: payment.voidedByName?.trim() || undefined };
   };
+  const normalizeUtilityMeterInput = (value: UtilityMeterInput | undefined): UtilityMeterInput | undefined => {
+    if (!value || typeof value !== "object") return undefined;
+    const type = value.type === "electricity" || value.type === "water" || value.type === "gas_fuel" ? value.type : undefined;
+    const reading = typeof value.reading === "number" && Number.isFinite(value.reading) && value.reading >= 0 ? Math.round(value.reading * 100) / 100 : undefined;
+    return type && reading !== undefined ? { type, reading, photoUri: value.photoUri?.trim() || undefined } : undefined;
+  };
   const normalizeCheckInConfirmation = (value: CheckInConfirmation | undefined): CheckInConfirmation | undefined => {
     if (!value || !normalizeRecordedAt(value.actualArrivalAt)) return undefined;
-    return { actualArrivalAt: value.actualArrivalAt, rentalBalanceVerified: value.rentalBalanceVerified === true, rentalBalancePaymentMethod: normalizePaymentMethodId(value.rentalBalancePaymentMethod), securityDepositVerified: value.securityDepositVerified === true, securityDepositPaymentMethod: normalizePaymentMethodId(value.securityDepositPaymentMethod), identityNote: value.identityNote?.trim().slice(0, 240) || undefined, identityImageUri: value.identityImageUri?.trim() || undefined };
+    return { actualArrivalAt: value.actualArrivalAt, rentalBalanceVerified: value.rentalBalanceVerified === true, rentalBalancePaymentMethod: normalizePaymentMethodId(value.rentalBalancePaymentMethod), securityDepositVerified: value.securityDepositVerified === true, securityDepositPaymentMethod: normalizePaymentMethodId(value.securityDepositPaymentMethod), identityNote: value.identityNote?.trim().slice(0, 240) || undefined, identityImageUri: value.identityImageUri?.trim() || undefined, utilityReading: normalizeUtilityMeterInput(value.utilityReading) };
   };
   const bookings = normalizeBookingReferences((data.bookings ?? []).map((booking) => normalizeBookingEndDate({ ...linkShift(booking), depositPaymentMethod: normalizePaymentMethodId(booking.depositPaymentMethod), depositPaymentRecordedAt: normalizeRecordedAt(booking.depositPaymentRecordedAt), depositCollection: booking.depositCollection && Boolean(booking.depositCollection.id) && Number.isFinite(Number(booking.depositCollection.amount)) && Number(booking.depositCollection.amount) >= 0 && typeof booking.depositCollection.date === "string" ? normalizePayment(booking.depositCollection) : undefined, payments: Array.isArray(booking.payments) ? booking.payments.filter((payment): payment is Payment => Boolean(payment?.id) && Number.isFinite(Number(payment.amount)) && Number(payment.amount) >= 0 && typeof payment.date === "string").map(normalizePayment) : [], depositRefunds: Array.isArray(booking.depositRefunds) ? booking.depositRefunds.filter((refund) => Boolean(refund?.id) && Number.isFinite(Number(refund.amount)) && Number(refund.amount) >= 0 && typeof refund.date === "string").map((refund) => ({ ...refund, amount: Math.max(0, Number(refund.amount || 0)), recordedAt: normalizeRecordedAt(refund.recordedAt), note: refund.note?.trim() || undefined, paymentMethod: normalizePaymentMethodId(refund.paymentMethod) })) : [], checkInConfirmation: normalizeCheckInConfirmation(booking.checkInConfirmation), createdByRole: booking.createdByRole === "owner" || booking.createdByRole === "employee" ? booking.createdByRole : undefined, bookingSource: normalizeBookingSource(booking.bookingSource), commissionRate: normalizeBookingCommission(booking.commissionRate), commissionAmount: normalizeBookingCommission(booking.commissionAmount), payoutStatus: normalizePayoutStatus(booking.payoutStatus), waitlistPriorityAcknowledgedForId: booking.waitlistPriorityAcknowledgedForId?.trim() || undefined, waitlistPriorityAcknowledgedAt: normalizeRecordedAt(booking.waitlistPriorityAcknowledgedAt), waitlistPriorityAcknowledgedByName: booking.waitlistPriorityAcknowledgedByName?.trim() || undefined })), migratedChalets);
   const businessLogoUrl = incomingSettings.businessLogoUrl?.trim();
@@ -473,7 +689,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   const glassBackgroundLevel = normalizeGlassBackgroundLevel(incomingSettings.device?.glassBackgroundLevel, incomingSettings.device?.quietGlassBackground === true);
   const glassSurfaceOpacity = normalizeGlassSurfaceOpacity(incomingSettings.device?.glassSurfaceOpacity);
   const glassGlowIntensity = normalizeGlassGlowIntensity(incomingSettings.device?.glassGlowIntensity);
-  const device: DeviceSettings | undefined = incomingSettings.device ? { ...DEFAULT_DEVICE_SETTINGS, ...incomingSettings.device, bookingCardViewMode: incomingSettings.device.bookingCardViewMode === "compact" ? "compact" : "expanded", glassBackgroundLevel, glassSurfaceOpacity, glassGlowIntensity, quietGlassBackground: glassBackgroundLevel !== "standard", showGuestCheckIn: incomingSettings.device.showGuestCheckIn !== false, guestCheckInModeHistory, showTurnoverTasks: incomingSettings.device.showTurnoverTasks !== false, showDailyTasks: incomingSettings.device.showDailyTasks !== false, dailyOperationsCollapsed: incomingSettings.device.dailyOperationsCollapsed === true } : undefined;
+  const device: DeviceSettings | undefined = incomingSettings.device ? { ...DEFAULT_DEVICE_SETTINGS, ...incomingSettings.device, weekdayFormat: normalizeWeekdayFormat(incomingSettings.device.weekdayFormat), bookingCardViewMode: incomingSettings.device.bookingCardViewMode === "compact" ? "compact" : "expanded", glassBackgroundLevel, glassSurfaceOpacity, glassGlowIntensity, quietGlassBackground: glassBackgroundLevel !== "standard", showGuestCheckIn: incomingSettings.device.showGuestCheckIn !== false, guestCheckInModeHistory, showTurnoverTasks: incomingSettings.device.showTurnoverTasks !== false, showDailyTasks: incomingSettings.device.showDailyTasks !== false, dailyOperationsCollapsed: incomingSettings.device.dailyOperationsCollapsed === true, guardReminderLeadMinutes: Number.isFinite(Number(incomingSettings.device.guardReminderLeadMinutes)) && Number(incomingSettings.device.guardReminderLeadMinutes) >= 1 && Number(incomingSettings.device.guardReminderLeadMinutes) <= 1440 ? Math.round(Number(incomingSettings.device.guardReminderLeadMinutes)) : DEFAULT_DEVICE_SETTINGS.guardReminderLeadMinutes, showLunarPhase: incomingSettings.device.showLunarPhase !== false } : undefined;
   const turnoverTasks: TurnoverTask[] = Array.isArray(data.turnoverTasks) ? data.turnoverTasks.filter((task): task is TurnoverTask => Boolean(task?.id && task?.checkoutBookingId && task?.nextBookingId && typeof task?.dueAt === "string" && typeof task?.createdAt === "string")).map((task) => ({ ...task, chaletId: task.chaletId?.trim() || undefined, chaletName: task.chaletName?.trim() || undefined, status: (task.status === "completed" ? "completed" : task.status === "in-progress" ? "in-progress" : "pending") as TurnoverTaskStatus, completedAt: normalizeRecordedAt(task.completedAt), completedByName: task.completedByName?.trim() || undefined })) : [];
   const normalizeExpenseCategory = (value: unknown): ExpenseCategory => {
     if (value === "guards-salaries" || value === "maintenance" || value === "cleaning-supplies" || value === "utilities" || value === "other") return value;
@@ -484,7 +700,45 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     const generalAllocations = Array.isArray(expense.generalAllocations) ? expense.generalAllocations.filter((allocation): allocation is ExpenseAllocation => Boolean(allocation?.chaletId?.trim() && allocation?.chaletName?.trim() && Number.isFinite(Number(allocation.amount)) && Number(allocation.amount) > 0)).map((allocation) => ({ chaletId: allocation.chaletId.trim(), chaletName: allocation.chaletName.trim(), amount: Number(allocation.amount) })) : undefined;
     return { ...expense, amount: Number(expense.amount), chaletId: expense.chaletId?.trim() || undefined, chaletName: expense.chaletName?.trim() || undefined, category: normalizeExpenseCategory(expense.category), note: expense.note?.trim() || undefined, paymentMethod: expense.paymentMethod === "cash" || expense.paymentMethod === "click" ? expense.paymentMethod : undefined, receiptUri: expense.receiptUri?.trim() || undefined, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, createdByName: expense.createdByName?.trim() || undefined };
   }) : [];
-  return { bookings, waitlist: (data.waitlist ?? []).map((entry) => ({ ...linkShift(entry), depositPaymentMethod: normalizePaymentMethodId(entry.depositPaymentMethod), depositPaymentRecordedAt: normalizeRecordedAt(entry.depositPaymentRecordedAt), status: entry.status === "cancelled" ? "cancelled" : entry.status === "promoted" ? "promoted" : "active", cancelledAt: typeof entry.cancelledAt === "string" ? entry.cancelledAt : undefined, cancellationReason: entry.cancellationReason === "start-time" ? "start-time" : entry.cancellationReason === "manual" ? "manual" : undefined, promotedAt: typeof entry.promotedAt === "string" ? entry.promotedAt : undefined, promotedByUserId: Number.isInteger(entry.promotedByUserId) ? entry.promotedByUserId : undefined, promotedByName: entry.promotedByName?.trim() || undefined, promotedBookingId: entry.promotedBookingId?.trim() || undefined, promotedBookingReference: entry.promotedBookingReference?.trim() || undefined, promotedReplacedCustomerNames: entry.promotedReplacedCustomerNames?.trim() || undefined })), turnoverTasks, expenses, chalets: migratedChalets, specialPriceRules, auditLog, settings: { ...DEFAULT_SETTINGS, ...incomingSettings, device, businessLogoUrl: businessLogoUrl && isValidBusinessLogoUrl(businessLogoUrl) ? businessLogoUrl : undefined, weekendDays: weekendDays?.length ? weekendDays : DEFAULT_SETTINGS.weekendDays, periodPricing, whatsAppOptions: { ...DEFAULT_WHATSAPP_MESSAGE_OPTIONS, ...(incomingSettings.whatsAppOptions ?? {}) }, bookingTypes: { ...DEFAULT_SETTINGS.bookingTypes, ...(incomingSettings.bookingTypes ?? {}) } } };
+  const isDateOnly = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime());
+  const customers: Customer[] = Array.isArray(data.customers) ? data.customers.filter((customer): customer is Customer => Boolean(customer?.id && customer?.name)).map((customer) => {
+    const rawPhone = customer.phone?.trim() || customer.e164?.trim() || "";
+    const digits = rawPhone.replace(/\D/g, "");
+    const e164 = digits.length >= 8 && digits.length <= 15 ? `+${digits}` : "";
+    return { id: customer.id, name: customer.name.trim().slice(0, 120), phone: rawPhone, e164, nationalId: customer.nationalId?.trim().slice(0, 40) || undefined, totalBookingsCount: Math.max(0, Math.floor(Number(customer.totalBookingsCount || 0))), totalSpent: Math.max(0, Number(customer.totalSpent || 0)), isBlacklisted: customer.isBlacklisted === true, blacklistReason: customer.blacklistReason?.trim() || undefined, notes: customer.notes?.trim().slice(0, 600) || undefined, lastBookingDate: isDateOnly(customer.lastBookingDate) ? customer.lastBookingDate : undefined, createdAt: normalizeRecordedAt(customer.createdAt) ?? new Date(0).toISOString(), updatedAt: normalizeRecordedAt(customer.updatedAt) } satisfies Customer;
+  }) : [];
+  const normalizeContractStatus = (value: unknown): ContractStatus => value === "signed" ? "signed" : value === "archived" ? "archived" : "draft";
+  const contracts: LeaseContract[] = Array.isArray(data.contracts) ? data.contracts.filter((contract): contract is LeaseContract => Boolean(contract?.id && contract?.bookingId && contract?.guestName && typeof contract?.termsSnapshot === "string")).map((contract) => ({ id: contract.id, bookingId: contract.bookingId, termsSnapshot: contract.termsSnapshot.slice(0, 50_000), guestName: contract.guestName.trim().slice(0, 120), guestPhone: contract.guestPhone?.trim() || "", chaletName: contract.chaletName?.trim() || undefined, bookingReference: contract.bookingReference?.trim() || undefined, bookingType: ["morning", "evening", "24h", "custom", "multi-day"].includes(contract.bookingType) ? contract.bookingType : "custom", startDate: isDateOnly(contract.startDate) ? contract.startDate : "1970-01-01", startTime: typeof contract.startTime === "string" && timeValuePattern.test(contract.startTime) ? contract.startTime : undefined, endDate: isDateOnly(contract.endDate) ? contract.endDate : "1970-01-01", endTime: typeof contract.endTime === "string" && timeValuePattern.test(contract.endTime) ? contract.endTime : undefined, rentalTotal: Math.max(0, Number(contract.rentalTotal || 0)), depositAmount: Math.max(0, Number(contract.depositAmount || 0)), status: normalizeContractStatus(contract.status), guestSignatureBase64: typeof contract.guestSignatureBase64 === "string" && contract.guestSignatureBase64.length > 0 ? contract.guestSignatureBase64.slice(0, 400_000) : undefined, signedAt: normalizeRecordedAt(contract.signedAt), signerIp: contract.signerIp?.trim() || undefined, signedByName: contract.signedByName?.trim() || undefined, createdAt: normalizeRecordedAt(contract.createdAt) ?? new Date(0).toISOString() } satisfies LeaseContract)) : [];
+  const normalizeAssetCondition = (value: unknown): AssetCondition => value === "good" || value === "needs_service" ? value : "excellent";
+  const assets: Asset[] = Array.isArray(data.assets) ? data.assets.filter((asset): asset is Asset => Boolean(asset?.id && asset?.chaletId && asset?.name)).map((asset) => ({ id: asset.id, chaletId: asset.chaletId.trim(), chaletName: asset.chaletName?.trim() || undefined, name: asset.name.trim().slice(0, 120), category: asset.category?.trim().slice(0, 80) || "other", serialNumber: asset.serialNumber?.trim().slice(0, 80) || undefined, condition: normalizeAssetCondition(asset.condition), purchaseDate: isDateOnly(asset.purchaseDate) ? asset.purchaseDate : undefined, purchaseCost: Number.isFinite(Number(asset.purchaseCost)) && Number(asset.purchaseCost) >= 0 ? Math.round(Number(asset.purchaseCost) * 100) / 100 : undefined, createdAt: normalizeRecordedAt(asset.createdAt) ?? new Date(0).toISOString(), updatedAt: normalizeRecordedAt(asset.updatedAt) } satisfies Asset)) : [];
+  const normalizeMaintenanceFrequency = (value: unknown): MaintenanceFrequency => value === "daily" || value === "weekly" || value === "custom" ? value : "monthly";
+  const maintenanceTasks: MaintenanceTask[] = Array.isArray(data.maintenanceTasks) ? data.maintenanceTasks.filter((task): task is MaintenanceTask => Boolean(task?.id && task?.chaletId && task?.title && isDateOnly(task.nextDueDate))).map((task) => ({ id: task.id, chaletId: task.chaletId.trim(), chaletName: task.chaletName?.trim() || undefined, assetId: task.assetId?.trim() || undefined, assetName: task.assetName?.trim() || undefined, title: task.title.trim().slice(0, 140), frequency: normalizeMaintenanceFrequency(task.frequency), nextDueDate: task.nextDueDate, lastCompletedDate: isDateOnly(task.lastCompletedDate) ? task.lastCompletedDate : undefined, assignedToStaffId: Number.isInteger(task.assignedToStaffId) ? task.assignedToStaffId : undefined, assignedToStaffName: task.assignedToStaffName?.trim() || undefined, status: task.status === "completed" ? "completed" : task.status === "in_progress" ? "in_progress" : "pending", cost: Number.isFinite(Number(task.cost)) && Number(task.cost) >= 0 ? Math.round(Number(task.cost) * 100) / 100 : undefined, note: task.note?.trim().slice(0, 400) || undefined, customIntervalDays: typeof task.customIntervalDays === "number" && Number.isInteger(task.customIntervalDays) && task.customIntervalDays >= 1 ? task.customIntervalDays : undefined, createdAt: normalizeRecordedAt(task.createdAt) ?? new Date(0).toISOString(), completedAt: normalizeRecordedAt(task.completedAt), completedByName: task.completedByName?.trim() || undefined } satisfies MaintenanceTask)) : [];
+  const normalizeNotificationType = (value: unknown): NotificationType => value === "payment_received" || value === "checkin_alert" || value === "maintenance_due" || value === "contract_signed" || value === "weather_advisory" ? value : "new_booking";
+  const notifications: InAppNotification[] = Array.isArray(data.notifications) ? data.notifications.flatMap((notification) => {
+    if (!notification || typeof notification !== "object") return [];
+    const candidate = notification as Partial<InAppNotification> & Record<string, unknown>;
+    const id = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : undefined;
+    const title = typeof candidate.title === "string" ? candidate.title.trim() : "";
+    const body = typeof candidate.body === "string" ? candidate.body.trim() : "";
+    if (!id || !title || !body || typeof candidate.createdAt !== "string" || !isDateOnly(candidate.createdAt.slice(0, 10))) return [];
+    const rawRecipients = Array.isArray(candidate.recipients) ? candidate.recipients : typeof candidate.recipients === "string" ? [candidate.recipients] : ["all"];
+    const recipients = rawRecipients.filter((recipient): recipient is NotificationRecipient => recipient === "owner" || recipient === "manager" || recipient === "guard" || recipient === "all");
+    const rawPayload = candidate.dataPayload && typeof candidate.dataPayload === "object" && !Array.isArray(candidate.dataPayload) ? candidate.dataPayload as Record<string, unknown> : undefined;
+    const dataPayload = rawPayload ? Object.fromEntries(Object.entries(rawPayload).filter((entry): entry is [string, string] => typeof entry[1] === "string")) as Record<string, string> : undefined;
+    return [{ id, recipients: recipients.length ? recipients : ["all"], type: normalizeNotificationType(candidate.type), title: title.slice(0, 200), body: body.slice(0, 1000), dataPayload, isRead: candidate.isRead === true, readByIds: Array.isArray(candidate.readByIds) ? candidate.readByIds.filter((entry): entry is string => typeof entry === "string").slice(0, 50) : undefined, createdAt: candidate.createdAt as string } satisfies InAppNotification];
+  }) : [];
+  const utilityReadings: UtilityReading[] = Array.isArray(data.utilityReadings) ? data.utilityReadings.filter((reading): reading is UtilityReading => Boolean(reading?.id && reading?.chaletId && (reading?.type === "electricity" || reading?.type === "water" || reading?.type === "gas_fuel") && Number.isFinite(Number(reading?.checkInReading)) && Number(reading.checkInReading) >= 0)).map((reading) => {
+    const consumed = Number.isFinite(Number(reading.checkOutReading)) && Number(reading.checkOutReading) >= reading.checkInReading ? Math.round((Number(reading.checkOutReading) - reading.checkInReading) * 100) / 100 : Number.isFinite(Number(reading.consumedUnits)) && Number(reading.consumedUnits) >= 0 ? Math.round(Number(reading.consumedUnits) * 100) / 100 : undefined;
+    return { id: reading.id, bookingId: reading.bookingId?.trim() || undefined, chaletId: reading.chaletId.trim(), type: reading.type, checkInReading: Math.round(Number(reading.checkInReading) * 100) / 100, checkInPhotoUri: reading.checkInPhotoUri?.trim() || undefined, checkInRecordedAt: normalizeRecordedAt(reading.checkInRecordedAt) ?? new Date(0).toISOString(), checkOutReading: Number.isFinite(Number(reading.checkOutReading)) && Number(reading.checkOutReading) >= 0 ? Math.round(Number(reading.checkOutReading) * 100) / 100 : undefined, checkOutPhotoUri: reading.checkOutPhotoUri?.trim() || undefined, checkOutRecordedAt: normalizeRecordedAt(reading.checkOutRecordedAt), consumedUnits: consumed, unitRate: Math.max(0, Number(reading.unitRate || 0)), totalCost: Number.isFinite(Number(reading.totalCost)) && Number(reading.totalCost) >= 0 ? Math.round(Number(reading.totalCost) * 100) / 100 : consumed !== undefined ? Math.round(consumed * Math.max(0, Number(reading.unitRate || 0)) * 100) / 100 : undefined, isExcessive: reading.isExcessive === true || undefined, createdAt: normalizeRecordedAt(reading.createdAt) ?? new Date(0).toISOString(), updatedAt: normalizeRecordedAt(reading.updatedAt) } satisfies UtilityReading;
+  }) : [];
+  const weatherLogs: WeatherLog[] = Array.isArray(data.weatherLogs) ? data.weatherLogs.filter((log): log is WeatherLog => Boolean(log?.id && log?.chaletId && normalizeRecordedAt(log.fetchedAt) && Number.isFinite(Number(log?.latitude)) && Math.abs(Number(log.latitude)) <= 90 && Number.isFinite(Number(log?.longitude)) && Math.abs(Number(log.longitude)) <= 180 && Array.isArray(log?.daily))).map((log) => {
+    const daily = log.daily.filter((day) => isDateOnly(day?.date) && Number.isFinite(Number(day?.temperatureMax))).map((day) => ({ date: day.date, temperatureMax: Math.round(Number(day.temperatureMax) * 10) / 10, temperatureMin: Math.round(Number(day.temperatureMin ?? day.temperatureMax) * 10) / 10, windSpeedMax: Math.round(Number(day.windSpeedMax ?? 0) * 10) / 10, precipitationProbabilityMax: Math.max(0, Math.min(100, Math.round(Number(day.precipitationProbabilityMax ?? 0)))), uvIndexMax: Math.max(0, Math.round(Number(day.uvIndexMax ?? 0))), weatherCode: Number.isInteger(Number(day.weatherCode)) ? Number(day.weatherCode) : 0 } satisfies WeatherDaily)).slice(0, 7);
+    return { id: log.id, chaletId: log.chaletId.trim(), fetchedAt: log.fetchedAt, latitude: Number(log.latitude), longitude: Number(log.longitude), current: log.current && Number.isFinite(Number(log.current.temperature)) ? { temperature: Math.round(Number(log.current.temperature) * 10) / 10, windSpeed: Math.round(Number(log.current.windSpeed ?? 0) * 10) / 10, weatherCode: Number.isInteger(Number(log.current.weatherCode)) ? Number(log.current.weatherCode) : 0 } : undefined, daily, generatedAt: normalizeRecordedAt(log.generatedAt) ?? new Date(0).toISOString() } satisfies WeatherLog;
+  }) : [];
+  const normalizeLoyaltyTier = (value: unknown): LoyaltyTier => value === "silver" || value === "gold" || value === "platinum" ? value : "bronze";
+  const loyaltyAccounts: LoyaltyAccount[] = Array.isArray(data.loyaltyAccounts) ? data.loyaltyAccounts.filter((account): account is LoyaltyAccount => Boolean(account?.id && account?.customerId)).map((account) => ({ id: account.id, customerId: account.customerId, pointsBalance: Math.max(0, Math.floor(Number(account.pointsBalance || 0))), tier: normalizeLoyaltyTier(account.tier), lifetimeEarned: Math.max(0, Math.floor(Number(account.lifetimeEarned || 0))), lifetimeRedeemed: Math.max(0, Math.floor(Number(account.lifetimeRedeemed || 0))), updatedAt: normalizeRecordedAt(account.updatedAt) ?? normalizeRecordedAt(account.createdAt) ?? new Date(0).toISOString(), createdAt: normalizeRecordedAt(account.createdAt) ?? new Date(0).toISOString() } satisfies LoyaltyAccount)) : [];
+  const loyaltyTransactions: LoyaltyTransaction[] = Array.isArray(data.loyaltyTransactions) ? data.loyaltyTransactions.filter((transaction): transaction is LoyaltyTransaction => Boolean(transaction?.id && transaction?.customerId && (transaction?.type === "earn" || transaction?.type === "redeem") && Number.isFinite(Number(transaction?.points)))).map((transaction) => ({ id: transaction.id, customerId: transaction.customerId, type: transaction.type === "redeem" ? "redeem" : "earn", points: Math.max(0, Math.floor(Number(transaction.points))), amount: Number.isFinite(Number(transaction.amount)) && Number(transaction.amount) >= 0 ? Math.round(Number(transaction.amount) * 100) / 100 : 0, bookingId: transaction.bookingId?.trim() || undefined, bookingReference: transaction.bookingReference?.trim() || undefined, note: transaction.note?.trim().slice(0, 240) || undefined, createdAt: normalizeRecordedAt(transaction.createdAt) ?? new Date(0).toISOString() } satisfies LoyaltyTransaction)) : [];
+  return { bookings, waitlist: (data.waitlist ?? []).map((entry) => ({ ...linkShift(entry), depositPaymentMethod: normalizePaymentMethodId(entry.depositPaymentMethod), depositPaymentRecordedAt: normalizeRecordedAt(entry.depositPaymentRecordedAt), status: entry.status === "cancelled" ? "cancelled" : entry.status === "promoted" ? "promoted" : "active", cancelledAt: typeof entry.cancelledAt === "string" ? entry.cancelledAt : undefined, cancellationReason: entry.cancellationReason === "start-time" ? "start-time" : entry.cancellationReason === "manual" ? "manual" : undefined, promotedAt: typeof entry.promotedAt === "string" ? entry.promotedAt : undefined, promotedByUserId: Number.isInteger(entry.promotedByUserId) ? entry.promotedByUserId : undefined, promotedByName: entry.promotedByName?.trim() || undefined, promotedBookingId: entry.promotedBookingId?.trim() || undefined, promotedBookingReference: entry.promotedBookingReference?.trim() || undefined, promotedReplacedCustomerNames: entry.promotedReplacedCustomerNames?.trim() || undefined })), turnoverTasks, expenses, customers, contracts, assets, maintenanceTasks, notifications, weatherLogs, utilityReadings, loyaltyAccounts, loyaltyTransactions, chalets: migratedChalets, specialPriceRules, auditLog, settings: { ...DEFAULT_SETTINGS, ...incomingSettings, device, businessLogoUrl: businessLogoUrl && isValidBusinessLogoUrl(businessLogoUrl) ? businessLogoUrl : undefined, weekendDays: weekendDays?.length ? weekendDays : DEFAULT_SETTINGS.weekendDays, periodPricing, whatsAppOptions: { ...DEFAULT_WHATSAPP_MESSAGE_OPTIONS, ...(incomingSettings.whatsAppOptions ?? {}) }, bookingTypes: { ...DEFAULT_SETTINGS.bookingTypes, ...(incomingSettings.bookingTypes ?? {}) } } };
 }
 
 export function chaletLabel(chaletId: string | undefined, legacyName: string | undefined, chalets: Chalet[], fallback = "الشاليه غير محدد") {
@@ -953,13 +1207,21 @@ export function isWeekendDate(date: string, settings: Settings = DEFAULT_SETTING
 export function configuredRateForDate(type: BookingType, date: string, settings: Settings = DEFAULT_SETTINGS, chalet?: Chalet, specialPriceRules: SpecialPriceRule[] = [], shiftId?: string) {
   const specialRule = specialPriceRules.filter((rule) => rule.startDate <= date && rule.endDate >= date).sort((left, right) => Number(right.kind === "occasion") - Number(left.kind === "occasion"))[0];
   if (specialRule) return Math.max(0, Number(specialRule.price));
+  let base: number | undefined;
   if (shiftId) {
     const shift = getChaletShift(chalet, shiftId, type, settings);
-    if (shift) return Math.max(0, Number(isWeekendDate(date, settings, chalet) ? shift.weekendPrice : shift.weekdayPrice));
+    if (shift) base = Math.max(0, Number(isWeekendDate(date, settings, chalet) ? shift.weekendPrice : shift.weekdayPrice));
   }
-  const period = configuredPeriodType(type);
-  const rate = chalet?.periodPricing?.[period] ?? settings.periodPricing?.[period] ?? DEFAULT_PERIOD_PRICING[period];
-  return Math.max(0, Number(isWeekendDate(date, settings, chalet) ? rate.weekendPrice : rate.weekdayPrice));
+  if (base === undefined) {
+    const period = configuredPeriodType(type);
+    const rate = chalet?.periodPricing?.[period] ?? settings.periodPricing?.[period] ?? DEFAULT_PERIOD_PRICING[period];
+    base = Math.max(0, Number(isWeekendDate(date, settings, chalet) ? rate.weekendPrice : rate.weekdayPrice));
+  }
+  const holidayPricing = effectiveHolidayPricing(settings);
+  if (holidayPricing.enabled && holidayPricing.upliftPercent > 0 && jordanianHolidayOn(date)) {
+    return Math.round(base * (1 + (holidayPricing.upliftPercent / 100)) * 100) / 100;
+  }
+  return base;
 }
 
 export function configuredBookingPrice(booking: Pick<Booking, "bookingType" | "startDate" | "endDate" | "shiftId">, settings: Settings = DEFAULT_SETTINGS, chalet?: Chalet, specialPriceRules: SpecialPriceRule[] = []) {

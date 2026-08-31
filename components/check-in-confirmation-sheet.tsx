@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { GlowGlassCard } from "@/components/glow-glass-card";
-import { type Booking, type CheckInConfirmation, type PaymentMethod, formatMoney, refundableDepositAmount, remainingAmount } from "@/lib/booking-model";
+import { UtilityMeterCapture } from "@/components/utility-meter-capture";
+import { type Booking, type CheckInConfirmation, type PaymentMethod, type UtilityMeterInput, formatMoney, refundableDepositAmount, remainingAmount, effectiveUtilityTracking } from "@/lib/booking-model";
+import { useBookings } from "@/lib/booking-store";
 
 type Palette = {
   background: string;
@@ -48,12 +50,15 @@ function localTimeKey(date: Date) {
 }
 
 export function CheckInConfirmationSheet({ booking, colors, currency, language, isRTL, visible, saving, formatDate, formatTime, onClose, onConfirm }: Props) {
+  const { settings } = useBookings();
+  const utilityTrackingEnabled = effectiveUtilityTracking(settings).enabled;
   const [arrivalAt, setArrivalAt] = useState(() => new Date().toISOString());
   const [rentalPaymentMethod, setRentalPaymentMethod] = useState<PaymentMethod | null>(null);
   const [depositPaymentMethod, setDepositPaymentMethod] = useState<PaymentMethod | null>(null);
   const [identityNote, setIdentityNote] = useState("");
   const [identityImageUri, setIdentityImageUri] = useState<string | undefined>();
   const [identitySelecting, setIdentitySelecting] = useState(false);
+  const [meterInput, setMeterInput] = useState<UtilityMeterInput | undefined>();
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const rentalBalance = booking ? remainingAmount(booking) : 0;
@@ -69,6 +74,7 @@ export function CheckInConfirmationSheet({ booking, colors, currency, language, 
     setDepositPaymentMethod(booking?.depositPaymentMethod ?? null);
     setIdentityNote("");
     setIdentityImageUri(undefined);
+    setMeterInput(undefined);
   }, [booking?.depositPaymentMethod, booking?.id, visible]);
 
   if (!booking) return null;
@@ -130,11 +136,12 @@ export function CheckInConfirmationSheet({ booking, colors, currency, language, 
             </View>
             {identityImageUri ? <Image source={{ uri: identityImageUri }} accessibilityLabel={language === "ar" ? "معاينة صورة هوية الضيف" : "Guest ID preview"} style={styles.identityPreview} /> : <Text style={{ color: colors.muted, fontSize: 10, marginTop: 5, textAlign: align }}>{language === "ar" ? "يُحفظ المرجع محليًا مع الحجز؛ استخدمه فقط بموافقة الضيف وسياسة المنشأة." : "The reference is saved locally with the booking; use only with consent and your property policy."}</Text>}
             <TextInput value={identityNote} onChangeText={setIdentityNote} editable={!saving} multiline maxLength={240} placeholder={language === "ar" ? "ملاحظة هوية أو استلام (اختياري)" : "ID or handover note (optional)"} placeholderTextColor={colors.muted} textAlignVertical="top" style={[styles.note, { color: colors.foreground, backgroundColor: colors.surfaceMuted, textAlign: align }]} />
+            {utilityTrackingEnabled ? <UtilityMeterCapture colors={colors} language={language} isRTL={isRTL} saving={saving} value={meterInput} onChange={setMeterInput} /> : null}
             <Text style={{ color: readyToConfirm ? colors.muted : colors.warning, fontSize: 11, marginTop: 8, textAlign: align }}>{readyToConfirm ? (language === "ar" ? "جاهز لتأكيد الوصول." : "Ready to confirm arrival.") : (language === "ar" ? "اختر طريقة الاستلام لكل مبلغ ظاهر قبل التأكيد." : "Choose a method for each displayed amount before confirming.")}</Text>
 
             <View style={[styles.actions, { flexDirection: row }]}>
               <Pressable disabled={saving} onPress={onClose} style={({ pressed }) => [styles.secondary, { backgroundColor: colors.surfaceMuted, opacity: pressed || saving ? 0.58 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "900" }}>{language === "ar" ? "رجوع" : "Back"}</Text></Pressable>
-              <Pressable disabled={!readyToConfirm || saving} onPress={() => onConfirm({ actualArrivalAt: arrivalAt, rentalBalanceVerified: !needsRentalPayment || Boolean(rentalPaymentMethod), rentalBalancePaymentMethod: rentalPaymentMethod ?? undefined, securityDepositVerified: !needsDepositPayment || Boolean(depositPaymentMethod), securityDepositPaymentMethod: depositPaymentMethod ?? undefined, identityNote: identityNote.trim() || undefined, identityImageUri })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !readyToConfirm || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "login"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "تأكيد الوصول" : "Confirm arrival")}</Text></Pressable>
+              <Pressable disabled={!readyToConfirm || saving} onPress={() => onConfirm({ actualArrivalAt: arrivalAt, rentalBalanceVerified: !needsRentalPayment || Boolean(rentalPaymentMethod), rentalBalancePaymentMethod: rentalPaymentMethod ?? undefined, securityDepositVerified: !needsDepositPayment || Boolean(depositPaymentMethod), securityDepositPaymentMethod: depositPaymentMethod ?? undefined, identityNote: identityNote.trim() || undefined, identityImageUri, utilityReading: meterInput })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !readyToConfirm || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "login"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "تأكيد الوصول" : "Confirm arrival")}</Text></Pressable>
             </View>
           </ScrollView>
         </GlowGlassCard>

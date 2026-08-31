@@ -7,6 +7,8 @@ export {
   Fonts,
   SchemeColors,
   ThemeColors,
+  neonForAccent,
+  type AppThemeTokens,
   type ColorScheme,
   type ThemeColorPalette,
 } from "@/lib/_core/theme";

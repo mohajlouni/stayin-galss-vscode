@@ -151,9 +151,9 @@ export default function HomeScreen() {
 
       <BentoGlassCard radius={24} elevated accentColor={selectedChaletAccent} style={styles.summaryBar} contentStyle={[styles.summaryBarContent, { flexDirection: row }]}>
       <SummaryMetric label={language === "ar" ? "حجوزات اليوم" : "Today's bookings"} value={String(todayBookings.length)} icon="calendar-month" colors={colors} accent={colors.success} align={align} onPress={() => openFilteredBookings("today")} />
-        <View style={[styles.summaryDivider, { backgroundColor: colors.surfaceMuted }]} />
+        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
         <SummaryMetric label={language === "ar" ? "نسبة الإشغال" : "Occupancy"} value={occupancyPercent === undefined ? "—" : `${occupancyPercent}%`} icon="percent" colors={colors} accent={colors.primary} align={align} onPress={() => appRouter.push("/(tabs)/calendar" as never)} />
-        <View style={[styles.summaryDivider, { backgroundColor: colors.surfaceMuted }]} />
+        <View style={[styles.summaryDivider, { backgroundColor: colors.border }]} />
         <SummaryMetric label={language === "ar" ? "الرصيد المستحق" : "Outstanding balance"} value={remaining > 0 ? `${remaining.toFixed(2)} ${settings.currency}` : language === "ar" ? "لا يوجد" : "None"} icon="account-balance-wallet" colors={colors} accent={colors.warning} align={align} onPress={() => openFilteredBookings("balance")} />
       </BentoGlassCard>
       {restoreHintVisible ? <View accessibilityLiveRegion="polite" style={[styles.restoreDataHint, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}><MaterialIcons name="cloud-download" size={18} color={colors.primary} /><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تسجيل الدخول لاستعادة البيانات" : "Sign in to restore data"} onPress={() => void startOAuthLogin()} style={({ pressed }) => [styles.flex, { opacity: pressed ? 0.68 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "هل لديك بيانات منشأة محفوظة؟" : "Have saved workspace data?"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{language === "ar" ? "اضغط لتسجيل الدخول واستعادتها بأمان." : "Tap to sign in and restore it securely."}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إخفاء الإشعار" : "Dismiss notification"} onPress={() => setRestoreHintVisible(false)} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View> : null}
@@ -179,31 +179,31 @@ export default function HomeScreen() {
 }
 
 function SummaryMetric({ label, value, icon, colors, accent, align, onPress }: { label: string; value: string; icon: "account-balance-wallet" | "calendar-month" | "percent"; colors: ReturnType<typeof useColors>; accent: string; align: "left" | "right"; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [styles.summaryMetric, { opacity: pressed ? 0.68 : 1 }]}><View style={[styles.summaryIcon, { backgroundColor: accent + "16" }]}><MaterialIcons name={icon} size={16} color={accent} /></View><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 14, fontWeight: "900", marginTop: 7, textAlign: align }}>{value}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{label}</Text></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [styles.summaryMetric, { opacity: pressed ? 0.64 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}><View style={[styles.summaryIcon, { backgroundColor: accent + "13" }]}><MaterialIcons name={icon} size={15} color={accent} /></View><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 15, fontWeight: "800", letterSpacing: 0.1, marginTop: 8, textAlign: align }}>{value}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, fontWeight: "600", letterSpacing: 0.2, marginTop: 3, textAlign: align }}>{label}</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, minHeight: 0 },
-  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 188 },
+  content: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 188 },
   flex: { flex: 1, minWidth: 0 },
   bellButton: { width: 43, height: 43, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   bellBadge: { position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
-  scopeBlock: { marginTop: 11, alignItems: "center", justifyContent: "space-between", gap: 8 },
+  scopeBlock: { marginTop: 13, alignItems: "center", justifyContent: "space-between", gap: 10 },
   scopeChalet: { flex: 1, minWidth: 0 },
-  quickSearchCard: { marginTop: 10, borderRadius: 20 },
-  quickSearch: { minHeight: 48, borderRadius: 20, paddingHorizontal: 14, alignItems: "center", justifyContent: "space-between", gap: 8 },
-  summaryBar: { minHeight: 104, borderRadius: 24, marginTop: 12 },
-  summaryBarContent: { minHeight: 104, paddingVertical: 10, alignItems: "stretch", justifyContent: "space-between" },
-  summaryMetric: { flex: 1, minWidth: 0, paddingHorizontal: 9, justifyContent: "center" },
-  summaryIcon: { width: 29, height: 29, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  summaryDivider: { width: StyleSheet.hairlineWidth, marginVertical: 5 },
-  restoreDataHint: { minHeight: 58, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 9, alignItems: "center", justifyContent: "space-between", gap: 9, marginTop: 10 },
-  waitlistIndicator: { minHeight: 34, borderRadius: 14, alignItems: "center", justifyContent: "space-between", gap: 7, paddingHorizontal: 10, marginTop: 8 },
-  sectionHeader: { alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 21, marginBottom: 10 },
-  sectionTitle: { fontWeight: "900", fontSize: 19 },
-  sectionHint: { fontSize: 11, marginTop: 2 },
-  emptyCard: { minHeight: 96, borderRadius: 22 },
-  emptyCardContent: { minHeight: 96, alignItems: "center", justifyContent: "center", paddingHorizontal: 16 },
+  quickSearchCard: { marginTop: 12, borderRadius: 20 },
+  quickSearch: { minHeight: 50, borderRadius: 20, paddingHorizontal: 16, alignItems: "center", justifyContent: "space-between", gap: 10 },
+  summaryBar: { minHeight: 104, borderRadius: 24, marginTop: 14 },
+  summaryBarContent: { minHeight: 104, paddingVertical: 14, alignItems: "stretch", justifyContent: "space-between", gap: 4 },
+  summaryMetric: { flex: 1, minWidth: 0, paddingHorizontal: 10, justifyContent: "center" },
+  summaryIcon: { width: 30, height: 30, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  summaryDivider: { width: StyleSheet.hairlineWidth, marginVertical: 8, opacity: 0.6 },
+  restoreDataHint: { minHeight: 60, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 12 },
+  waitlistIndicator: { minHeight: 36, borderRadius: 15, alignItems: "center", justifyContent: "space-between", gap: 8, paddingHorizontal: 12, marginTop: 10 },
+  sectionHeader: { alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 24, marginBottom: 12 },
+  sectionTitle: { fontWeight: "900", fontSize: 18, letterSpacing: 0.15 },
+  sectionHint: { fontSize: 11.5, marginTop: 3, lineHeight: 16 },
+  emptyCard: { minHeight: 104, borderRadius: 24 },
+  emptyCardContent: { minHeight: 104, alignItems: "center", justifyContent: "center", paddingHorizontal: 16, paddingVertical: 16 },
   operationalToast: { position: "absolute", top: 14, left: 16, right: 16, zIndex: 30, minHeight: 50, borderRadius: 14, paddingHorizontal: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, elevation: 8, shadowColor: "#071412", shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
   bookingCard: { borderWidth: 1, borderRadius: 18, padding: 13, marginBottom: 9 },
   guestHeader: { width: "100%", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 },

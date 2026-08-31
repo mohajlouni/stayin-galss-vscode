@@ -139,7 +139,7 @@ export default function CalendarScreen() {
         <CompactScreenHeader title={language === "ar" ? "التقويم" : "Calendar"} logoUrl={settings.businessLogoUrl} icon="calendar-month" accentColor={selectedChaletAccent} />
         <View style={styles.scopeWrap}><ChaletSwitcher /></View>
 
-        <BentoGlassCard radius={24} elevated intensity={30} accentColor={selectedChaletAccent} style={[styles.calendarCard, { backgroundColor: "rgba(13, 17, 26, 0.72)", borderWidth: 0.5, borderColor: "rgba(255,255,255,0.16)" }]} contentStyle={styles.calendarCardContent}>
+        <BentoGlassCard radius={24} elevated intensity={30} accentColor={selectedChaletAccent} style={[styles.calendarCard, { backgroundColor: "rgba(14, 18, 28, 0.76)", borderWidth: 0.8, borderColor: "rgba(255,255,255,0.14)" }]} contentStyle={styles.calendarCardContent}>
           <View style={[styles.monthHeader, { flexDirection: row }]}>
             <MonthButton icon={isRTL ? "chevron-right" : "chevron-left"} label={t("previous")} onPress={() => moveMonth(-1)} colors={colors} />
             <View style={styles.monthTitleWrap}><Text style={[styles.monthTitle, { color: colors.foreground }]}>{formatMonth(year, month)}</Text>{showHijriDate ? <Text style={[styles.hijriMonth, { color: colors.muted }]}>{formatHijriMonth(year, month)}</Text> : null}</View>
@@ -261,17 +261,17 @@ function CalendarLoading({ colors, language }: { colors: ReturnType<typeof useCo
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, minHeight: 0 },
-  content: { flexGrow: 1, paddingHorizontal: 16, paddingStart: 16, paddingEnd: 16, paddingTop: 8, paddingBottom: 196, marginStart: 0, marginEnd: 0 },
+  content: { flexGrow: 1, paddingHorizontal: 16, paddingStart: 16, paddingEnd: 16, paddingTop: 10, paddingBottom: 196, marginStart: 0, marginEnd: 0 },
   flex: { flex: 1, minWidth: 0 },
-  scopeWrap: { marginTop: 11 },
-  calendarCard: { borderRadius: 24, marginTop: 12 },
-  calendarCardContent: { padding: 14 },
-  monthHeader: { alignItems: "center", justifyContent: "space-between", gap: 10 },
+  scopeWrap: { marginTop: 13 },
+  calendarCard: { borderRadius: 24, marginTop: 14 },
+  calendarCardContent: { padding: 16 },
+  monthHeader: { alignItems: "center", justifyContent: "space-between", gap: 12 },
   monthTitleWrap: { flex: 1, minWidth: 0, alignItems: "center" },
-  monthTitle: { fontSize: 17, fontWeight: "800", textAlign: "center" },
-  hijriMonth: { fontSize: 10, marginTop: 2, textAlign: "center" },
-  monthButton: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center" },
-  weekRow: { marginTop: 17, marginBottom: 7 },
+  monthTitle: { fontSize: 17.5, fontWeight: "800", textAlign: "center", letterSpacing: 0.15 },
+  hijriMonth: { fontSize: 10, fontWeight: "600", marginTop: 3, textAlign: "center", letterSpacing: 0.2 },
+  monthButton: { width: 42, height: 42, borderRadius: 15, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.08)" },
+  weekRow: { marginTop: 18, marginBottom: 8 },
   weekday: { width: "14.285%", minWidth: 0, fontSize: 10, fontWeight: "800", textAlign: "center" },
   daysGridContainer: { flexDirection: "row", flexWrap: "wrap", width: "100%", justifyContent: "flex-start", alignItems: "center" },
   dayCell: { width: "14.285%", height: 62, minWidth: 0, alignItems: "center", justifyContent: "center", padding: 2 },

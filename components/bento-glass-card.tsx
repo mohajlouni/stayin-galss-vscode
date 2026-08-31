@@ -58,9 +58,9 @@ export const BentoGlassCard = memo(function BentoGlassCard({
     borderRadius: radius,
     overflow: "hidden",
     shadowColor: accentColor ?? shadow.color,
-    shadowOpacity: accentColor ? 0.22 : shadow.opacity,
-    shadowRadius: shadow.radius,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: accentColor ? 0.18 : shadow.opacity,
+    shadowRadius: accentColor ? 20 : shadow.radius,
+    shadowOffset: { width: 0, height: 10 },
     elevation: shadow.elevation,
   };
 
@@ -93,8 +93,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   topSheen: {
-    height: "18%",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    height: "13%",
+    backgroundColor: "rgba(255,255,255,0.038)",
   },
   content: {
     position: "relative",

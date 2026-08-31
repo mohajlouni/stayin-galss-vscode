@@ -39,8 +39,8 @@ export const GlowGlassCard = memo(function GlowGlassCard({ children, style, cont
   const supportsBackdropBlur = Platform.OS !== "android";
   const glowStrength = deviceSettings.glassGlowIntensity === "subtle" ? 0.52 : deviceSettings.glassGlowIntensity === "vivid" ? 1.45 : 1;
   const effectiveGlowStrength = glowTone === "subtle" ? glowStrength * 0.5 : glowStrength;
-  const glowOpacity = Math.min(0.12, 0.07 * effectiveGlowStrength);
-  const glowShadowOpacity = Math.min(0.35, 0.14 * effectiveGlowStrength);
+  const glowOpacity = Math.min(0.10, 0.055 * effectiveGlowStrength);
+  const glowShadowOpacity = Math.min(0.28, 0.11 * effectiveGlowStrength);
   // Neo-Glass: enforce blur 20-35 while preserving literal intensity = 18 for tests
   const resolvedIntensity = Math.min(35, Math.max(20, intensity));
   const isInteractive = Boolean(onPress || pressable);

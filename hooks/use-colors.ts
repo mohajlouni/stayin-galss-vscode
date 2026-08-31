@@ -15,7 +15,8 @@ export function useColors(colorSchemeOverride?: ColorScheme): ThemeColorPalette 
     ...base.appTheme,
     background: {
       ...base.appTheme.background,
-      orbPrimary: `${accent}2E`,
+      orbPrimary: `${accent}26`,
+      orbSecondary: `${accent}14`,
     },
   };
   return {

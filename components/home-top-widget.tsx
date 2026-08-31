@@ -69,13 +69,13 @@ export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotificati
   return (
     <BentoGlassCard radius={24} elevated accentColor={accent} contentStyle={styles.containerContent}>
       <View style={[styles.headerRow, { flexDirection: row }]}>
-        <View style={[styles.avatar, { backgroundColor: accent + "16" }]}>{logoUrl ? <Image source={{ uri: logoUrl }} contentFit="cover" cachePolicy="memory-disk" transition={180} style={styles.avatarImage} accessibilityLabel="Business logo" /> : <Image source={require("../assets/images/stayin-logo.jpg")} contentFit="cover" transition={180} style={styles.avatarImage} accessibilityLabel="StayIn logo" />}</View>
+        <View style={[styles.avatar, { backgroundColor: accent + "12", borderWidth: 1, borderColor: accent + "1A" }]}>{logoUrl ? <Image source={{ uri: logoUrl }} contentFit="cover" cachePolicy="memory-disk" transition={180} style={styles.avatarImage} accessibilityLabel="Business logo" /> : <Image source={require("../assets/images/stayin-logo.jpg")} contentFit="cover" transition={180} style={styles.avatarImage} accessibilityLabel="StayIn logo" />}</View>
         <View style={styles.titleBlock}>
-          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 20, fontWeight: "900", textAlign: align }}>{APP_BRAND_NAME}</Text>
-          <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 12, fontWeight: "700", marginTop: 4, textAlign: align, writingDirection: language === "ar" ? "rtl" : "ltr" }}>{dateTime}</Text>
+          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 19, fontWeight: "900", letterSpacing: 0.2, textAlign: align }}>{APP_BRAND_NAME}</Text>
+          <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11.5, fontWeight: "700", marginTop: 3, textAlign: align, writingDirection: language === "ar" ? "rtl" : "ltr" }}>{dateTime}</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حجز جديد" : "New booking"} onPress={onNewBooking} style={({ pressed }) => [styles.action, { backgroundColor: colors.primary, opacity: pressed ? 0.76 : 1 }]}><MaterialIcons name="add" size={20} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "حجز جديد" : "New booking"}</Text></Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مركز الإشعارات" : "Notification center"} onPress={onNotifications} style={({ pressed }) => [styles.bellButton, { borderColor: unreadCount > 0 ? colors.warning + "88" : colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="notifications" size={20} color={unreadCount > 0 ? colors.warning : colors.muted} />{unreadCount > 0 ? <View style={[styles.bellBadge, { backgroundColor: colors.warning }]}><Text style={{ color: "#13181D", fontSize: 9, fontWeight: "900" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View> : null}</Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حجز جديد" : "New booking"} onPress={onNewBooking} style={({ pressed }) => [styles.action, { backgroundColor: colors.primary, opacity: pressed ? 0.72 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]}><MaterialIcons name="add" size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "حجز جديد" : "New booking"}</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مركز الإشعارات" : "Notification center"} onPress={onNotifications} style={({ pressed }) => [styles.bellButton, { borderColor: unreadCount > 0 ? colors.warning + "70" : colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><MaterialIcons name="notifications" size={19} color={unreadCount > 0 ? colors.warning : colors.muted} />{unreadCount > 0 ? <View style={[styles.bellBadge, { backgroundColor: colors.warning }]}><Text style={{ color: "#13181D", fontSize: 9, fontWeight: "900" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View> : null}</Pressable>
       </View>
 
       {hasTiles ? <>
@@ -92,16 +92,16 @@ export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotificati
 }
 
 const styles = StyleSheet.create({
-  containerContent: { padding: 12 },
-  headerRow: { alignItems: "center", gap: 10 },
-  avatar: { width: 47, height: 47, borderRadius: 16, alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 },
+  containerContent: { padding: 14 },
+  headerRow: { alignItems: "center", gap: 11 },
+  avatar: { width: 48, height: 48, borderRadius: 15, alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 },
   avatarImage: { width: "100%", height: "100%" },
   titleBlock: { flex: 1, minWidth: 0 },
-  action: { minHeight: 43, borderRadius: 15, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4, flexShrink: 0 },
-  bellButton: { width: 43, height: 43, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  bellBadge: { position: "absolute", top: -5, right: -5, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
-  collapseHandle: { marginTop: 10, minHeight: 26, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 4 },
+  action: { minHeight: 44, borderRadius: 15, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, flexShrink: 0, shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
+  bellButton: { width: 44, height: 44, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  bellBadge: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "#070B10" },
+  collapseHandle: { marginTop: 12, minHeight: 26, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 4 },
   collapseBody: { overflow: "hidden" },
   flex: { flex: 1 },
-  tile: { marginTop: 8 },
+  tile: { marginTop: 10 },
 });

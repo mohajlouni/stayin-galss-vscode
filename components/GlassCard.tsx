@@ -68,9 +68,9 @@ export const GlassCard = memo(function GlassCard({
     borderRadius: baseRadius,
     overflow: "hidden",
     shadowColor: active ? accent : shadow.color,
-    shadowOpacity: active ? 0.35 : shadow.opacity,
-    shadowRadius: active ? 16 : shadow.radius,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: active ? 0.28 : shadow.opacity,
+    shadowRadius: active ? 18 : shadow.radius,
+    shadowOffset: { width: 0, height: 10 },
     elevation: shadow.elevation,
   };
 
@@ -108,11 +108,11 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   topSheen: {
-    height: "18%",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    height: "14%",
+    backgroundColor: "rgba(255,255,255,0.045)",
   },
   neonAura: {
-    opacity: 0.5,
+    opacity: 0.42,
   },
   content: {
     position: "relative",

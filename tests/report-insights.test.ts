@@ -14,6 +14,12 @@ describe("report business insights", () => {
     expect(insight.outstandingBookingCount).toBe(1);
   });
 
+  it("does not count a booking that checks out at midnight as occupying the checkout date", () => {
+    const overnight = booking({ id: "b-night", chaletId: "c-1", startDate: "2026-08-21", endDate: "2026-08-22", bookingType: "evening", startTime: "22:00", endTime: "00:00" });
+    const insight = buildReportBusinessInsights([overnight], chalets, "today", "2026-08-22", undefined, new Date(2026, 7, 22, 10, 0).getTime());
+    expect(insight.occupancyRate).toBe(0);
+  });
+
   it("flags a held deposit after checkout as an overdue deposit risk", () => {
     const insight = buildReportBusinessInsights([booking({ endDate: "2026-08-21", depositAmount: 50, status: "completed" })], [chalets[0]!], "all", "2026-08-22", "c-1", new Date(2026, 7, 22, 10, 0).getTime());
     expect(insight.overdueDepositAmount).toBe(50);

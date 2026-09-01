@@ -1,4 +1,4 @@
-import { type Booking, type Chalet, getBookingStayTimeline, remainingAmount, remainingRefundableDeposit } from "./booking-model";
+import { type Booking, type Chalet, getBookingStayTimeline, remainingAmount, remainingRefundableDeposit, bookingCoversDate } from "./booking-model";
 import { type ReportRange } from "./reporting";
 
 export type ReportBusinessInsights = {
@@ -37,7 +37,9 @@ export function buildReportBusinessInsights(bookings: Booking[], chalets: Chalet
   for (let date = start; date <= end; date = addDays(date, 1)) activeDates.add(date);
   const occupiedKeys = new Set<string>();
   scopedBookings.forEach((booking) => {
-    for (let date = booking.startDate; date <= booking.endDate; date = addDays(date, 1)) if (activeDates.has(date) && booking.chaletId) occupiedKeys.add(`${booking.chaletId}:${date}`);
+    for (const date of activeDates) {
+      if (booking.chaletId && bookingCoversDate(booking, date)) occupiedKeys.add(`${booking.chaletId}:${date}`);
+    }
   });
   const availableChaletDays = activeDates.size * scopeChalets.length;
   const bookedChaletDays = occupiedKeys.size;

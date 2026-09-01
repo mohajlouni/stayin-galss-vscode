@@ -18,7 +18,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { BentoGlassCard } from "@/components/bento-glass-card";
 import { useColors } from "@/hooks/use-colors";
-import { Booking, BookingListFilter, PricedBookingType, availableSiblingSlotForBooking, chaletColor, chaletLabel, getBookingDisplayOperationalState, getBookingStayTimeline, isWaitlistExpired, remainingAmount, splitBookingsByCheckout, todayISO } from "@/lib/booking-model";
+import { Booking, BookingListFilter, PricedBookingType, availableSiblingSlotForBooking, bookingCoversDate, chaletColor, chaletLabel, getBookingDisplayOperationalState, getBookingStayTimeline, isWaitlistExpired, remainingAmount, splitBookingsByCheckout, todayISO } from "@/lib/booking-model";
 import { unreadNotificationCount } from "@/lib/notification-center";
 import { getDailyOperations } from "@/lib/daily-operations";
 import { getTurnoverTaskCandidates } from "@/lib/turnover-tasks";
@@ -79,7 +79,7 @@ export default function HomeScreen() {
   const upcomingHolidays = useMemo(() => upcomingJordanianHolidays(today, 7), [today]);
   const turnoverAttentionCount = useMemo(() => getTurnoverTaskCandidates(bookings, turnoverTasks, clock, selectedChaletId).filter((task) => task.status !== "completed").length, [bookings, clock, selectedChaletId, turnoverTasks]);
   const checkoutWarningCount = useMemo(() => activeOperationalBookings.filter((booking) => getBookingStayTimeline(booking, clock).phase === "checkout-warning").length, [activeOperationalBookings, clock]);
-  const occupiedChaletCount = useMemo(() => new Set(todayBookings.map((booking) => booking.chaletId).filter(Boolean)).size, [todayBookings]);
+  const occupiedChaletCount = useMemo(() => new Set(bookings.filter((booking) => booking.status !== "cancelled" && booking.status !== "waitlisted" && bookingCoversDate(booking, today) && (!selectedChaletId || booking.chaletId === selectedChaletId)).map((booking) => booking.chaletId).filter(Boolean)).size, [bookings, selectedChaletId, today]);
   const availableChaletCount = selectedChaletId ? 1 : chalets.length;
   const occupancyPercent = availableChaletCount > 0 ? Math.round((occupiedChaletCount / availableChaletCount) * 100) : undefined;
   const selectedChaletAccent = selectedChaletId ? chaletColor(selectedChaletId, chalets, colors.primary) : colors.primary;

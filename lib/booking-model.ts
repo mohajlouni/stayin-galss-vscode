@@ -1232,3 +1232,11 @@ export function configuredBookingPrice(booking: Pick<Booking, "bookingType" | "s
 export function resolvedBookingPrice(automaticPrice: number, enteredPrice: string | number, isManualOverride: boolean) {
   return isManualOverride ? Math.max(0, Number(enteredPrice || 0)) : Math.max(0, Number(automaticPrice || 0));
 }
+
+/** Parses a user-entered amount string into a finite positive number, or `null` when invalid. */
+export function toPositiveFiniteAmount(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}

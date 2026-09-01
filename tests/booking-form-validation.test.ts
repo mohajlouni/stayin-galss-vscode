@@ -7,7 +7,8 @@ const source = readFileSync(resolve(process.cwd(), "app/booking-form.tsx"), "utf
 describe("Booking form edit validation", () => {
   it("validates phone and positive rental values before saving, then returns an updated booking to details", () => {
     expect(source).toContain("normalizeInternationalPhone(phone, phoneCountry.code)");
-    expect(source).toContain("rentalPrice <= 0");
+    expect(source).toContain("toPositiveFiniteAmount(price)");
+    expect(source).toContain("!rentalPrice");
     expect(source).toContain('pathname: "/booking-detail"');
     expect(source).toContain('updated: "1"');
   });

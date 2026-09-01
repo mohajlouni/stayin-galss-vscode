@@ -623,12 +623,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     },
     deleteChalet: async (id) => {
       if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
-      const chalet = data.chalets.find((item) => item.id === id);
-      if (!chalet) throw new Error("chalet-not-found");
-      const linkedBookings = data.bookings.filter((booking) => booking.chaletId === id).length;
-      await persist({ ...data, chalets: data.chalets.filter((item) => item.id !== id), auditLog: [{ id: `audit-${Date.now()}`, action: "chalet-deleted" as AuditAction, subjectName: chalet.name, details: `حجوزات مرتبطة محفوظة: ${linkedBookings}`, createdAt: new Date().toISOString(), actorName: auditActorName }, ...data.auditLog] });
-      if (chalet.imageUri) await removeManagedChaletImage(chalet.imageUri);
-      setLastDeleted({ kind: "chalet", record: chalet, createdAt: Date.now() });
+      const deleted = data.chalets.find((chalet) => chalet.id === id);
+      if (!deleted) throw new Error("chalet-not-found");
+      await persist({ ...data, chalets: data.chalets.filter((chalet) => chalet.id !== id), bookings: data.bookings.map((booking) => booking.chaletId === id ? { ...booking, chaletId: undefined, chaletName: booking.chaletName || deleted.name } : booking), waitlist: data.waitlist.map((entry) => entry.chaletId === id ? { ...entry, chaletId: undefined, chaletName: entry.chaletName || deleted.name } : entry) });
+      if (deleted.imageUri) await removeManagedChaletImage(deleted.imageUri);
+      setLastDeleted({ kind: "chalet", record: deleted, createdAt: Date.now() });
     },
     updateSettings: async (settings) => { if (isEmployee) throw new Error("employee-settings-forbidden"); await persist({ ...data, settings }); },
     updateSpecialPriceRules: async (rules) => { if (isEmployee) throw new Error("employee-pricing-forbidden"); await persist({ ...data, specialPriceRules: rules }); },
@@ -836,7 +835,15 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         const result = await DocumentPicker.getDocumentAsync({ type: "application/json", copyToCacheDirectory: true });
         if (result.canceled) return false;
         const asset = result.assets[0];
+        if (asset.size !== undefined && asset.size > 5 * 1024 * 1024) {
+          Alert.alert("File too large", "Choose a backup of 5 megabytes or less.");
+          return false;
+        }
         const raw = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 });
+        if (new TextEncoder().encode(raw).byteLength > 5 * 1024 * 1024) {
+          Alert.alert("File too large", "Choose a backup of 5 megabytes or less.");
+          return false;
+        }
         setPendingBackupImport({ ...parseBackupData(raw), fileName: asset.name, fileSize: asset.size });
         return true;
       } catch {

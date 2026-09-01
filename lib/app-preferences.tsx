@@ -3,7 +3,7 @@ import { getCalendars, getLocales } from "expo-localization";
 import * as Haptics from "expo-haptics";
 import { Appearance, I18nManager, Platform, useColorScheme as useSystemColorScheme } from "react-native";
 import * as Updates from "expo-updates";
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useBookings } from "@/lib/booking-store";
 import { type AppLanguage, type AppearanceMode, type DateFormat, type DeviceSettings, DEFAULT_DEVICE_SETTINGS, formatBookingDate, formatCalendarMonth, formatTime12, hijriDateLabel, hijriMonthLabel, normalizeGlassBackgroundLevel, normalizeGlassGlowIntensity, normalizeGlassSurfaceOpacity } from "@/lib/booking-model";
@@ -64,6 +64,8 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
   const [languageChangeStatus, setLanguageChangeStatus] = useState<LanguageChangeStatus>("none");
   const deviceLanguage = useMemo(detectDeviceLanguage, []);
 
+  const deviceSettingsRef = useRef(deviceSettings);
+  const settingsRef = useRef(settings);
   const previousLanguageRef = React.useRef<string | null>(null);
 
   const deviceTimezone = useMemo(detectDeviceTimezone, []);
@@ -135,14 +137,22 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
     Appearance.setColorScheme?.(appearanceMode === "system" ? null : appearanceMode);
   }, [appearanceMode]);
 
+  useEffect(() => {
+    deviceSettingsRef.current = deviceSettings;
+  }, [deviceSettings]);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   const updateDeviceSettings = useCallback(async (patch: Partial<DeviceSettings>) => {
-    const next = { ...deviceSettings, ...patch };
-    if ("showGuestCheckIn" in patch && typeof patch.showGuestCheckIn === "boolean" && patch.showGuestCheckIn !== deviceSettings.showGuestCheckIn) {
-      next.guestCheckInModeHistory = [{ enabled: patch.showGuestCheckIn, changedAt: new Date().toISOString() }, ...deviceSettings.guestCheckInModeHistory].slice(0, 3);
+    const next = { ...deviceSettingsRef.current, ...patch };
+    if ("showGuestCheckIn" in patch && typeof patch.showGuestCheckIn === "boolean" && patch.showGuestCheckIn !== deviceSettingsRef.current.showGuestCheckIn) {
+      next.guestCheckInModeHistory = [{ enabled: patch.showGuestCheckIn, changedAt: new Date().toISOString() }, ...deviceSettingsRef.current.guestCheckInModeHistory].slice(0, 3);
     }
+    deviceSettingsRef.current = next;
     setDeviceSettings(next);
-    await updateSettings({ ...settings, device: next });
-  }, [deviceSettings, settings, updateSettings]);
+    await updateSettings({ ...settingsRef.current, device: next });
+  }, [updateSettings]);
 
   const triggerHaptic = useCallback(async (style = Haptics.ImpactFeedbackStyle.Light) => {
     if (!deviceSettings.hapticsEnabled || Platform.OS === "web") return;

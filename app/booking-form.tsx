@@ -11,7 +11,7 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, weekdayLabel } from "@/lib/booking-model";
+import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
 import { hasBookingConflict } from "@/services/availabilityService";
 import { configuredBookingPrice } from "@/services/pricingService";
 import { useBookings } from "@/lib/booking-store";
@@ -272,17 +272,20 @@ export default function BookingForm() {
     }
   };
   const save = async () => {
-    const rentalPrice = Number(price);
-    const discount = Number(discountAmount || 0);
-    const deposit = Number(depositAmount || 0);
-    const initial = Number(initialPayment || 0);
+    const rentalPrice = toPositiveFiniteAmount(price);
+    const discount = toPositiveFiniteAmount(discountAmount ?? "");
+    const deposit = toPositiveFiniteAmount(depositAmount ?? "");
+    const initial = toPositiveFiniteAmount(initialPayment);
     if (!name.trim() || !chaletId || !startDate || !endDate) return Alert.alert(language === "ar" ? "بيانات ناقصة" : "Missing data", language === "ar" ? "أدخل اسم العميل والشاليه والتاريخ والسعر." : "Enter the customer name, chalet, dates, and price.");
     if (phone.trim() && normalizedPhone.error) return Alert.alert(language === "ar" ? "رقم هاتف غير صحيح" : "Invalid phone number", language === "ar" ? "أدخل رقمًا محليًا صحيحًا بعد اختيار رمز الدولة." : "Enter a valid local number after selecting the country code.");
     if (blacklistedBlocked) return Alert.alert(language === "ar" ? "عميل محظور" : "Blacklisted customer", language === "ar" ? "هذا الرقم مدرج في القائمة السوداء ولا يمكن إتمام الحجز له. إذا كان قرار الحظر خاطئًا فتوجه إلى إدارة العملاء." : "This number is on the blacklist and cannot be booked. If the block is a mistake, go to Customer CRM to unblock.");
-    if (!Number.isFinite(rentalPrice) || rentalPrice <= 0) return Alert.alert(language === "ar" ? "مبلغ إيجار غير صحيح" : "Invalid rental amount", language === "ar" ? "يجب أن يكون مبلغ الإيجار رقمًا موجبًا أكبر من صفر." : "Rental amount must be a positive number greater than zero.");
-    if (!Number.isFinite(discount) || discount < 0 || discount >= rentalPrice || !Number.isFinite(deposit) || deposit < 0 || !Number.isFinite(initial) || (initialPayment.trim() !== "" && initial <= 0)) return Alert.alert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? "تحقق من الخصم والتأمين والدفعة الأولى؛ يجب أن تكون الأرقام صالحة والمبالغ المدخلة موجبة." : "Check discount, deposit, and initial payment; values must be valid and entered amounts must be positive.");
-    if (!existing && initial > 0 && !initialPaymentMethod) { setInitialPaymentMethodError(true); return Alert.alert(language === "ar" ? "اختر طريقة الدفعة الأولى" : "Choose initial payment method", language === "ar" ? "لا يمكن حفظ الحجز قبل اختيار طريقة دفع الدفعة الأولى." : "Choose the initial payment method before saving."); }
-    if (!existing && deposit > 0 && !depositPaymentMethod) { setDepositPaymentMethodError(true); return Alert.alert(language === "ar" ? "اختر طريقة استلام التأمين" : "Choose deposit method", language === "ar" ? "لا يمكن حفظ الحجز قبل اختيار طريقة استلام التأمين." : "Choose the deposit collection method before saving."); }
+    if (!rentalPrice) return Alert.alert(language === "ar" ? "مبلغ إيجار غير صحيح" : "Invalid rental amount", language === "ar" ? "يجب أن يكون مبلغ الإيجار رقمًا موجبًا أكبر من صفر." : "Rental amount must be a positive number greater than zero.");
+    const discountIsInvalid = discount !== null && (discount < 0 || discount >= rentalPrice);
+    const depositIsInvalid = deposit !== null && deposit < 0;
+    const initialIsInvalid = initialPayment?.trim() !== "" && initial === null;
+    if (discountIsInvalid || depositIsInvalid || initialIsInvalid) return Alert.alert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? "تحقق من الخصم والتأمين والدفعة الأولى؛ يجب أن تكون الأرقام صالحة والمبالغ المدخلة موجبة." : "Check discount, deposit, and initial payment; values must be valid and entered amounts must be positive.");
+    if (!existing && initial !== null && initial > 0 && !initialPaymentMethod) { setInitialPaymentMethodError(true); return Alert.alert(language === "ar" ? "اختر طريقة الدفعة الأولى" : "Choose initial payment method", language === "ar" ? "لا يمكن حفظ الحجز قبل اختيار طريقة دفع الدفعة الأولى." : "Choose the initial payment method before saving."); }
+    if (!existing && deposit !== null && deposit > 0 && !depositPaymentMethod) { setDepositPaymentMethodError(true); return Alert.alert(language === "ar" ? "اختر طريقة استلام التأمين" : "Choose deposit method", language === "ar" ? "لا يمكن حفظ الحجز قبل اختيار طريقة استلام التأمين." : "Choose the deposit collection method before saving."); }
     if (!existing && isBookingStartDatePast(draft, clock)) return Alert.alert(language === "ar" ? "تاريخ غير متاح" : "Unavailable date", language === "ar" ? "لا يمكن إنشاء حجز بتاريخ يسبق تاريخ اليوم." : "A booking cannot be created for a date before today.");
     if (!existing && isBookingPeriodEndedToday(draft, clock)) return Alert.alert(language === "ar" ? "انتهت الفترة اليوم" : "Period has ended", language === "ar" ? "انتهى وقت هذه الفترة اليوم؛ اختر فترة لاحقة أو تاريخ الغد." : "This period has ended today. Choose a later period or tomorrow.");
     if (isInvalidTimeOrder(draft)) return Alert.alert(language === "ar" ? "وقت غير صحيح" : "Invalid time", language === "ar" ? "وقت الخروج يجب أن يكون بعد وقت الدخول." : "End time must be after start time.");

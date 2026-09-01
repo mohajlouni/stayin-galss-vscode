@@ -16,7 +16,7 @@ import { GlowGlassCard } from "@/components/glow-glass-card";
 import { GlassModalMotion } from "@/components/glass-modal-motion";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { AuditLogEntry, bookingOccupancyStatus, bookingTypeLabel, DEFAULT_DEVICE_SETTINGS, depositFinancialStatus, durationLabel, formatMoney, getBookingDisplayOperationalState, getBookingOperationalState, localDateISO, Payment, PaymentMethod, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, statusColors, statusLabel, totalDepositRefunded, totalPaid, typeColors, weekdayLabel } from "@/lib/booking-model";
+import { AuditLogEntry, bookingOccupancyStatus, bookingTypeLabel, DEFAULT_DEVICE_SETTINGS, depositFinancialStatus, durationLabel, formatMoney, getBookingDisplayOperationalState, getBookingOperationalState, localDateISO, Payment, PaymentMethod, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, statusColors, statusLabel, toPositiveFiniteAmount, totalDepositRefunded, totalPaid, typeColors, weekdayLabel } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { shareBookingReceipt } from "@/lib/booking-receipt";
 import { shareFinancialReceipt } from "@/lib/financial-receipt";
@@ -322,8 +322,8 @@ export default function BookingDetail() {
       Alert.alert(language === "ar" ? "اختر طريقة الدفع" : "Choose a payment method", language === "ar" ? "يرجى اختيار طريقة الدفع للمتابعة" : "Please choose a payment method to continue.");
       return;
     }
-    const value = Number(amount);
-    if (!Number.isFinite(value) || value <= 0) {
+    const value = toPositiveFiniteAmount(amount);
+    if (!value) {
       Alert.alert(language === "ar" ? "مبلغ غير صالح" : "Invalid payment amount", language === "ar" ? "يرجى إدخال مبلغ صحيح للدفعة" : "Please enter a valid payment amount.");
       return;
     }

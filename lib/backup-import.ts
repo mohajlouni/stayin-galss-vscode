@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AppData, Booking, BookingStatus, BookingType, Chalet, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, DepositRefund, Payment, Settings, WaitlistEntry, normalizeAppData } from "./booking-model";
+import { AppData, Booking, BookingStatus, BookingType, Chalet, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, DepositRefund, Expense, Payment, Settings, TurnoverTask, WaitlistEntry, normalizeAppData } from "./booking-model";
 import { type LoyaltyAccount, type LoyaltyTransaction, type UtilityReading, type WeatherLog } from "./booking-model";
 
 export const BACKUP_VERSION = 8;
@@ -40,6 +40,14 @@ const paymentSchema = z.object({
   calculatedCommission: moneySchema.optional(),
   commissionType: z.enum(["percent", "fixed"]).optional(),
   receiptUri: optionalText,
+  voidedAt: z.string().datetime().optional(),
+  voidReason: optionalText,
+  recordedByUserId: z.number().int().positive().optional(),
+  recordedByName: z.string().max(255).optional(),
+  updatedByUserId: z.number().int().positive().optional(),
+  updatedByName: z.string().max(255).optional(),
+  voidedByUserId: z.number().int().positive().optional(),
+  voidedByName: z.string().max(255).optional(),
 }) satisfies z.ZodType<Payment>;
 
 const depositRefundSchema = z.object({
@@ -59,6 +67,7 @@ const checkInConfirmationSchema = z.object({
   securityDepositPaymentMethod: z.string().regex(/^[a-z0-9-]{2,48}$/).optional(),
   identityNote: optionalText,
   identityImageUri: optionalText,
+  utilityReading: z.object({ type: z.enum(["electricity", "water", "gas_fuel"]), reading: moneySchema, photoUri: optionalText }).optional(),
 });
 
 const bookingSchema = z.object({
@@ -86,6 +95,15 @@ const bookingSchema = z.object({
   createdAt: z.string(),
   checkedInAt: z.string().datetime().optional(),
   checkInConfirmation: checkInConfirmationSchema.optional(),
+  checkedOutAt: z.string().datetime().optional(),
+  noShowAt: z.string().datetime().optional(),
+  commissionRate: moneySchema.optional(),
+  commissionAmount: moneySchema.optional(),
+  payoutStatus: z.enum(["pending", "paid"]).optional(),
+  updatedByUserId: z.number().int().optional(),
+  updatedByName: z.string().optional(),
+  bookingSource: z.enum(["manual_host", "guest_app"]).optional(),
+  assetInspections: z.array(z.object({ assetId: z.string().optional(), assetName: z.string(), passed: z.boolean(), note: z.string().optional(), photoUri: z.string().optional() })).optional(),
   createdByUserId: z.number().int().optional(),
   createdByName: z.string().optional(),
   createdByRole: z.enum(["owner", "employee"]).optional(),
@@ -340,11 +358,43 @@ const loyaltyTransactionSchema = z.object({
   createdAt: z.string(),
 });
 
+const expenseAllocationSchema = z.object({ chaletId: identifierSchema, chaletName: z.string(), amount: moneySchema });
+const expenseSchema = z.object({
+  id: identifierSchema,
+  chaletId: identifierSchema.optional(),
+  chaletName: z.string().optional(),
+  amount: moneySchema,
+  date: dateSchema,
+  category: z.enum(["guards-salaries", "maintenance", "cleaning-supplies", "utilities", "other"]),
+  note: optionalText,
+  paymentMethod: z.enum(["cash", "click"]).optional(),
+  receiptUri: optionalText,
+  generalAllocations: z.array(expenseAllocationSchema).optional(),
+  createdAt: z.string(),
+  createdByName: z.string().optional(),
+}) satisfies z.ZodType<Expense>;
+
+const turnoverTaskSchema = z.object({
+  id: identifierSchema,
+  checkoutBookingId: identifierSchema,
+  nextBookingId: identifierSchema,
+  chaletId: z.string().optional(),
+  chaletName: z.string().optional(),
+  dueAt: z.string(),
+  status: z.enum(["pending", "in-progress", "completed"]),
+  createdAt: z.string(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  completedByName: z.string().optional(),
+}) satisfies z.ZodType<TurnoverTask>;
+
 const backupSchema = z.object({
   backupVersion: z.number().int().min(1).max(BACKUP_VERSION).optional(),
   exportedAt: z.string().optional(),
   bookings: z.array(bookingSchema),
   waitlist: z.array(waitlistSchema).optional(),
+  turnoverTasks: z.array(turnoverTaskSchema).optional(),
+  expenses: z.array(expenseSchema).optional(),
   chalets: z.array(chaletSchema).optional(),
   specialPriceRules: z.array(z.object({ id: z.string(), name: z.string(), startDate: dateSchema, endDate: dateSchema, price: moneySchema, kind: z.enum(["season", "occasion"]), createdAt: z.string() })).optional(),
   auditLog: z.array(z.object({ id: z.string(), action: z.enum(["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"]), subjectName: z.string(), details: z.string(), createdAt: z.string(), actorName: z.string().optional(), bookingId: z.string().optional() })).optional(),
@@ -430,6 +480,8 @@ export function parseBackupData(raw: string): AppData {
   return normalizeAppData({
     bookings: imported.bookings,
     waitlist: imported.waitlist ?? [],
+    turnoverTasks: imported.turnoverTasks as unknown as TurnoverTask[],
+    expenses: imported.expenses as unknown as Expense[],
     chalets: imported.chalets,
     auditLog: imported.auditLog ?? [],
     customers: imported.customers ?? [],

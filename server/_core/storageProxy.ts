@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { ENV } from "./env";
+import { sdk } from "./sdk";
+import { matchesSuperAdminIdentity } from "./identity";
 
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
@@ -11,6 +13,21 @@ export function registerStorageProxy(app: Express) {
 
     if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
       res.status(500).send("Storage proxy not configured");
+      return;
+    }
+
+    // Only authenticated sessions may resolve signed storage URLs. Super admin
+    // can read any key; regular users are scoped to their own profile uploads;
+    // non-profile keys (e.g. generated assets) require any authenticated user.
+    try {
+      const user = await sdk.authenticateRequest(req);
+      const isSuperAdmin = matchesSuperAdminIdentity(user, ENV.ownerOpenId);
+      if (!isSuperAdmin && key.startsWith("profiles/") && !key.startsWith(`profiles/${user.openId}/`)) {
+        res.status(403).send("Forbidden");
+        return;
+      }
+    } catch {
+      res.status(401).send("Unauthorized");
       return;
     }
 

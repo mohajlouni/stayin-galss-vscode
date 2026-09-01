@@ -31,7 +31,7 @@ describe("Booking detail compact layout", () => {
     expect(source).toContain("bookingOccupancyStatus(booking)");
     expect(source).toContain("تم استرداد التأمين");
     expect(source).toContain("التأمين بانتظار الاسترداد");
-    expect(source).toContain("const canRefundDeposit = depositRecorded > 0 && depositHeld > 0;");
+    expect(source).toContain("const canRefundDeposit = depositRecorded > 0 && depositHeld > 0 && depositCollected;");
     expect(source).toContain("depositRecorded <= 0");
     expect(source).toContain("تم استرداد التأمين بالكامل ولا يمكن إضافة دفعة أخرى.");
     expect(source).toContain("styles.periodIdentityGrid");

@@ -8,6 +8,7 @@ import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { ENV } from "./env";
+import { isTrustedOAuthRedirect } from "./security";
 import type {
   ExchangeTokenRequest,
   ExchangeTokenResponse,
@@ -41,8 +42,22 @@ class OAuthService {
     }
   }
 
+  /**
+   * Decode and validate the OAuth `state`. The platform protocol embeds the
+   * client redirectUri (base64); we confirm it points back at a trusted
+   * callback (our web origins or our deep-link scheme) before forwarding it
+   * to the identity exchange. Malformed or foreign values are rejected.
+   */
   private decodeState(state: string): string {
-    const redirectUri = atob(state);
+    let redirectUri: string;
+    try {
+      redirectUri = atob(state);
+    } catch {
+      throw new Error("Invalid OAuth state payload");
+    }
+    if (!isTrustedOAuthRedirect(redirectUri)) {
+      throw new Error("Untrusted OAuth state redirectUri");
+    }
     return redirectUri;
   }
 

@@ -52,6 +52,9 @@ describe("points math", () => {
     expect(redemptionForSubtotal(0, 5)).toEqual({ points: 0, amount: 0 });
     expect(redemptionForSubtotal(30, 0)).toEqual({ points: 0, amount: 0 });
     expect(redemptionForSubtotal(20, 2.5)).toEqual({ points: 20, amount: 2 });
+    // A remainder that cannot pay a full 0.10 cashback point must not be
+    // rounded up into an over-redemption (previously ceil() charged 0.60).
+    expect(redemptionForSubtotal(100, 0.55)).toEqual({ points: 5, amount: 0.5 });
   });
 });
 

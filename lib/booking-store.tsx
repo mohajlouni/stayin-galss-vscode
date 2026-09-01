@@ -125,6 +125,10 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const saveRemoteData = trpc.workspace.saveData.useMutation();
   const resetOperationsRemote = trpc.workspace.resetOperations.useMutation();
   const [data, setData] = useState<AppData>(EMPTY_DATA);
+  // Latest committed snapshot for conflict-free persistence. Handlers build
+  // `next` from the `data` closure of their render; merging those partial
+  // writes against this ref prevents unrelated writers from being clobbered.
+  const dataRef = useRef<AppData>(EMPTY_DATA);
   const [hydrated, setHydrated] = useState(false);
   const [remoteVersion, setRemoteVersion] = useState<number | null>(null);
   const [remoteReady, setRemoteReady] = useState(false);
@@ -150,7 +154,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       );
       setData((current) => {
         const merged = mergeWorkspaceAppData(remote, current).data;
-        if (JSON.stringify(merged) === JSON.stringify(current)) return current;
+        if (JSON.stringify(merged) === JSON.stringify(current)) {
+          dataRef.current = merged;
+          return current;
+        }
+        dataRef.current = merged;
         void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(merged));
         return merged;
       });
@@ -219,14 +227,29 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
 
   const persist = async (next: AppData) => {
     const normalized = expireElapsedRecords(normalizeAppData(next));
-    setData(normalized);
+    // Treat `next` as a partial writer: only adopt its top-level keys that
+    // actually changed, layering them over the latest committed snapshot. This
+    // keeps concurrent writers from losing each other's untouched sections.
+    const snapshot = dataRef.current ?? EMPTY_DATA;
+    const merged = expireElapsedRecords(
+      normalizeAppData(
+        (Object.keys(snapshot) as (keyof AppData)[]).reduce<AppData>((result, key) => {
+          const incoming = normalized[key];
+          const current = snapshot[key];
+          (result as Record<string, unknown>)[key] = JSON.stringify(incoming == null ? null : incoming) === JSON.stringify(current == null ? null : current) ? current : incoming;
+          return result;
+        }, {} as AppData),
+      ),
+    );
+    dataRef.current = merged;
+    setData(merged);
     await Promise.all([
-      AsyncStorage.setItem(scopedStorageKey, JSON.stringify(normalized)),
-      persistPaymentMethods(normalized.settings.paymentMethods),
+      AsyncStorage.setItem(scopedStorageKey, JSON.stringify(merged)),
+      persistPaymentMethods(merged.settings.paymentMethods),
     ]);
     if (canSyncWorkspace && remoteReady && remoteVersion !== null) {
       try {
-        const result = await saveRemoteData.mutateAsync({ payload: JSON.stringify(normalized), expectedVersion: remoteVersion });
+        const result = await saveRemoteData.mutateAsync({ payload: JSON.stringify(merged), expectedVersion: remoteVersion });
         setRemoteVersion(result.version);
         setSyncConflict(false);
         await recordSuccessfulSync();
@@ -238,7 +261,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     // failure this is silently ignored; the tRPC + device copy remain source of truth.
     if (supabaseReady && supabaseToken) {
       try {
-        await saveWorkspaceState(supabaseToken, JSON.stringify(normalized));
+        await saveWorkspaceState(supabaseToken, JSON.stringify(merged));
       } catch {
         // Snapshot write failed — not fatal. Next successful sync will retry.
       }
@@ -273,11 +296,15 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         const initialBase = activeWorkspaceId ? mergeWorkspaceAppData(normalized, deviceData).data : normalized;
         const initialData = Array.isArray(storedPaymentMethods) && storedPaymentMethods.length ? { ...initialBase, settings: { ...initialBase.settings, paymentMethods: normalizePaymentMethodOptions(storedPaymentMethods) } } : initialBase;
         setData(initialData);
+        dataRef.current = initialData;
         if (shouldImportLegacyDeviceData && activeWorkspaceId !== null) await AsyncStorage.setItem(LEGACY_MIGRATION_WORKSPACE_KEY, String(activeWorkspaceId));
         setLastSyncedAt(savedSyncTime && !Number.isNaN(new Date(savedSyncTime).getTime()) ? savedSyncTime : null);
         if (raw && JSON.stringify(normalized) !== raw) await AsyncStorage.setItem(scopedStorageKey, JSON.stringify(normalized));
       } catch {
-        if (mounted) setData(EMPTY_DATA);
+        if (mounted) {
+          setData(EMPTY_DATA);
+          dataRef.current = EMPTY_DATA;
+        }
       } finally {
         if (mounted) setHydrated(true);
       }
@@ -297,8 +324,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       try {
         if (remoteData.data.payload) {
           const normalized = expireElapsedRecords(parseStoredAppData(remoteData.data.payload));
-          const mergedWorkspaceData = mergeWorkspaceAppData(normalized, data).data;
-          setData((current) => JSON.stringify(current) === JSON.stringify(mergedWorkspaceData) ? current : mergedWorkspaceData);
+          const mergedWorkspaceData = mergeWorkspaceAppData(normalized, dataRef.current ?? data).data;
+          if (JSON.stringify(dataRef.current ?? data) !== JSON.stringify(mergedWorkspaceData)) {
+            dataRef.current = mergedWorkspaceData;
+            setData(mergedWorkspaceData);
+          }
           await AsyncStorage.setItem(scopedStorageKey, JSON.stringify(mergedWorkspaceData));
           if (JSON.stringify(mergedWorkspaceData) !== remoteData.data.payload) {
             const result = await saveRemoteData.mutateAsync({ payload: JSON.stringify(mergedWorkspaceData), expectedVersion: remoteData.data.version });
@@ -328,9 +358,10 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem(`${RESCUE_BACKUP_KEY}:${activeWorkspaceId}`, JSON.stringify(data));
       const result = await remoteData.refetch();
       const remoteSnapshot = result.data?.payload ? expireElapsedRecords(parseStoredAppData(result.data.payload)) : EMPTY_DATA;
-      const mergedWorkspaceData = mergeWorkspaceAppData(remoteSnapshot, data).data;
+      const mergedWorkspaceData = mergeWorkspaceAppData(remoteSnapshot, dataRef.current ?? data).data;
       const mergedPayload = JSON.stringify(mergedWorkspaceData);
       setData(mergedWorkspaceData);
+      dataRef.current = mergedWorkspaceData;
       await AsyncStorage.setItem(scopedStorageKey, mergedPayload);
       if (!result.data?.payload || mergedPayload !== result.data.payload) {
         const saved = await saveRemoteData.mutateAsync({ payload: mergedPayload, expectedVersion: result.data?.version ?? 0 });
@@ -356,6 +387,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const next = expireElapsedRecords(data);
       if (next === data) return;
       setData(next);
+      dataRef.current = next;
       void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
     }, 60_000);
     return () => clearInterval(interval);
@@ -374,6 +406,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     if (!extra.length) return;
     const next = { ...data, notifications: [...extra, ...(data.notifications ?? [])] };
     setData(next);
+    dataRef.current = next;
     void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
   }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, scopedStorageKey]);
 
@@ -385,9 +418,16 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     refreshWorkspaceData,
     resetOperationalRecords: async () => {
       const result = await resetOperationsRemote.mutateAsync({ confirmation: "RESET-OPERATIONS" });
+      if (!result.payload) {
+        // Remote wipe produced no payload to commit. Preserve a scoped rescue of
+        // the current records before wiping them locally, so the wipe is never a
+        // silent, unrecoverable data loss point.
+        await AsyncStorage.setItem(`${RESCUE_BACKUP_KEY}:${activeWorkspaceId}`, JSON.stringify(data));
+      }
       const next = result.payload ? expireElapsedRecords(parseStoredAppData(result.payload)) : { ...data, bookings: [], expenses: [] };
       await AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
       setData(next);
+      dataRef.current = next;
       setRemoteVersion(result.version);
       setSyncConflict(false);
       await recordSuccessfulSync();
@@ -433,7 +473,14 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!confirmation || !confirmation.inspectionPassed) throw new Error("checkout-inspection-required");
       const refundableDeposit = remainingRefundableDeposit(booking);
       const requestedRefund = confirmation?.depositRefund;
-      if (requestedRefund && (!isValidPaymentMethod(requestedRefund.paymentMethod) || !Number.isFinite(requestedRefund.amount) || requestedRefund.amount <= 0 || requestedRefund.amount - refundableDeposit > 0.005)) throw new Error("invalid-deposit-refund");
+      if (requestedRefund && requestedRefund.amount > 0) {
+        const depositCollected = Boolean(
+          (booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0)
+          || booking.depositPaymentRecordedAt,
+        );
+        if (!depositCollected) throw new Error("deposit-not-collected");
+        if (!isValidPaymentMethod(requestedRefund.paymentMethod) || !Number.isFinite(requestedRefund.amount) || requestedRefund.amount <= 0 || requestedRefund.amount - refundableDeposit > 0.005) throw new Error("invalid-deposit-refund");
+      }
       const checkedOutAt = new Date().toISOString();
       const actorName = auditActorName ?? "مستخدم التطبيق";
       const refund: DepositRefund | undefined = requestedRefund ? { id: `deposit-refund-checkout-${Date.now()}`, amount: requestedRefund.amount, date: checkedOutAt.slice(0, 10), recordedAt: checkedOutAt, note: requestedRefund.note?.trim() || "استرداد التأمين عند المغادرة", paymentMethod: requestedRefund.paymentMethod } : undefined;
@@ -549,6 +596,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     },
     deleteBooking: async (id) => { if (!can("cancel_delete_bookings")) throw new Error("delete-booking-forbidden"); const booking = data.bookings.find((item) => item.id === id); await persist({ ...data, bookings: data.bookings.filter((item) => item.id !== id), auditLog: booking ? [{ id: `audit-${Date.now()}`, action: "booking-deleted" as AuditAction, subjectName: booking.customerName, details: booking.chaletName ?? "", createdAt: new Date().toISOString(), actorName: auditActorName }, ...data.auditLog] : data.auditLog }); if (booking) setLastDeleted({ kind: "booking", record: booking, createdAt: Date.now() }); },
     addChalet: async (input) => {
+      if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
       const name = input.name.trim();
       const referenceCode = normalizeChaletReferenceCode(input.referenceCode);
       if (!name) throw new Error("chalet-name-required");
@@ -561,6 +609,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       return chalet;
     },
     updateChalet: async (chalet) => {
+      if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
       const name = chalet.name.trim();
       const referenceCode = normalizeChaletReferenceCode(chalet.referenceCode);
       if (!name) throw new Error("chalet-name-required");
@@ -573,6 +622,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (current?.imageUri && current.imageUri !== imageUri) await removeManagedChaletImage(current.imageUri);
     },
     deleteChalet: async (id) => {
+      if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
       const chalet = data.chalets.find((item) => item.id === id);
       if (!chalet) throw new Error("chalet-not-found");
       const linkedBookings = data.bookings.filter((booking) => booking.chaletId === id).length;
@@ -691,6 +741,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!booking) throw new Error("booking-not-found");
       const amount = Number(payment.amount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("invalid-rental-payment");
+      if (!isValidPaymentMethod(payment.paymentMethod)) throw new Error("invalid-rental-payment");
       const receiptUri = await persistPaymentReceipt(payment.receiptUri, bookingId, payment.id);
       const savedPayment: Payment = { ...payment, amount, recordedAt: payment.recordedAt ?? new Date().toISOString(), note: payment.note?.trim() || undefined, receiptUri, recordedByUserId: user?.id, recordedByName: user?.name ?? undefined };
       const language = data.settings.device?.language ?? "ar";
@@ -721,6 +772,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!can("refund_security_deposits")) throw new Error("refund-deposit-forbidden");
       const booking = data.bookings.find((item) => item.id === bookingId);
       if (!booking) throw new Error("booking-not-found");
+      const depositCollected = Boolean(
+        (booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0)
+        || booking.depositPaymentRecordedAt,
+      );
+      if (!depositCollected) throw new Error("deposit-not-collected");
       const refundable = Math.max(0, Number(booking.depositAmount || 0) - (booking.depositRefunds ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0)), 0));
       if (!Number.isFinite(refund.amount) || refund.amount <= 0 || refund.amount > refundable) throw new Error("invalid-deposit-refund");
       if (!isValidPaymentMethod(refund.paymentMethod)) throw new Error("invalid-deposit-refund-method");
@@ -728,8 +784,9 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       await persist({ ...data, bookings: data.bookings.map((item) => item.id === bookingId ? { ...item, depositRefunds: [...(item.depositRefunds ?? []), savedRefund] } : item) });
     },
     addWaitlist: async (entry) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); await persist({ ...data, waitlist: [...data.waitlist, entry] }); },
-    deleteWaitlist: async (id) => { const entry = data.waitlist.find((item) => item.id === id); if (!entry) throw new Error("waitlist-not-found"); const cancelledAt = new Date().toISOString(); await persist({ ...data, waitlist: data.waitlist.map((item) => item.id === id ? { ...item, status: "cancelled" as const, cancelledAt, cancellationReason: "manual" as const } : item), auditLog: [{ id: `audit-${Date.now()}`, action: "waitlist-cancelled" as AuditAction, subjectName: entry.customerName, details: `${entry.chaletName ?? ""} · أُلغي يدويًا`, createdAt: cancelledAt }, ...data.auditLog] }); },
+    deleteWaitlist: async (id) => { if (!can("cancel_delete_bookings")) throw new Error("waitlist-delete-forbidden"); const entry = data.waitlist.find((item) => item.id === id); if (!entry) throw new Error("waitlist-not-found"); const cancelledAt = new Date().toISOString(); await persist({ ...data, waitlist: data.waitlist.map((item) => item.id === id ? { ...item, status: "cancelled" as const, cancelledAt, cancellationReason: "manual" as const } : item), auditLog: [{ id: `audit-${Date.now()}`, action: "waitlist-cancelled" as AuditAction, subjectName: entry.customerName, details: `${entry.chaletName ?? ""} · أُلغي يدويًا`, createdAt: cancelledAt, actorName: auditActorName ?? "مستخدم التطبيق" }, ...data.auditLog] }); },
     promoteWaitlist: async (id, booking, conflictIds = []) => {
+      if (!can("create_bookings")) throw new Error("create-booking-forbidden");
       const entry = data.waitlist.find((item) => item.id === id);
       if (!entry) throw new Error("waitlist-not-found");
       if (entry.status === "promoted") throw new Error("waitlist-already-promoted");
@@ -750,15 +807,20 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const replacementAudits = replacedBookings.map((item, index) => ({ id: `audit-waitlist-replacement-${Date.now()}-${index}`, action: "booking-cancelled" as AuditAction, subjectName: item.customerName, details: `${item.chaletName ?? ""} · استُبدل بحجز العميل: ${entry.customerName} · الحجز الناتج: ${bookingReference} · نفّذ التحويل: ${actorName}`, createdAt: promotedAt }));
       const customerUpsert = upsertCustomerFromBooking(data.customers ?? [], savedBooking);
       const promotedNotification = buildInAppNotification({ type: "new_booking", recipients: ["owner", "manager"], dataPayload: { bookingId: savedBooking.id }, ...buildNewBookingNotification(savedBooking, data.settings.device?.language ?? "ar", data.settings.businessName) });
-      await persist({ ...data, bookings: [savedBooking, ...data.bookings.map((item) => conflictIds.includes(item.id) ? { ...item, status: "cancelled" as const, updatedByUserId: user?.id, updatedByName: actorName } : item)], waitlist: data.waitlist.map((item) => item.id === id ? { ...item, status: "promoted" as const, promotedAt, promotedByUserId: user?.id, promotedByName: actorName, promotedBookingId: savedBooking.id, promotedBookingReference: bookingReference, promotedReplacedCustomerNames: replacementNames || undefined } : item), customers: customerUpsert.customers, notifications: [promotedNotification, ...(data.notifications ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "waitlist-promoted" as AuditAction, subjectName: entry.customerName, details: promotionDetails, createdAt: promotedAt }, ...replacementAudits, ...data.auditLog] });
+      await persist({ ...data, bookings: [savedBooking, ...data.bookings.map((item) => conflictIds.includes(item.id) ? { ...item, status: "cancelled" as const, updatedByUserId: user?.id, updatedByName: actorName } : item)], waitlist: data.waitlist.map((item) => item.id === id ? { ...item, status: "promoted" as const, promotedAt, promotedByUserId: user?.id, promotedByName: actorName, promotedBookingId: savedBooking.id, promotedBookingReference: bookingReference, promotedReplacedCustomerNames: replacementNames || undefined } : item), customers: customerUpsert.customers, notifications: [promotedNotification, ...(data.notifications ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "waitlist-promoted" as AuditAction, subjectName: entry.customerName, details: promotionDetails, createdAt: promotedAt, actorName }, ...replacementAudits, ...data.auditLog] });
     },
     replaceConflictsAndSave: async (conflictIds, booking) => {
+      if (!can("create_bookings")) throw new Error("create-booking-forbidden");
       const exists = data.bookings.some((item) => item.id === booking.id);
+      const replacedBookings = data.bookings.filter((item) => conflictIds.includes(item.id) && item.id !== booking.id);
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const cancelledAt = new Date().toISOString();
+      const replacementAudits = replacedBookings.map((item, index) => ({ id: `audit-waitlist-replacement-${Date.now()}-${index}`, action: "booking-cancelled" as AuditAction, subjectName: item.customerName, details: `${item.chaletName ?? ""} · استُبدل بحجز العميل: ${booking.customerName}`, createdAt: cancelledAt, actorName }));
       const nextBookings = data.bookings.map((item) => {
         if (item.id === booking.id) return booking;
-        return conflictIds.includes(item.id) ? { ...item, status: "cancelled" as const } : item;
+        return conflictIds.includes(item.id) ? { ...item, status: "cancelled" as const, updatedByUserId: user?.id, updatedByName: actorName } : item;
       });
-      await persist({ ...data, bookings: exists ? nextBookings : [booking, ...nextBookings] });
+      await persist({ ...data, bookings: exists ? nextBookings : [booking, ...nextBookings], auditLog: [...replacementAudits, ...data.auditLog] });
     },
     exportBackup: async () => {
       const uri = `${FileSystem.documentDirectory}booking-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -787,14 +849,16 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const { fileName: _fileName, fileSize: _fileSize, ...next } = pendingBackupImport;
       const rescuePayload = serializeBackup(data);
       if (Platform.OS !== "web" && FileSystem.documentDirectory) {
-        const rescueUri = `${FileSystem.documentDirectory}booking-rescue-before-import-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+        const rescueUri = `${FileSystem.documentDirectory}booking-rescue-before-import-${activeWorkspaceId ?? "local"}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
         await FileSystem.writeAsStringAsync(rescueUri, rescuePayload, { encoding: FileSystem.EncodingType.UTF8 });
       } else {
-        await AsyncStorage.setItem(RESCUE_BACKUP_KEY, rescuePayload);
+        await AsyncStorage.setItem(`${RESCUE_BACKUP_KEY}:${activeWorkspaceId}`, rescuePayload);
       }
       const normalized = expireElapsedRecords(normalizeAppData(next));
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-      setData(normalized);
+      // persist() commits locally and pushes the snapshot through the same
+      // tRPC + Supabase mirror path as every other write, so a restored backup
+      // is immediately reflected on other operational devices.
+      await persist(normalized);
       setPendingBackupImport(null);
       return { rescueBackupCreated: true };
     },
@@ -808,7 +872,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       return true;
     },
     clearLastDeleted: () => setLastDeleted(null),
-  }), [data, hydrated, lastDeleted, lastSyncedAt, pendingBackupImport, resetOperationsRemote, scopedStorageKey]);
+  }), [data, hydrated, lastDeleted, lastSyncedAt, pendingBackupImport, remoteVersion, remoteReady, resetOperationsRemote, scopedStorageKey]);
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>;
 }

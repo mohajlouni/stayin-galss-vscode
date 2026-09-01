@@ -621,7 +621,9 @@ export async function listWorkspaceCollectionRecipients(workspaceId: number) {
 export async function listWorkspaceInvitations(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
-  return database.select().from(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, workspaceId)).orderBy(desc(workspaceInvitations.createdAt));
+  // Never return the PIN hash to clients; it is only needed server-side to
+  // verify acceptance and would otherwise be trivially cracked offline.
+  return database.select({ id: workspaceInvitations.id, workspaceId: workspaceInvitations.workspaceId, employeeName: workspaceInvitations.employeeName, phone: workspaceInvitations.phone, createdByUserId: workspaceInvitations.createdByUserId, role: workspaceInvitations.role, permissions: workspaceInvitations.permissions, expiresAt: workspaceInvitations.expiresAt, usedAt: workspaceInvitations.usedAt, revokedAt: workspaceInvitations.revokedAt, createdAt: workspaceInvitations.createdAt }).from(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, workspaceId)).orderBy(desc(workspaceInvitations.createdAt));
 }
 
 export async function createWorkspaceInvitation(input: { workspaceId: number; employeeName: string; phone: string; pin: string; createdByUserId: number; role?: Exclude<WorkspaceRole, "owner">; permissions: WorkspacePermissions; expiresAt: Date }) {
@@ -633,10 +635,12 @@ export async function createWorkspaceInvitation(input: { workspaceId: number; em
   return Number(result[0].insertId);
 }
 
-export async function revokeWorkspaceInvitation(invitationId: number, actorUserId: number) {
+export async function revokeWorkspaceInvitation(workspaceId: number, invitationId: number, actorUserId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
-  const invitation = (await database.select().from(workspaceInvitations).where(eq(workspaceInvitations.id, invitationId)).limit(1))[0];
+  // Scope by both id and workspaceId to prevent cross-workspace revocation
+  // (IDOR) when a manager supplies another workspace's invitation id.
+  const invitation = (await database.select().from(workspaceInvitations).where(and(eq(workspaceInvitations.id, invitationId), eq(workspaceInvitations.workspaceId, workspaceId))).limit(1))[0];
   if (!invitation) throw new Error("Invitation not found");
   await database.update(workspaceInvitations).set({ revokedAt: new Date() }).where(eq(workspaceInvitations.id, invitationId));
   await database.insert(workspaceActivity).values({ workspaceId: invitation.workspaceId, actorUserId, action: "invitation-revoked", subject: invitation.employeeName, details: invitation.phone });

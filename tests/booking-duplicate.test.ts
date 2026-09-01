@@ -10,7 +10,7 @@ describe("duplicate booking flow", () => {
     expect(form).toContain("copyFromId");
     expect(form).toContain("cloneSource?.customerName");
     expect(form).toContain("cloneSource?.chaletId");
-    expect(form).toContain("payments: existing?.payments ?? pendingInitialPayment");
+    expect(form).toContain("payments: existing?.payments ?? sourceWaitlist?.payments ?? pendingInitialPayment");
   });
 
   it("offers the flow from booking details only to users who can create bookings", () => {

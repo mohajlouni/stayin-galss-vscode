@@ -178,7 +178,11 @@ export default function BookingDetail() {
   const depositRecorded = refundableDepositAmount(booking);
   const depositRefunded = totalDepositRefunded(booking);
   const depositHeld = remainingRefundableDeposit(booking);
-  const canRefundDeposit = depositRecorded > 0 && depositHeld > 0;
+  const depositCollected = Boolean(
+    (booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0)
+    || booking.depositPaymentRecordedAt,
+  );
+  const canRefundDeposit = depositRecorded > 0 && depositHeld > 0 && depositCollected;
   const rentalBalance = remainingAmount(booking);
   const rentalFullyPaid = rentalBalance <= 0;
   const manualCheckInEnabled = deviceSettings.showGuestCheckIn;
@@ -217,7 +221,7 @@ export default function BookingDetail() {
   const depositSummary = depositState === "fully-refunded"
     ? { title: language === "ar" ? "تم استرداد التأمين" : "Deposit refunded", state: language === "ar" ? "مسترد" : "Refunded", value: formatMoney(depositRefunded, settings.currency), color: colors.success, detail: language === "ar" ? "تم استرداد التأمين بالكامل ولا يمكن إضافة دفعة أخرى." : "The deposit was fully refunded and cannot receive another refund payment." }
     : depositState === "held"
-      ? { title: language === "ar" ? "التأمين بانتظار الاسترداد" : "Deposit awaiting refund", state: depositRefunded > 0 ? (language === "ar" ? "استرداد جزئي" : "Partially refunded") : (language === "ar" ? "مستلم" : "Received"), value: formatMoney(depositHeld, settings.currency), color: colors.success, detail: language === "ar" ? `المتبقي للاسترداد: ${formatMoney(depositHeld, settings.currency)} من ${formatMoney(depositRecorded, settings.currency)}` : `Remaining to refund: ${formatMoney(depositHeld, settings.currency)} of ${formatMoney(depositRecorded, settings.currency)}` }
+      ? { title: language === "ar" ? "التأمين بانتظار الاسترداد" : "Deposit awaiting refund", state: depositRefunded > 0 ? (language === "ar" ? "استرداد جزئي" : "Partially refunded") : depositCollected ? (language === "ar" ? "مستلم" : "Received") : (language === "ar" ? "غير مستلم" : "Not collected"), value: formatMoney(depositHeld, settings.currency), color: depositCollected ? colors.success : colors.warning, detail: language === "ar" ? `المتبقي للاسترداد: ${formatMoney(depositHeld, settings.currency)} من ${formatMoney(depositRecorded, settings.currency)}` : `Remaining to refund: ${formatMoney(depositHeld, settings.currency)} of ${formatMoney(depositRecorded, settings.currency)}` }
       : { title: language === "ar" ? "لا يوجد تأمين" : "No deposit", state: language === "ar" ? "غير مسجل" : "Not recorded", value: formatMoney(0, settings.currency), color: colors.muted, detail: language === "ar" ? "لا يمكن إضافة استرداد لهذا الحجز." : "No refund can be added for this booking." };
   const initialRentalPayment = booking.payments.find((payment) => !payment.voidedAt && /الدفعة الأولى|initial rental/i.test(payment.note ?? ""));
   const initialRentalPaymentMethodLabel = initialRentalPayment?.paymentMethod ? paymentMethodLabel(initialRentalPayment.paymentMethod, language) : undefined;
@@ -357,7 +361,7 @@ export default function BookingDetail() {
     const value = Number(refundAmount);
     const available = remainingRefundableDeposit(booking);
     if (!canRefundDeposit) {
-      Alert.alert(language === "ar" ? "استرداد غير متاح" : "Refund unavailable", language === "ar" ? (depositRecorded <= 0 ? "لا يوجد تأمين مسجل لهذا الحجز." : "تم استرداد التأمين بالكامل ولا يمكن إضافة دفعة أخرى.") : (depositRecorded <= 0 ? "No deposit is recorded for this booking." : "The deposit was fully refunded and cannot receive another refund payment."));
+      Alert.alert(language === "ar" ? "استرداد غير متاح" : "Refund unavailable", language === "ar" ? (depositRecorded <= 0 ? "لا يوجد تأمين مسجل لهذا الحجز." : depositHeld <= 0 ? "تم استرداد التأمين بالكامل ولا يمكن إضافة دفعة أخرى." : "لم يُستلم التأمين من الضيف فعليًا، لذا لا يمكن استرداده.") : (depositRecorded <= 0 ? "No deposit is recorded for this booking." : depositHeld <= 0 ? "The deposit was fully refunded and cannot receive another refund payment." : "The deposit was never actually collected, so it cannot be refunded."));
       return;
     }
     if (!refundPaymentMethod) {

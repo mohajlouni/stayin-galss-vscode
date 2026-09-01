@@ -18,6 +18,8 @@ const booking = (overrides: Partial<Booking> = {}): Booking => ({
   price: 150,
   depositAmount: 70,
   depositPaymentMethod: "cash-guardian",
+  // Deposit actually received at check-in (legacy path without a structured depositCollection).
+  depositPaymentRecordedAt: "2026-08-26T09:30:00.000Z",
   payments: [{ id: "initial", amount: 40, date: "2026-08-26", paymentMethod: "cash-owner", note: "الدفعة الأولى من الإيجار" }],
   notes: "",
   status: "confirmed",
@@ -31,6 +33,12 @@ describe("طرق دفع الحجز والتأمين", () => {
     expect(summary.paymentMethods["cash-owner"]).toBe(40);
     expect(summary.depositCollectionMethods["cash-guardian"]).toBe(70);
     expect(summary.depositCollectionMethods["cash-owner"]).toBe(0);
+  });
+
+  it("does not count a deposit method until the deposit is actually received", () => {
+    const uncollected = booking({ depositCollection: undefined, depositPaymentRecordedAt: undefined });
+    const summary = summarizeFinancialReport([uncollected], [], []);
+    expect(summary.depositCollectionMethods["cash-guardian"]).toBe(0);
   });
 
   it("يوجه إضافة الوحدة لإدارة الوحدات ويتحقق من اختيار طريقتي الدفع", () => {

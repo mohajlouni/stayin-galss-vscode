@@ -35,10 +35,10 @@ export type FinancialReportSummary = {
 export type CollectionSettlement = { key: string; recipientType: PaymentRecipientType; handlerUserId?: number; handlerName: string; fundsHeld: number; commission: number; netDueToOwner: number };
 
 function collectionPaymentEvents(bookings: Booking[]): Payment[] {
-  return bookings.flatMap((booking) => [
-    ...booking.payments.filter((payment) => !payment.voidedAt),
-    ...(booking.depositCollection && !booking.depositCollection.voidedAt ? [booking.depositCollection] : booking.depositAmount && booking.depositPaymentMethod ? [{ id: `legacy-deposit-${booking.id}`, amount: booking.depositAmount, date: booking.depositPaymentRecordedAt?.slice(0, 10) ?? booking.createdAt.slice(0, 10), paymentMethod: booking.depositPaymentMethod, recipientType: booking.depositPaymentMethod === "cash-guardian" ? "guard" as const : "owner" as const, handlerName: booking.depositPaymentMethod === "cash-guardian" ? "الحارس" : "حساب المالك الرئيسي" }] : []),
-  ]);
+  // Rental payments only. Refundable security deposits are held for the guest
+  // and returned on checkout, so they must never inflate funds held by the
+  // owner (netDueToOwner) — excluding them also removes refunded deposits.
+  return bookings.flatMap((booking) => booking.payments.filter((payment) => !payment.voidedAt));
 }
 
 function summarizeCollectionSettlements(bookings: Booking[]): CollectionSettlement[] {
@@ -76,7 +76,14 @@ export function summarizeFinancialReport(bookings: Booking[], chalets: Chalet[],
     return summary;
   }, { "cash-guardian": 0, "cash-owner": 0, click: 0 });
   const depositCollectionMethods = REPORT_PAYMENT_METHODS.reduce<Record<ReportPaymentMethod, number>>((summary, method) => {
-    summary[method] = bookings.reduce((sum, booking) => sum + (booking.depositPaymentMethod === method ? Math.max(0, Number(booking.depositAmount || 0)) : 0), 0);
+    summary[method] = bookings.reduce((sum, booking) => {
+      const liveCollection = booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0 ? booking.depositCollection : undefined;
+      if (liveCollection?.paymentMethod === method) return sum + Math.max(0, Number(liveCollection.amount || 0));
+      // Legacy check-in collection: recorded at check-in but before structured
+      // depositCollection tracking existed. Only counts when actually received.
+      if (!liveCollection && booking.depositPaymentRecordedAt && booking.depositPaymentMethod === method) return sum + Math.max(0, Number(booking.depositAmount || 0));
+      return sum;
+    }, 0);
     return summary;
   }, { "cash-guardian": 0, "cash-owner": 0, click: 0 });
   const totalExpenses = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount || 0)), 0);

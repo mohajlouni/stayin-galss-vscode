@@ -4,6 +4,7 @@ import { ensureLocalDevAccess, getDb, getUserByOpenId, upsertUser } from "../db"
 import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { isSuperAdminPhone, SUPER_ADMIN_EMAIL } from "./identity";
+import { isAllowedWebOrigin } from "./security";
 import { sdk, sessionTokenFromRequest } from "./sdk";
 
 function getQueryParam(req: Request, key: string): string | undefined {
@@ -147,6 +148,22 @@ export function registerOAuthRoutes(app: Express) {
   });
 
   app.post("/api/auth/logout", async (req: Request, res: Response) => {
+    // CSRF guard: cookie-clearing endpoint must only be triggered from the
+    // same host (origin header, when present, must match the request host).
+    // Bearer-token (mobile) calls carry no Origin header and are unaffected.
+    const origin = req.headers.origin;
+    const host = req.headers.host ?? "";
+    if (typeof origin === "string" && origin.trim() !== "" && origin.trim() !== "null") {
+      try {
+        if (new URL(origin).host !== host) {
+          res.status(403).json({ error: "Cross-origin logout blocked" });
+          return;
+        }
+      } catch {
+        res.status(403).json({ error: "Invalid origin" });
+        return;
+      }
+    }
     const token = sessionTokenFromRequest(req);
     await sdk.revokeSessionToken(token);
     const cookieOptions = getSessionCookieOptions(req);
@@ -266,7 +283,9 @@ export function registerOAuthRoutes(app: Express) {
       if (referer) {
         try {
           const origin = new URL(referer).origin;
-          if (origin.startsWith("http://") || origin.startsWith("https://")) frontendUrl = origin;
+          // Only allow redirects back to a web origin trusted by the CORS
+          // allowlist (localhost / .manuspre.computer / explicit env origins).
+          if (isAllowedWebOrigin(origin)) frontendUrl = origin;
         } catch {
           frontendUrl = "http://localhost:8081";
         }

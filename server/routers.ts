@@ -134,7 +134,13 @@ export const appRouter = router({
     collectionRecipients: protectedProcedure.query(async ({ ctx }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.member) throw new TRPCError({ code: "FORBIDDEN", message: "Workspace membership required" });
-      return db.listWorkspaceCollectionRecipients(summary.member.workspaceId);
+      const recipients = await db.listWorkspaceCollectionRecipients(summary.member.workspaceId);
+      // Guests are field supervisors: they do not need members' financial
+      // routing details (CliQ aliases / bank accounts).
+      if (summary.member.role === "guest") {
+        return recipients.map((recipient) => ({ ...recipient, cliqAlias: null, bankDetails: null }));
+      }
+      return recipients;
     }),
     inviteEmployee: protectedProcedure.input(z.object({ employeeName: z.string().trim().min(2).max(255), phone: z.string().trim().min(6).max(32), role: workspaceInviteRoleSchema.default("staff"), permissions: workspacePermissionsSchema })).mutation(async ({ ctx, input }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
@@ -175,7 +181,7 @@ export const appRouter = router({
     revokeInvitation: protectedProcedure.input(z.object({ invitationId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
-      await db.revokeWorkspaceInvitation(input.invitationId, ctx.user.id);
+      await db.revokeWorkspaceInvitation(summary.member.workspaceId, input.invitationId, ctx.user.id);
       return { success: true };
     }),
     acceptInvitation: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32), pin: z.string().regex(/^\d{6}$/, "PIN must contain 6 digits") })).mutation(async ({ ctx, input }) => {

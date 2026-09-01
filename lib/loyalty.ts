@@ -42,12 +42,12 @@ export function pointsValueJod(points: number, config: LoyaltyProgramConfig = DE
   return Math.round(Math.max(0, Math.floor(points) * config.jodPerPoint) * 100) / 100;
 }
 
-/** Largest redeemable point block that fully covers the given subtotal. */
+/** Largest redeemable point block whose cash value does not exceed the subtotal. */
 export function redemptionForSubtotal(pointsBalance: number, subtotal: number, config: LoyaltyProgramConfig = DEFAULT_LOYALTY_PROGRAM_CONFIG) {
   const balance = Math.max(0, Math.floor(pointsBalance || 0));
   const remaining = Math.max(0, Number(subtotal || 0));
   if (balance <= 0 || remaining <= 0) return { points: 0, amount: 0 };
-  const affordable = Math.min(balance, Math.ceil(remaining / Math.max(0.001, config.jodPerPoint)));
+  const affordable = Math.min(balance, Math.floor(remaining / Math.max(0.001, config.jodPerPoint)));
   const amount = pointsValueJod(affordable, config);
   return { points: affordable, amount: Math.min(amount, remaining) };
 }

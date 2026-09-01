@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   int,
   longtext,
   mysqlEnum,
@@ -37,7 +38,10 @@ export const stayInAccountDeletionRequests = mysqlTable("stayInAccountDeletionRe
   requestedAt: timestamp("requestedAt").notNull(),
   scheduledFor: timestamp("scheduledFor").notNull(),
   confirmedAt: timestamp("confirmedAt").notNull(),
-});
+}, (table) => ({
+  statusIdx: index("stayInAccountDeletionRequests_status_idx").on(table.status),
+  scheduledIdx: index("stayInAccountDeletionRequests_scheduledFor_idx").on(table.scheduledFor),
+}));
 
 export const stayInSuggestions = mysqlTable("stayInSuggestions", {
   id: int("id").autoincrement().primaryKey(),
@@ -45,7 +49,10 @@ export const stayInSuggestions = mysqlTable("stayInSuggestions", {
   language: mysqlEnum("language", ["ar", "en"]).notNull(),
   status: mysqlEnum("status", ["new"]).notNull().default("new"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  languageIdx: index("stayInSuggestions_language_idx").on(table.language),
+  statusIdx: index("stayInSuggestions_status_idx").on(table.status),
+}));
 
 export const stayInWorkspaces = mysqlTable("stayInWorkspaces", {
   id: int("id").autoincrement().primaryKey(),
@@ -64,7 +71,9 @@ export const stayInWorkspaces = mysqlTable("stayInWorkspaces", {
   timeZone: varchar("timeZone", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  ownerIdx: index("stayInWorkspaces_ownerUserId_idx").on(table.ownerUserId),
+}));
 
 export const stayInWorkspaceMembers = mysqlTable("stayInWorkspaceMembers", {
   id: int("id").autoincrement().primaryKey(),
@@ -82,7 +91,10 @@ export const stayInWorkspaceMembers = mysqlTable("stayInWorkspaceMembers", {
   allowDirectCollection: boolean("allowDirectCollection").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  workspaceIdx: index("stayInWorkspaceMembers_workspaceId_idx").on(table.workspaceId),
+  userIdx: index("stayInWorkspaceMembers_userId_idx").on(table.userId),
+}));
 
 export const stayInWorkspaceInvitations = mysqlTable("stayInWorkspaceInvitations", {
   id: int("id").autoincrement().primaryKey(),
@@ -97,12 +109,17 @@ export const stayInWorkspaceInvitations = mysqlTable("stayInWorkspaceInvitations
   usedAt: timestamp("usedAt"),
   revokedAt: timestamp("revokedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  workspaceIdx: index("stayInWorkspaceInvitations_workspaceId_idx").on(table.workspaceId),
+  createdByIdx: index("stayInWorkspaceInvitations_createdByUserId_idx").on(table.createdByUserId),
+}));
 
 export const stayInActiveWorkspaces = mysqlTable("stayInActiveWorkspaces", {
   userId: int("userId").primaryKey(),
   workspaceId: int("workspaceId").notNull(),
-});
+}, (table) => ({
+  workspaceIdx: index("stayInActiveWorkspaces_workspaceId_idx").on(table.workspaceId),
+}));
 
 export const stayInWorkspaceData = mysqlTable("stayInWorkspaceData", {
   workspaceId: int("workspaceId").primaryKey(),
@@ -110,7 +127,9 @@ export const stayInWorkspaceData = mysqlTable("stayInWorkspaceData", {
   version: int("version").notNull().default(0),
   updatedByUserId: int("updatedByUserId"),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  updatedByIdx: index("stayInWorkspaceData_updatedByUserId_idx").on(table.updatedByUserId),
+}));
 
 export const stayInWorkspaceDataBackups = mysqlTable("stayInWorkspaceDataBackups", {
   id: int("id").autoincrement().primaryKey(),
@@ -120,7 +139,10 @@ export const stayInWorkspaceDataBackups = mysqlTable("stayInWorkspaceDataBackups
   createdByUserId: int("createdByUserId"),
   reason: varchar("reason", { length: 80 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  workspaceIdx: index("stayInWorkspaceDataBackups_workspaceId_idx").on(table.workspaceId),
+  createdByIdx: index("stayInWorkspaceDataBackups_createdByUserId_idx").on(table.createdByUserId),
+}));
 
 export const stayInWorkspaceActivity = mysqlTable("stayInWorkspaceActivity", {
   id: int("id").autoincrement().primaryKey(),
@@ -130,7 +152,11 @@ export const stayInWorkspaceActivity = mysqlTable("stayInWorkspaceActivity", {
   subject: varchar("subject", { length: 255 }).notNull(),
   details: text("details"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  workspaceIdx: index("stayInWorkspaceActivity_workspaceId_idx").on(table.workspaceId),
+  actionIdx: index("stayInWorkspaceActivity_action_idx").on(table.action),
+  createdByIdx: index("stayInWorkspaceActivity_actorUserId_idx").on(table.actorUserId),
+}));
 
 export const stayInWorkspaceOwnerPins = mysqlTable("stayInWorkspaceOwnerPins", {
   workspaceId: int("workspaceId").primaryKey(),
@@ -138,7 +164,9 @@ export const stayInWorkspaceOwnerPins = mysqlTable("stayInWorkspaceOwnerPins", {
   pinHash: varchar("pinHash", { length: 255 }).notNull(),
   updatedByUserId: int("updatedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  updatedByIdx: index("stayInWorkspaceOwnerPins_updatedByUserId_idx").on(table.updatedByUserId),
+}));
 
 export const stayInSessions = mysqlTable("stayInSessions", {
   jti: varchar("jti", { length: 191 }).primaryKey(),
@@ -147,7 +175,10 @@ export const stayInSessions = mysqlTable("stayInSessions", {
   expiresAt: timestamp("expiresAt").notNull(),
   revokedAt: timestamp("revokedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  openIdIdx: index("stayInSessions_openId_idx").on(table.openId),
+  expiresIdx: index("stayInSessions_expiresAt_idx").on(table.expiresAt),
+}));
 
 export const stayInSuperAdminAudit = mysqlTable("stayInSuperAdminAudit", {
   id: int("id").autoincrement().primaryKey(),
@@ -157,7 +188,10 @@ export const stayInSuperAdminAudit = mysqlTable("stayInSuperAdminAudit", {
   targetMemberId: int("targetMemberId"),
   details: text("details"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  actorIdx: index("stayInSuperAdminAudit_actorUserId_idx").on(table.actorUserId),
+  workspaceIdx: index("stayInSuperAdminAudit_targetWorkspaceId_idx").on(table.targetWorkspaceId),
+}));
 
 export const users = stayInUsers;
 export const accountDeletionRequests = stayInAccountDeletionRequests;

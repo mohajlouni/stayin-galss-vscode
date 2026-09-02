@@ -162,13 +162,3 @@ export async function openJordanianWhatsApp(input: { phone: string | null | unde
     usedFallback: openedUrl.startsWith("https://") ? (true as const) : (false as const),
   };
 }
-
-export function buildBookingConfirmationMessage(input: { guestName: string; chaletName: string; date: string; amount: string }) {
-  return [
-    `مرحبًا ${input.guestName}،`,
-    `تم تأكيد حجزك في ${input.chaletName}.`,
-    `تاريخ الحجز: ${input.date}`,
-    `إجمالي المبلغ: ${input.amount}`,
-    "نتطلع لاستضافتكم. لمزيد من التفاصيل يمكنكم التواصل معنا.",
-  ].join("\n");
-}

@@ -25,7 +25,7 @@ import { useChaletScope } from "@/lib/chalet-scope";
 import { useI18n } from "@/lib/i18n";
 import { isWaitlistPriorityDue, waitlistPriorityCandidates } from "@/lib/waitlist-priority";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
-import { buildBookingConfirmationMessage, openWhatsAppChat } from "@/lib/whatsapp";
+import { openBookingWhatsApp } from "@/lib/whatsapp-helper";
 
 type TimeFilter = "all" | "today" | "two-days" | "tomorrow" | "week" | "month" | "upcoming";
 type StatusFilter = "all" | "confirmed" | "cancelled" | "completed";
@@ -273,13 +273,11 @@ const clearAppliedFilters = () => {
     }
   };
   const sendCheckInWhatsApp = async (booking: Booking) => {
-    const message = buildBookingConfirmationMessage({
-      guestName: booking.customerName,
-      chaletName: booking.chaletName || (language === "ar" ? "الشاليه" : "the chalet"),
-      date: formatDate(booking.startDate),
-      amount: booking.price.toLocaleString(language === "ar" ? "ar-JO" : "en-US"),
-    });
-    await openWhatsAppChat(booking.phone, message);
+    try {
+      await openBookingWhatsApp(booking, settings, language, chalets.find((chalet) => chalet.id === booking.chaletId));
+    } catch {
+      Alert.alert(language === "ar" ? "تعذر فتح واتساب" : "WhatsApp unavailable", language === "ar" ? "تحقق من تفعيل المشاركة ورقم الضيف وتثبيت واتساب." : "Check sharing settings, the guest number, and that WhatsApp is installed.");
+    }
   };
   const operationalFailureMessage = (error: unknown, action: "check-in" | "check-out" | "no-show") => {
     const code = error instanceof Error ? error.message : "";

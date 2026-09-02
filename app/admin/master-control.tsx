@@ -12,7 +12,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 
-const ROLES = ["super-admin", "owner", "admin", "staff", "guest"] as const;
+const ROLES = ["super-admin", "owner", "admin", "staff", "caretaker", "guest"] as const;
 const TABS = ["ledger", "members", "system"] as const;
 type SimulationRole = (typeof ROLES)[number];
 type Tab = (typeof TABS)[number];
@@ -69,7 +69,7 @@ function AuditTrail({ audit, colors }: { audit: Array<{ id: number; action: stri
 function Section({ title, colors, children }: { title: string; colors: ReturnType<typeof useColors>; children: React.ReactNode }) { return <View style={styles.section}><Text style={[styles.sectionTitle, { color: colors.foreground }]}>{title}</Text><GlowGlassCard style={styles.sectionBody} contentStyle={styles.sectionBodyContent}>{children}</GlowGlassCard></View>; }
 function Metric({ label, value, color }: { label: string; value: string; color: string }) { return <View style={[styles.metric, { borderColor: color + "66", backgroundColor: color + "10" }]}><Text style={[styles.metricValue, { color }]}>{value}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
 function ActionButton({ label, icon, color, disabled, onPress }: { label: string; icon: React.ComponentProps<typeof MaterialIcons>["name"]; color: string; disabled: boolean; onPress: () => void }) { return <Pressable disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.actionButton, { borderColor: color + "88", backgroundColor: color + "10", opacity: pressed || disabled ? 0.5 : 1 }]}><MaterialIcons name={icon} size={20} color={color} /><Text style={[styles.actionText, { color }]}>{label}</Text><MaterialIcons name="chevron-left" size={20} color={color} /></Pressable>; }
-function roleLabel(role: SimulationRole | "owner" | "admin" | "staff" | "guest") { return role === "super-admin" ? "مدير النظام" : role === "owner" ? "مالك المنشأة" : role === "admin" ? "مدير المنشأة" : role === "staff" ? "موظف متعدد المنشآت" : "ضيف"; }
+function roleLabel(role: SimulationRole | "owner" | "admin" | "staff" | "caretaker" | "guest") { return role === "super-admin" ? "مدير النظام" : role === "owner" ? "مالك المنشأة" : role === "admin" ? "مدير المنشأة" : role === "staff" ? "موظف حجوزات" : role === "caretaker" ? "حارس / مشرف ميداني" : "ضيف"; }
 function tabLabel(tab: Tab) { return tab === "ledger" ? "الحجوزات والمالية" : tab === "members" ? "العضويات والمحاكاة" : "النظام والمزامنة"; }
 function auditLabel(action: string) { const labels: Record<string, string> = { "role-simulation": "محاكاة دور", "membership-updated": "تحديث عضوية", "recovery-point-created": "إنشاء نقطة استرداد", "recovery-point-restored": "استعادة نقطة بيانات", "workspace-exported": "تصدير نسخة منشأة", "server-sync-requested": "طلب مزامنة خادمية", "booking-overridden": "تدخل إداري في حجز", "expense-overridden": "تدخل إداري في مصروف", "expense-deleted": "حذف مصروف إداري", "identity-reset-requested": "طلب إعادة ضبط الهوية" }; return labels[action] ?? action; }
 function auditTarget(item: { targetWorkspaceId: number | null; targetMemberId: number | null }) { return item.targetWorkspaceId ? `المنشأة #${item.targetWorkspaceId}` : item.targetMemberId ? `العضوية #${item.targetMemberId}` : "مستوى النظام"; }

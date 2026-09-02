@@ -33,6 +33,6 @@ describe("Home compact summary metrics", () => {
     expect(moreSource).toContain("تحديث بيانات المنشأة");
     expect(moreSource).toContain("CompactSyncIndicator");
     expect(moreSource).toContain("useInternetAvailability");
-    expect(moreSource).toContain("connectionLabel");
+    expect(moreSource).toContain("statusLabel");
   });
 });

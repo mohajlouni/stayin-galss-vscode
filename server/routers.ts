@@ -22,9 +22,11 @@ const workspacePermissionsSchema = z.object({
   cancel_delete_bookings: z.boolean(),
   view_audit_logs: z.boolean(),
 });
-const workspaceInviteRoleSchema = z.enum(["admin", "staff", "guest"]);
+const workspaceInviteRoleSchema = z.enum(["admin", "staff", "caretaker", "guest"]);
 const canManageWorkspace = (role: string | null | undefined) => role === "owner" || role === "admin";
-const masterRoleSchema = z.enum(["owner", "admin", "staff", "guest"]);
+const masterRoleSchema = z.enum(["owner", "admin", "staff", "caretaker", "guest"]);
+const featureFlagSchema = z.enum(["loyalty", "utility_tracking", "maintenance", "weather_alerts", "whatsapp_templates", "advanced_tools", "master_control", "payment_methods", "audit_logs", "crm"]);
+const featureFlagsSchema = z.record(featureFlagSchema, z.boolean());
 const masterBookingStatusSchema = z.enum(["confirmed", "checked-in", "checked-out", "cancelled", "waiting"]);
 const masterConfirmation = z.literal("ADMIN-OVERRIDE");
 const expenseCategorySchema = z.enum(["guards-salaries", "maintenance", "cleaning-supplies", "utilities", "other"]);
@@ -241,6 +243,19 @@ export const appRouter = router({
       const [workspaces, audit] = await Promise.all([db.listMasterWorkspaces(), db.listSuperAdminAudit()]);
       return { workspaces, audit };
     }),
+    featureFlags: router({
+      get: adminProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ input }) => {
+        const workspace = await db.getWorkspaceById(input.workspaceId);
+        if (!workspace) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+        return JSON.parse(workspace.featureFlags ?? "{}");
+      }),
+      update: adminProcedure.input(z.object({ workspaceId: z.number().int().positive(), flags: featureFlagsSchema })).mutation(async ({ input }) => {
+        const workspace = await db.getWorkspaceById(input.workspaceId);
+        if (!workspace) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+        await db.updateWorkspaceFeatureFlags(input.workspaceId, input.flags);
+        return { success: true as const };
+      }),
+    }),
     directory: adminProcedure.input(z.object({ query: z.string().trim().max(80) })).query(async ({ input }) => db.searchMasterWorkspaceDirectory(input.query)),
     searchUsers: adminProcedure.input(z.object({ query: z.string().trim().max(80) })).query(async ({ input }) => db.searchMasterUsers(input.query)),
     workspace: adminProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ input }) => {
@@ -261,13 +276,13 @@ export const appRouter = router({
         units: data.chalets.map((chalet) => ({ id: chalet.id, name: chalet.name, color: chalet.color, propertyType: chalet.propertyType ?? "chalet" })),
       };
     }),
-    simulateRole: adminProcedure.input(z.object({ workspaceId: z.number().int().positive(), role: z.enum(["super-admin", "owner", "admin", "staff", "guest"]), permissions: workspacePermissionsSchema.optional() })).mutation(async ({ ctx, input }) => {
+    simulateRole: adminProcedure.input(z.object({ workspaceId: z.number().int().positive(), role: z.enum(["super-admin", "owner", "admin", "staff", "caretaker", "guest"]), permissions: workspacePermissionsSchema.optional() })).mutation(async ({ ctx, input }) => {
       const detail = await db.listMasterWorkspaceMembers(input.workspaceId);
-      const permissions = input.permissions ?? (input.role === "staff" ? { view_financial_reports: false, manage_payments: true, refund_security_deposits: false, create_bookings: true, edit_bookings: false, cancel_delete_bookings: false, view_audit_logs: false } : input.role === "guest" ? { view_financial_reports: false, manage_payments: false, refund_security_deposits: false, create_bookings: false, edit_bookings: false, cancel_delete_bookings: false, view_audit_logs: false } : { view_financial_reports: true, manage_payments: true, refund_security_deposits: true, create_bookings: true, edit_bookings: true, cancel_delete_bookings: true, view_audit_logs: true });
+      const permissions = input.permissions ?? (input.role === "staff" ? { view_financial_reports: false, manage_payments: true, refund_security_deposits: false, create_bookings: true, edit_bookings: true, cancel_delete_bookings: false, view_audit_logs: false } : input.role === "caretaker" ? { view_financial_reports: false, manage_payments: false, refund_security_deposits: false, create_bookings: false, edit_bookings: false, cancel_delete_bookings: false, view_audit_logs: false } : input.role === "guest" ? { view_financial_reports: false, manage_payments: false, refund_security_deposits: false, create_bookings: false, edit_bookings: false, cancel_delete_bookings: false, view_audit_logs: false } : { view_financial_reports: true, manage_payments: true, refund_security_deposits: true, create_bookings: true, edit_bookings: true, cancel_delete_bookings: true, view_audit_logs: true });
       await db.createSuperAdminAudit({ actorUserId: ctx.user.id, action: "role-simulation", targetWorkspaceId: input.workspaceId, details: JSON.stringify({ role: input.role, simulationOnly: true }) });
       return { simulationOnly: true as const, workspace: detail.workspace, role: input.role, permissions, memberCount: detail.members.filter((member) => member.status === "active").length };
     }),
-    assignMembership: adminProcedure.input(z.object({ confirmation: masterConfirmation, workspaceId: z.number().int().positive(), userId: z.number().int().positive(), displayName: z.string().trim().min(2).max(255), phone: z.string().trim().min(2).max(32), role: z.enum(["admin", "staff", "guest"]), permissions: workspacePermissionsSchema, status: z.enum(["active", "disabled"]) })).mutation(async ({ ctx, input }) => {
+    assignMembership: adminProcedure.input(z.object({ confirmation: masterConfirmation, workspaceId: z.number().int().positive(), userId: z.number().int().positive(), displayName: z.string().trim().min(2).max(255), phone: z.string().trim().min(2).max(32), role: z.enum(["admin", "staff", "caretaker", "guest"]), permissions: workspacePermissionsSchema, status: z.enum(["active", "disabled"]) })).mutation(async ({ ctx, input }) => {
       return db.assignMasterWorkspaceMembership({ ...input, actorUserId: ctx.user.id });
     }),
     createRecoveryPoint: adminProcedure.input(z.object({ confirmation: masterConfirmation, workspaceId: z.number().int().positive(), reason: z.string().trim().min(3).max(80) })).mutation(async ({ ctx, input }) => {

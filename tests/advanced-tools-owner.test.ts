@@ -32,7 +32,7 @@ describe("advanced owner tools security", () => {
     const screen = source("app/settings/advanced-tools.tsx");
     expect(router).toContain("saveOwnerEmergencySnapshot");
     expect(router).toContain("findConflicts(moved");
-    expect(more).toContain("...(isOwner ?");
+    expect(more).toContain("isOwner && flags.advanced_tools");
     expect(screen).toContain("أدخل PIN المالك");
     expect(screen).toContain("سلة محذوفات الحجوزات");
     expect(screen).toContain("سجل رقابة الموظفين");

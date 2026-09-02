@@ -8,7 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { clearPendingRegistration, getPendingRegistration } from "@/lib/legal-consent";
 
 export type SessionUser = { id: number; fullName: string; phone: string | null; email: string | null; avatarUrl: string | null; createdAt: string };
-export type SessionMembership = { userId: number; propertyGroupId: number; role: "owner" | "manager" | "staff" | "guest"; permissions: string[] };
+export type SessionMembership = { userId: number; propertyGroupId: number; role: "owner" | "manager" | "staff" | "caretaker" | "guest"; permissions: string[] };
 export type PropertyGroup = { id: number; name: string; logo: string | null; chaletsCount: number | null; currency: string | null; timeZone: string | null };
 export type ActiveSession = { currentUser: SessionUser | null; activePropertyGroupId: number | null; isAuthenticated: boolean; rememberMe: boolean; biometricsEnabled: boolean };
 

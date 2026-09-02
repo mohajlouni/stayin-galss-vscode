@@ -707,6 +707,18 @@ export async function getWorkspaceData(workspaceId: number) {
   return (await database.select().from(workspaceData).where(eq(workspaceData.workspaceId, workspaceId)).limit(1))[0];
 }
 
+export async function getWorkspaceById(workspaceId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  return (await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+}
+
+export async function updateWorkspaceFeatureFlags(workspaceId: number, flags: Record<string, boolean>) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  await database.update(workspaces).set({ featureFlags: JSON.stringify(flags), updatedAt: new Date() }).where(eq(workspaces.id, workspaceId));
+}
+
 export async function saveWorkspaceData(input: { workspaceId: number; payload: string; expectedVersion: number; updatedByUserId: number }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");

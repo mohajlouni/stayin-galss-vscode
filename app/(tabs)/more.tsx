@@ -15,9 +15,43 @@ import { useI18n } from "@/lib/i18n";
 import { useInternetAvailability } from "@/lib/network-status";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
+import { useWorkspaceFeatureFlags, type FeatureFlagKey } from "@/lib/feature-flags";
 
-type MenuRoute = "/(tabs)/settings" | "/(tabs)/waitlist" | "/suggestions" | "/audit-log" | "/chalet-management" | "/user-management" | "/workspace-select" | "/whatsapp-templates" | "/profile" | "/admin/master-control" | "/settings/advanced-tools" | "/payment-methods" | "/maintenance-dashboard" | "/notifications" | "/(tabs)/crm" | "/loyalty";
-type MenuIcon = "settings" | "format-list-bulleted" | "lightbulb-outline" | "history" | "holiday-village" | "home-work" | "group" | "business" | "chat" | "login" | "person" | "admin-panel-settings" | "health-and-safety" | "payments" | "build" | "notifications" | "workspace-premium";
+type MenuRoute =
+  | "/(tabs)/settings"
+  | "/(tabs)/waitlist"
+  | "/suggestions"
+  | "/audit-log"
+  | "/chalet-management"
+  | "/user-management"
+  | "/workspace-select"
+  | "/whatsapp-templates"
+  | "/profile"
+  | "/admin/master-control"
+  | "/settings/advanced-tools"
+  | "/payment-methods"
+  | "/maintenance-dashboard"
+  | "/notifications"
+  | "/(tabs)/crm"
+  | "/loyalty";
+type MenuIcon =
+  | "settings"
+  | "format-list-bulleted"
+  | "lightbulb-outline"
+  | "history"
+  | "holiday-village"
+  | "home-work"
+  | "group"
+  | "business"
+  | "chat"
+  | "login"
+  | "person"
+  | "admin-panel-settings"
+  | "health-and-safety"
+  | "payments"
+  | "build"
+  | "notifications"
+  | "workspace-premium";
 type MenuEntry = { title: string; description: string; icon: MenuIcon; route: MenuRoute };
 const MORE_TAB_ROUTES = new Set<MenuRoute>(["/(tabs)/settings", "/(tabs)/waitlist"]);
 
@@ -33,7 +67,7 @@ export default function MoreScreen() {
   const colors = useColors();
   const { lastSyncedAt, refreshWorkspaceData } = useBookings();
   const { isRTL, language, t } = useI18n();
-  const { isAuthenticated, isManager, isOwner, can } = useWorkspaceAccess();
+  const { isAuthenticated, isManager, isOwner, can, isCaretaker, activeWorkspaceId } = useWorkspaceAccess();
   const { currentUser, activePropertyGroup } = useAuthSession();
   const masterControl = trpc.masterControl.overview.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const internetAvailability = useInternetAvailability();
@@ -41,6 +75,7 @@ export default function MoreScreen() {
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const internetReachable = internetAvailability === true;
+  const flags = useWorkspaceFeatureFlags(activeWorkspaceId);
   const lastSyncLabel = useMemo(() => {
     if (!lastSyncedAt) return language === "ar" ? "لم تتم مزامنة سابقة على هذا الجهاز." : "No previous sync on this device.";
     const syncedDate = new Date(lastSyncedAt);
@@ -49,56 +84,72 @@ export default function MoreScreen() {
     const timestamp = `${syncedDate.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "numeric" })} · ${syncedDate.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
     return language === "ar" ? `آخر مزامنة: ${timestamp}` : `Last sync: ${timestamp}`;
   }, [language, lastSyncedAt]);
-  const connectionLabel = internetReachable
-    ? (language === "ar" ? "متصل بالإنترنت · المزامنة ممكنة" : "Online · Sync available")
-    : (language === "ar" ? "لا يوجد اتصال بالإنترنت · المزامنة متوقفة" : "Offline · Sync unavailable");
+
   const refreshDataNow = async () => {
     if (!isManager) {
-      Alert.alert(language === "ar" ? "صلاحية مطلوبة" : "Permission required", language === "ar" ? "تحديث بيانات المنشأة متاح للمالك أو المدير فقط." : "Workspace refresh is available to owners and managers only.");
+      Alert.alert(
+        language === "ar" ? "صلاحية مطلوبة" : "Permission required",
+        language === "ar" ? "تحديث بيانات المنشأة متاح للمالك أو المدير فقط." : "Workspace refresh is available to owners and managers only."
+      );
       return;
     }
     if (!internetReachable) {
-      Alert.alert(language === "ar" ? "لا يوجد اتصال" : "No internet connection", language === "ar" ? "اتصل بالإنترنت ثم حاول تحديث بيانات المنشأة مرة أخرى." : "Connect to the internet, then try refreshing workspace data again.");
+      Alert.alert(
+        language === "ar" ? "لا يوجد اتصال" : "No internet connection",
+        language === "ar" ? "اتصل بالإنترنت ثم حاول تحديث بيانات المنشأة مرة أخرى." : "Connect to the internet, then try refreshing workspace data again."
+      );
       return;
     }
     setSyncRefreshing(true);
     try { await refreshWorkspaceData(); } finally { setSyncRefreshing(false); }
   };
 
-  const propertyOperationsItems: MenuEntry[] = [
+  const showPropertyOps = flags.maintenance ?? true;
+  const showFinance = (flags.payment_methods ?? true) || (flags.loyalty ?? true);
+  const showTeamSecurity = (flags.audit_logs ?? true) || (flags.advanced_tools ?? true) || (flags.master_control ?? true);
+  const showCommunication = flags.whatsapp_templates ?? true;
+  const showCustomers = flags.crm ?? true;
+
+  const propertyOpsItems: MenuEntry[] = useMemo(() => [
     ...(isManager ? [{ title: language === "ar" ? "إدارة الوحدات / العقارات" : "Property management", description: language === "ar" ? "ملف كل وحدة وأسعارها وحارسها وأوقاتها" : "Each property profile, pricing, guardian, and hours", icon: "home-work" as const, route: "/chalet-management" as const }] : []),
     { title: t("waitlist"), description: language === "ar" ? "طلبات العملاء بانتظار توفر الموعد" : "Customer requests waiting for availability", icon: "format-list-bulleted", route: "/(tabs)/waitlist" },
-  ];
-  const financialItems: MenuEntry[] = [
-    ...(isManager ? [{ title: language === "ar" ? "طرق الدفع والحسابات المالية" : "Payment methods & financial accounts", description: language === "ar" ? "طرق التحصيل وحسابات CliQ وIBAN للإيجار والتأمين" : "Collection methods and CliQ/IBAN accounts for rent and deposits", icon: "payments" as const, route: "/payment-methods" as const }] : []),
-    ...(can("view_financial_reports") ? [{ title: language === "ar" ? "برنامج الولاء والنقاط" : "Loyalty program & points", description: language === "ar" ? "أرصدة العملاء والطبقات والاسترداد على الحجوزات" : "Customer balances, tiers, and booking redemptions", icon: "workspace-premium" as const, route: "/loyalty" as const }] : []),
-  ];
-  const teamSecurityItems: MenuEntry[] = [
-    ...(isManager ? [{ title: language === "ar" ? "إدارة المستخدمين والصلاحيات" : "User management & permissions", description: language === "ar" ? "فريق العمل والموظفون والدعوات والصلاحيات" : "Staff, employees, invitations, and permissions", icon: "group" as const, route: "/user-management" as const }] : []),
-    ...(can("view_audit_logs") ? [{ title: language === "ar" ? "سجل إجراءات النظام" : "System activity log", description: language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions", icon: "history" as const, route: "/audit-log" as const }] : []),
-    ...(isOwner ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجوزات وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
-    ...(masterControl.data ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
-  ];
-  const communicationPreferenceItems: MenuEntry[] = [
-    ...(isManager ? [{ title: language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates", description: language === "ar" ? "تخصيص القوالب والرسائل الذكية" : "Customize templates and smart messages", icon: "chat" as const, route: "/whatsapp-templates" as const }] : []),
-    { title: language === "ar" ? "الإعدادات العامة والمزامنة" : "General settings & sync", description: language === "ar" ? "المنشأة والوحدات، التقويم والتسعير، العقود، الولاء، الطقس والإشعارات، النظام والمزامنة" : "Property, calendar & pricing, contracts, loyalty, weather/alerts, system & sync", icon: "settings", route: "/(tabs)/settings" },
-  ];
-  const qualityOperationsItems: MenuEntry[] = [
-    { title: language === "ar" ? "قاعدة العملاء وإدارة العلاقات" : "Customer relations (CRM)", description: language === "ar" ? "سجل العملاء والولاء والحظر وفئة VIP" : "Customer records, loyalty, blacklist, and VIP tier", icon: "group", route: "/(tabs)/crm" },
-    ...(isManager ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),
+    ...(isManager && flags.maintenance ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),
     { title: language === "ar" ? "مركز الإشعارات" : "Notifications center", description: language === "ar" ? "الإشعارات الداخلية والفلاتر وحالة القراءة" : "In-app notifications, filters, and read status", icon: "notifications", route: "/notifications" },
-  ];
+  ], [isManager, language, flags.maintenance]);
+
+  const financeItems: MenuEntry[] = useMemo(() => [
+    ...(isManager && flags.payment_methods ? [{ title: language === "ar" ? "طرق الدفع والحسابات المالية" : "Payment methods & financial accounts", description: language === "ar" ? "طرق التحصيل وحسابات CliQ وIBAN للإيجار والتأمين" : "Collection methods and CliQ/IBAN accounts for rent and deposits", icon: "payments" as const, route: "/payment-methods" as const }] : []),
+    ...(can("view_financial_reports") && flags.loyalty ? [{ title: language === "ar" ? "برنامج الولاء والنقاط" : "Loyalty program & points", description: language === "ar" ? "أرصدة العملاء والطبقات والاسترداد على الحجوزات" : "Customer balances, tiers, and booking redemptions", icon: "workspace-premium" as const, route: "/loyalty" as const }] : []),
+  ], [isManager, language, can, flags.payment_methods, flags.loyalty]);
+
+  const teamSecurityItems: MenuEntry[] = useMemo(() => [
+    ...(isManager ? [{ title: language === "ar" ? "إدارة المستخدمين والصلاحيات" : "User management & permissions", description: language === "ar" ? "فريق العمل والموظفون والدعوات والصلاحيات" : "Staff, employees, invitations, and permissions", icon: "group" as const, route: "/user-management" as const }] : []),
+    ...(can("view_audit_logs") && flags.audit_logs ? [{ title: language === "ar" ? "سجل إجراءات النظام" : "System activity log", description: language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions", icon: "history" as const, route: "/audit-log" as const }] : []),
+    ...(isOwner && flags.advanced_tools ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجز وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
+    ...(masterControl.data && flags.master_control ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
+  ], [isManager, isOwner, language, can, masterControl.data, flags.audit_logs, flags.advanced_tools, flags.master_control]);
+
+  const communicationItems: MenuEntry[] = useMemo(() => [
+    ...(isManager && flags.whatsapp_templates ? [{ title: language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates", description: language === "ar" ? "تخصيص القوالب والرسائل الذكية" : "Customize templates and smart messages", icon: "chat" as const, route: "/whatsapp-templates" as const }] : []),
+    { title: language === "ar" ? "الإعدادات العامة والمزامنة" : "General settings & sync", description: language === "ar" ? "المنشأة والوحدات، التقويم والتسعير، العقود، الولاء، الطقس والإشعارات، النظام والمزامنة" : "Property, calendar & pricing, contracts, loyalty, weather/alerts, system & sync", icon: "settings", route: "/(tabs)/settings" },
+  ], [isManager, language, flags.whatsapp_templates]);
+
+  const customerItems: MenuEntry[] = useMemo(() => [
+    ...(flags.crm ? [{ title: language === "ar" ? "قاعدة العملاء وإدارة العلاقات" : "Customer relations (CRM)", description: language === "ar" ? "سجل العملاء والولاء والحظر وفئة VIP" : "Customer records, loyalty, blacklist, and VIP tier", icon: "group" as const, route: "/(tabs)/crm" as const }] : []),
+  ], [language, flags.crm]);
+
   const suggestion: MenuEntry = { title: language === "ar" ? "مركز الاقتراحات والمساعدة" : "Suggestions & help center", description: language === "ar" ? "شارك فكرة أو اطلب مساعدة لتطوير تجربتك" : "Share an idea or ask for help", icon: "lightbulb-outline", route: "/suggestions" };
 
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}>
     <ScrollView style={{ flex: 1, minHeight: 0, backgroundColor: "transparent" }} contentContainerStyle={[styles.content, { backgroundColor: "transparent" }]} showsVerticalScrollIndicator={false}>
       <CompactScreenHeader title={t("more")} icon="more-horiz" plain showDateTime={false} />
-      {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => router.push("/workspace-select")} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="business" size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة النشطة" : "Active property group"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", marginTop: 2, textAlign: align }}>{activePropertyGroup?.name ?? (language === "ar" ? "اختيار مجموعة منشآت" : "Choose a property group")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></BentoGlassCard> : null}
-      {propertyOperationsItems.length ? <MenuSection title={language === "ar" ? "المنشأة والوحدات" : "Chalet & property"} items={propertyOperationsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
-      {financialItems.length ? <MenuSection title={language === "ar" ? "المالية والتسعير الذكي" : "Finance & smart pricing"} items={financialItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
-      {teamSecurityItems.length ? <MenuSection title={language === "ar" ? "الفريق والأمان" : "Staff & security"} items={teamSecurityItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
-      <MenuSection title={language === "ar" ? "العقود والتواصل" : "Contracts & messaging"} items={communicationPreferenceItems} colors={colors} row={row} align={align} isRTL={isRTL} />
-      <MenuSection title={language === "ar" ? "العملاء والأتمتة والطقس" : "CRM, automation & weather"} items={qualityOperationsItems} colors={colors} row={row} align={align} isRTL={isRTL} />
+      {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => router.push("/workspace-select")} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="business" size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة النشطة" : "Active property group"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{activePropertyGroup?.name ?? (language === "ar" ? "غير محدد" : "Not set")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.muted} /></Pressable></BentoGlassCard> : null}
+
+      {showPropertyOps && propertyOpsItems.length ? <MenuSection title={language === "ar" ? "المنشأة والعمليات" : "Property & operations"} items={propertyOpsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {showFinance && financeItems.length ? <MenuSection title={language === "ar" ? "المالية والمدفوعات" : "Finance & payments"} items={financeItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {showTeamSecurity && teamSecurityItems.length ? <MenuSection title={language === "ar" ? "الفريق والأمان" : "Team & security"} items={teamSecurityItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {showCommunication && communicationItems.length ? <MenuSection title={language === "ar" ? "التواصل والإعدادات" : "Communication & settings"} items={communicationItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
+      {showCustomers && customerItems.length ? <MenuSection title={language === "ar" ? "العملاء" : "Customers"} items={customerItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
       <MenuSection title={language === "ar" ? "الدعم والمساعدة" : "Support"} items={[]} colors={colors} row={row} align={align} isRTL={isRTL} beforeItems={<SuggestionRow item={suggestion} colors={colors} row={row} align={align} isRTL={isRTL} />} />
       {isAuthenticated ? <CompactSyncIndicator colors={colors} row={row} align={align} internetReachable={internetReachable} lastSyncLabel={lastSyncLabel} syncRefreshing={syncRefreshing} canRefresh={isManager} onRefresh={() => void refreshDataNow()} language={language} /> : null}
     </ScrollView>

@@ -12,11 +12,12 @@ describe("multi-tenant identity foundation", () => {
     expect(permissionsForWorkspaceRole("admin")).toEqual(MANAGER_PERMISSIONS);
     expect(permissionsForWorkspaceRole("guest")).toEqual(GUEST_PERMISSIONS);
     expect(permissionsForWorkspaceRole("staff").create_bookings).toBe(true);
+    expect(permissionsForWorkspaceRole("caretaker").create_bookings).toBe(false);
   });
 
   it("persists the active organization and supports all required membership roles", () => {
     const schema = projectFile("drizzle/schema.ts");
-    expect(schema).toContain('WORKSPACE_ROLES = ["owner", "admin", "staff", "guest"]');
+    expect(schema).toContain('WORKSPACE_ROLES = ["owner", "admin", "staff", "caretaker", "guest"]');
     expect(schema).toContain('mysqlTable("stayInActiveWorkspaces"');
     expect(schema).toContain('role: mysqlEnum("role", WORKSPACE_ROLES)');
   });

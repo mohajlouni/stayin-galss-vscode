@@ -10,7 +10,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 
-export const WORKSPACE_ROLES = ["owner", "admin", "staff", "guest"] as const;
+export const WORKSPACE_ROLES = ["owner", "admin", "staff", "caretaker", "guest"] as const;
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
 export const stayInUsers = mysqlTable("stayInUsers", {
@@ -69,6 +69,7 @@ export const stayInWorkspaces = mysqlTable("stayInWorkspaces", {
   logoUrl: text("logoUrl"),
   currency: varchar("currency", { length: 8 }),
   timeZone: varchar("timeZone", { length: 64 }),
+  featureFlags: text("featureFlags"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({

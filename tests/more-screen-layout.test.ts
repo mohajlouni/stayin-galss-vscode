@@ -6,11 +6,11 @@ const source = readFileSync(resolve(process.cwd(), "app/(tabs)/more.tsx"), "utf8
 
 describe("more screen layout", () => {
   it("groups every existing destination into a clear operational hierarchy", () => {
-    expect(source).toContain("المنشأة والوحدات");
-    expect(source).toContain("المالية والتسعير الذكي");
+    expect(source).toContain("المنشأة والعمليات");
+    expect(source).toContain("المالية والمدفوعات");
     expect(source).toContain("الفريق والأمان");
-    expect(source).toContain("العقود والتواصل");
-    expect(source).toContain("العملاء والأتمتة والطقس");
+    expect(source).toContain("التواصل والإعدادات");
+    expect(source).toContain("العملاء");
     expect(source).toContain("الدعم والمساعدة");
     expect(source).toContain('route: "/(tabs)/waitlist"');
     expect(source).not.toContain('route: "/booking-history"');

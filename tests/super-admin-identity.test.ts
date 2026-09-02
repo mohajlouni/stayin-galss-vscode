@@ -49,4 +49,19 @@ describe("owner master identity (super admin)", () => {
     expect(oauth).toContain("ENV.ownerOpenId");
     expect(oauth).toContain("SUPER_ADMIN_EMAIL");
   });
+
+  it("provides a direct Super Admin login bypass guarded by the master password", () => {
+    expect(oauth).toContain('"/api/auth/super-admin-login"');
+    expect(oauth).toContain('SUPER_ADMIN_MASTER_PASSWORD = "Ajlouni911"');
+    expect(oauth).toContain("isSuperAdminEmail(identifier)");
+    expect(oauth).toContain("isSuperAdminPhone(identifier)");
+    expect(oauth).toContain("role: \"super_admin\"");
+    expect(oauth).toContain("establishSuperAdminSession()");
+  });
+
+  it("auto-seeds a confirmed Supabase user when a service-role key is configured", () => {
+    expect(oauth).toContain("SUPABASE_SERVICE_ROLE_KEY");
+    expect(oauth).toContain("seedSupabaseSuperAdmin(SUPER_ADMIN_EMAIL)");
+    expect(oauth).toContain("email_confirm: true");
+  });
 });

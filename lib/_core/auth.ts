@@ -11,6 +11,8 @@ export type User = {
   phone?: string | null;
   avatarUrl?: string | null;
   loginMethod: string | null;
+  role?: string | null;
+  isSuperAdmin?: boolean;
   lastSignedIn: Date;
 };
 

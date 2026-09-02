@@ -22,7 +22,8 @@ describe("StayIn authentication and multi-tenant session foundation", () => {
 
   it("uses the secure identity flow, remembers the session, and offers biometric unlock only when available", () => {
     expect(login).toContain("UnifiedAuthScreen");
-    expect(authScreen).toContain("startOAuthLogin");
+    expect(authScreen).toContain("الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب");
+    expect(authScreen).not.toContain("startOAuthLogin");
     expect(authScreen).toContain("تذكرني");
     expect(authScreen).toContain("setRememberMe");
     expect(authScreen).toContain("activeSession.biometricsEnabled");

@@ -1,100 +1,125 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { ThemedText } from "@/components/themed-text";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
-import { normalizeInternationalPhone } from "@/lib/phone-number";
+import { requestPasswordlessEmail, type SupabaseOtpError } from "@/lib/supabase-otp";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * Passwordless recovery — because StayIn uses a passwordless Email-OTP strategy,
+ * "forgot password" is inherently replaced by the secure dynamic OTP flow: the
+ * user confirms their email, receives a fresh time-limited code, verifies it,
+ * and is signed back into the exact same account — no password to reset.
+ */
 export default function ForgotPasswordScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
   const params = useLocalSearchParams<{ mode?: string; identifier?: string }>();
-  const [mode, setMode] = useState<"phone" | "email">(params.mode === "email" ? "email" : "phone");
-  const [identifier, setIdentifier] = useState(typeof params.identifier === "string" ? params.identifier : "");
+  const [email, setEmail] = useState(typeof params.identifier === "string" && emailPattern.test(params.identifier) ? params.identifier : "");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reviewed, setReviewed] = useState(false);
-  const align = isRTL ? "right" : "left";
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const row = isRTL ? "row-reverse" : "row";
+  const align = isRTL ? "right" : "left";
 
-  const validate = () => {
-    if (mode === "phone") {
-      const phone = normalizeInternationalPhone(identifier.trim());
-      return phone.error || !phone.value
-        ? (language === "ar" ? "اكتب رقم هاتف دوليًا صحيحًا أو رقمًا أردنيًا يبدأ بـ 079." : "Enter a valid international phone number.")
-        : null;
+  const submit = async () => {
+    const trimmed = email.trim();
+    if (!trimmed) { setFieldError(language === "ar" ? "أدخل بريدك الإلكتروني للمتابعة." : "Enter your email to continue."); setError(null); return; }
+    if (!emailPattern.test(trimmed)) { setFieldError(language === "ar" ? "أدخل بريدًا إلكترونيًا صحيحًا، مثل name@example.com." : "Enter a valid email like name@example.com."); setError(null); return; }
+    setBusy(true); setError(null); setFieldError(null);
+    try {
+      const result = await requestPasswordlessEmail(trimmed);
+      if (result.error) { setError(RECOVERY_MESSAGE(result.error, language)); return; }
+      router.replace({ pathname: "/auth/otp", params: { email: trimmed.toLowerCase() } });
+    } catch {
+      setError(language === "ar" ? "تعذر إرسال رمز الاسترجاع. تحقق من اتصال الإنترنت ثم أعد المحاولة." : "Could not send the recovery code. Check your connection and try again.");
+    } finally {
+      setBusy(false);
     }
-    return emailPattern.test(identifier.trim()) ? null : (language === "ar" ? "اكتب بريدًا إلكترونيًا صحيحًا." : "Enter a valid email address.");
   };
 
-  const continuePreview = () => {
-    const message = validate();
-    if (message) {
-      setError(message);
-      setReviewed(false);
-      return;
-    }
-    setError(null);
-    setReviewed(true);
-  };
-
-  const changeMode = (next: "phone" | "email") => {
-    setMode(next);
-    setError(null);
-    setReviewed(false);
-  };
-
-  const description = language === "ar"
-    ? "هذه معاينة لتسلسل الواجهة فقط. لن نرسل رمزًا أو نغيّر كلمة المرور في هذه المرحلة."
-    : "This is a UI flow preview only. No code is sent and no password is changed at this stage.";
-  const successText = language === "ar"
-    ? `تسلسل المعاينة صحيح للـ${mode === "phone" ? "رقم" : "بريد"} المدخل. عند تفعيل الخدمة لاحقًا، سترسل بوابة الهوية رمز تحقق إلى هذه القناة.`
-    : `The preview flow is valid for the entered ${mode}. When enabled later, the identity service will send a verification code to this channel.`;
+  const styles = makeStyles(colors);
 
   return (
-    <ScreenContainer edges={["top", "bottom", "left", "right"]}>
+    <ScreenContainer containerClassName="bg-transparent" safeAreaClassName="bg-transparent" edges={["top", "bottom", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "العودة لتسجيل الدخول" : "Back to sign in"} onPress={() => router.replace("/auth/login")} style={({ pressed }) => [styles.back, { borderColor: colors.border, backgroundColor: colors.surface, flexDirection: row, opacity: pressed ? 0.65 : 1 }]}>
           <MaterialIcons name={isRTL ? "arrow-forward" : "arrow-back"} size={19} color={colors.primary} />
-          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "العودة للدخول" : "Back to sign in"}</Text>
+          <ThemedText variant="label" color={colors.primary} style={styles.backText}>{language === "ar" ? "العودة للدخول" : "Back to sign in"}</ThemedText>
         </Pressable>
 
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={[styles.icon, { backgroundColor: colors.warning + "18" }]}><MaterialIcons name="lock-reset" size={30} color={colors.warning} /></View>
-          <Text style={{ color: colors.foreground, fontSize: 21, fontWeight: "900", marginTop: 14, textAlign: align }}>{language === "ar" ? "نسيت كلمة المرور" : "Forgot password"}</Text>
-          <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: 7, textAlign: align }}>{description}</Text>
+          <View style={[styles.icon, { backgroundColor: colors.primary + "18", borderColor: colors.neonBorder }]}><MaterialIcons name="lock-reset" size={30} color={colors.primary} /></View>
+          <ThemedText variant="titleLarge" style={styles.cardTitle}>{language === "ar" ? "استرجاع الوصول" : "Recover access"}</ThemedText>
+          <ThemedText variant="bodySmall" color={colors.muted} style={styles.description}>
+            {language === "ar"
+              ? "لا كلمات مرور هنا. أدخل بريدك الإلكتروني وسنرسل رمز تحقق آمنًا (صالح 5 دقائق) للدخول المباشر إلى بياناتك من أي جهاز — يتيح المصادقة عبر OTP استرجاع الحساب بشكل فوري وآمن دون الحاجة إلى إعادة ضبط كلمة مرور."
+              : "There are no passwords here. Enter your email and we’ll send a secure verification code (valid 5 minutes) for direct access to your data from any device — Email-OTP lets you instantly and safely recover your account without resetting any password."}
+          </ThemedText>
 
-          <View style={[styles.modeRow, { flexDirection: row }]}>
-            {(["phone", "email"] as const).map((value) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: mode === value }} onPress={() => changeMode(value)} style={({ pressed }) => [styles.mode, { backgroundColor: mode === value ? colors.primary + "16" : colors.surfaceMuted, borderColor: mode === value ? colors.primary : colors.border, opacity: pressed ? 0.68 : 1 }]}><Text style={{ color: mode === value ? colors.primary : colors.muted, fontSize: 12, fontWeight: "900" }}>{value === "phone" ? (language === "ar" ? "رقم الهاتف" : "Phone") : (language === "ar" ? "البريد الإلكتروني" : "Email")}</Text></Pressable>)}
-          </View>
+          <ThemedText variant="label" style={styles.inputLabel}>{language === "ar" ? "البريد الإلكتروني" : "Email address"}</ThemedText>
+          <TextInput value={email} onChangeText={(value) => { setEmail(value); setFieldError(null); setError(null); }} placeholder="name@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} placeholderTextColor={colors.muted} textAlign={align} style={[styles.input, { color: colors.foreground, borderColor: fieldError ? colors.error : colors.border, backgroundColor: colors.surfaceMuted }]} accessibilityLabel="البريد الإلكتروني" />
 
-          <TextInput value={identifier} onChangeText={(value) => { setIdentifier(value); setError(null); setReviewed(false); }} placeholder={mode === "phone" ? "+962 79 000 0000 أو 079 000 0000" : "name@example.com"} keyboardType={mode === "phone" ? "phone-pad" : "email-address"} autoCapitalize="none" autoCorrect={false} placeholderTextColor={colors.muted} textAlign={mode === "phone" ? "left" : align} style={[styles.input, { color: colors.foreground, borderColor: error ? colors.error : colors.border, backgroundColor: colors.surfaceMuted, writingDirection: mode === "phone" ? "ltr" : undefined }]} />
+          {fieldError ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.error + "12", borderColor: colors.error + "55", flexDirection: row }]}><MaterialIcons name="error-outline" size={18} color={colors.error} /><ThemedText variant="caption" color={colors.error} style={[styles.flex, styles.feedbackText]}>{fieldError}</ThemedText></View> : null}
+          {error ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.error + "12", borderColor: colors.error + "55", flexDirection: row }]}><MaterialIcons name="error-outline" size={18} color={colors.error} /><ThemedText variant="caption" color={colors.error} style={[styles.flex, styles.feedbackText]}>{error}</ThemedText></View> : null}
 
-          {error ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.error + "12", borderColor: colors.error + "55", flexDirection: row }]}><MaterialIcons name="error-outline" size={18} color={colors.error} /><Text style={[styles.flex, { color: colors.error, fontSize: 11, fontWeight: "700", lineHeight: 17, textAlign: align }]}>{error}</Text></View> : null}
-          {reviewed ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.success + "12", borderColor: colors.success + "55", flexDirection: row }]}><MaterialIcons name="check-circle" size={18} color={colors.success} /><Text style={[styles.flex, { color: colors.success, fontSize: 11, fontWeight: "800", lineHeight: 17, textAlign: align }]}>{successText}</Text></View> : null}
-
-          <Pressable accessibilityRole="button" onPress={continuePreview} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed ? 0.68 : 1 }]}><MaterialIcons name="arrow-forward" size={20} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900" }}>{language === "ar" ? "متابعة فحص التسلسل" : "Continue UI flow test"}</Text></Pressable>
-          {reviewed ? <Pressable accessibilityRole="button" onPress={() => router.replace("/auth/login")} style={({ pressed }) => [styles.secondary, { borderColor: colors.primary, opacity: pressed ? 0.65 : 1 }]}><Text style={{ color: colors.primary, fontWeight: "900" }}>{language === "ar" ? "العودة إلى تسجيل الدخول" : "Return to sign in"}</Text></Pressable> : null}
+          <Pressable disabled={busy} accessibilityRole="button" accessibilityState={{ busy }} onPress={() => void submit()} style={({ pressed }) => [styles.primary, { opacity: pressed || busy ? 0.68 : 1 }]}>
+            <LinearGradient colors={[colors.primary, colors.secondary, colors.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primaryGradient}>
+              {busy ? <ActivityIndicator color={colors.background} /> : <MaterialIcons name="send" size={18} color={colors.background} />}
+              <ThemedText variant="button" color={colors.background} style={styles.primaryText}>{busy ? (language === "ar" ? "جارٍ إرسال الرمز…" : "Sending code…") : (language === "ar" ? "إرسال رمز الاسترجاع" : "Send recovery code")}</ThemedText>
+            </LinearGradient>
+          </Pressable>
         </View>
       </ScrollView>
     </ScreenContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  content: { flexGrow: 1, padding: 18, justifyContent: "center", gap: 14 },
-  back: { alignSelf: "flex-start", minHeight: 40, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, alignItems: "center", gap: 6 },
-  card: { borderWidth: 1, borderRadius: 24, padding: 18 },
-  icon: { width: 58, height: 58, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  modeRow: { gap: 8, marginTop: 18 },
-  mode: { flex: 1, minHeight: 40, borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  input: { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, marginTop: 11, fontSize: 13 },
-  feedback: { minHeight: 48, borderWidth: 1, borderRadius: 12, marginTop: 10, paddingHorizontal: 10, paddingVertical: 8, alignItems: "center", gap: 7 },
-  flex: { flex: 1, minWidth: 0 },
-  primary: { minHeight: 51, borderRadius: 13, marginTop: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  secondary: { minHeight: 45, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 10 },
-});
+function RECOVERY_MESSAGE(error: SupabaseOtpError, language: string): string {
+  const ar: Record<SupabaseOtpError, string> = {
+    "not-configured": "استرجاع الحساب عبر البريد الإلكتروني غير مفعّل بعد على هذا التطبيق.",
+    "invalid-email": "أدخل بريدًا إلكترونيًا صحيحًا.",
+    "invalid-otp": "رمز التحقق غير صحيح.",
+    "expired-otp": "انتهت صلاحية رمز التحقق. اطلب رمزًا جديدًا.",
+    "rate-limited": "طلبت عدة رموز في وقت قصير. انتظر قليلًا ثم أعد المحاولة.",
+    network: "تعذر إرسال الرمز. تحقق من اتصال الإنترنت ثم أعد المحاولة.",
+    unknown: "حدث خطأ غير متوقع أثناء إرسال الرمز. حاول مرة أخرى.",
+  };
+  const en: Record<SupabaseOtpError, string> = {
+    "not-configured": "Account recovery by email is not enabled on this app yet.",
+    "invalid-email": "Enter a valid email address.",
+    "invalid-otp": "The verification code is incorrect.",
+    "expired-otp": "The verification code has expired. Request a new one.",
+    "rate-limited": "Too many codes requested recently. Wait a moment and retry.",
+    network: "Could not send the code. Check your connection and retry.",
+    unknown: "An unexpected error occurred while sending the code. Try again.",
+  };
+  return language === "ar" ? (ar[error] ?? ar.unknown) : (en[error] ?? en.unknown);
+}
+
+function makeStyles(colors: ReturnType<typeof useColors>) {
+  return {
+    content: { flexGrow: 1, padding: 18, justifyContent: "center", gap: 14 } as const,
+    back: { alignSelf: "flex-start", minHeight: 40, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, alignItems: "center", gap: 6 } as const,
+    backText: { fontSize: 12, fontWeight: "900" } as const,
+    card: { borderWidth: 1, borderRadius: 24, padding: 18 } as const,
+    icon: { width: 58, height: 58, borderRadius: 19, alignItems: "center", justifyContent: "center", borderWidth: 1 } as const,
+    cardTitle: { fontSize: 21, fontWeight: "900", marginTop: 14, textAlign: "right" as const } as const,
+    description: { fontSize: 12, lineHeight: 19, marginTop: 8, textAlign: "right" as const } as const,
+    inputLabel: { color: colors.muted, fontSize: 12, fontWeight: "800", marginTop: 16, marginBottom: 8, textAlign: "right" as const } as const,
+    input: { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, fontSize: 13 } as const,
+    feedback: { minHeight: 48, borderWidth: 1, borderRadius: 12, marginTop: 10, paddingHorizontal: 10, paddingVertical: 8, alignItems: "center", gap: 7 } as const,
+    flex: { flex: 1, minWidth: 0 } as const,
+    feedbackText: { fontSize: 11, fontWeight: "700", lineHeight: 17 } as const,
+    primary: { minHeight: 51, borderRadius: 13, marginTop: 15 } as const,
+    primaryGradient: { minHeight: 51, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 } as const,
+    primaryText: { fontWeight: "900" } as const,
+  };
+}

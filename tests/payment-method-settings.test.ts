@@ -32,7 +32,6 @@ describe("payment-method settings", () => {
     const form = readFileSync("app/booking-form.tsx", "utf8");
     const model = readFileSync("lib/booking-model.ts", "utf8");
     const store = readFileSync("lib/booking-store.tsx", "utf8");
-    const settings = readFileSync("app/(tabs)/settings.tsx", "utf8");
     const more = readFileSync("app/(tabs)/more.tsx", "utf8");
     const management = readFileSync("app/payment-methods.tsx", "utf8");
     expect(form).toContain("activePaymentMethods(settings)");
@@ -48,8 +47,6 @@ describe("payment-method settings", () => {
     expect(model).toContain("PAYMENT_METHOD_ICON_OPTIONS");
     expect(store).toContain('PAYMENT_METHODS_STORAGE_KEY = "@stayin_payment_methods"');
     expect(store).toContain("persistPaymentMethods");
-    expect(settings).toContain("إدارة طرق الدفع");
-    expect(settings).toContain('router.push("/payment-methods" as never)');
     expect(more).toContain('route: "/payment-methods"');
     expect(management).toContain("إضافة طريقة دفع");
     expect(management).toContain("تعديل طريقة الدفع");

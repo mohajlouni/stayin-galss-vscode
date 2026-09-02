@@ -12,7 +12,8 @@ describe("registration and legal consent", () => {
     expect(register).toContain("UnifiedAuthScreen");
     expect(auth).toContain("!accepted");
     expect(auth).toContain("savePendingRegistration");
-    expect(auth).toContain("startOAuthLogin");
+    expect(auth).toContain("requestEmailSignupOtp");
+    expect(auth).not.toContain("startOAuthLogin");
     expect(auth).toContain('"/legal/terms"');
     expect(auth).toContain('"/legal/privacy"');
     expect(auth).toContain('"/legal/conditions"');

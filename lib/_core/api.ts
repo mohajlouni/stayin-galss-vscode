@@ -10,6 +10,8 @@ export type AuthenticatedUser = {
   phone?: string | null;
   avatarUrl?: string | null;
   loginMethod: string | null;
+  role?: string | null;
+  isSuperAdmin?: boolean;
   lastSignedIn: string;
 };
 
@@ -103,6 +105,134 @@ export async function getMe(): Promise<AuthenticatedUser | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Bridges a successfully verified Supabase Auth session into the StayIn backend
+ * session: sends the Supabase access token to the server, which validates it,
+ * resolves the canonical identity (merging the Super Admin to the owner openId,
+ * enforcing the registration gate, and provisioning the first workspace on
+ * first-time sign-up activation), then returns an app session token + user.
+ * Stores the pair exactly like the OAuth/local login paths so routing, tRPC
+ * headers, and workspace access keep working unchanged.
+ */
+export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; name?: string | null; mode?: "signin" | "signup"; provider?: string | null }): Promise<boolean> {
+  const result = await apiCall<{ app_session_id: string; user: AuthenticatedUser | null }>("/api/auth/supabase-otp", {
+    method: "POST",
+    body: JSON.stringify({
+      supabaseAccessToken: input.supabaseAccessToken,
+      name: input.name ?? null,
+      mode: input.mode ?? "signin",
+      provider: input.provider ?? "email",
+    }),
+  });
+
+  await Auth.setSessionToken(result.app_session_id);
+  if (result.user) {
+    await Auth.setUserInfo({
+      id: result.user.id,
+      openId: result.user.openId,
+      name: result.user.name,
+      email: result.user.email,
+      phone: result.user.phone ?? null,
+      avatarUrl: result.user.avatarUrl ?? null,
+      loginMethod: result.user.loginMethod ?? null,
+      role: result.user.role ?? null,
+      isSuperAdmin: result.user.isSuperAdmin ?? false,
+      lastSignedIn: new Date(result.user.lastSignedIn),
+    });
+  }
+  return true;
+}
+
+/**
+ * Direct Super Admin login that bypasses Supabase Auth entirely. The server
+ * validates the master credential against the canonical owner identity and
+ * issues the owner session, so it works even if the Supabase Auth user has not
+ * been seeded or email-confirmed.
+ *
+ * The request uses an absolute API URL (never a relative `fetch` path, which
+ * fails on Expo native) with an explicit `Content-Type: application/json`. If
+ * the network call throws or is blocked, we fall back to a local in-memory
+ * bridge so the Super Admin can still reach the workspace gate: a session token
+ * and the canonical owner profile (`stay-in-preview-owner-v1`, role
+ * `super_admin`) are persisted to secure storage, and native session restore
+ * accepts it without a server round-trip.
+ */
+export async function exchangeSuperAdminLogin(input: { identifier: string; password: string }): Promise<{ ok: boolean; error?: string; local?: boolean }> {
+  const baseUrl = getApiBaseUrl();
+  const url = baseUrl ? `${baseUrl}/api/auth/super-admin-login` : "/api/auth/super-admin-login";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: input.identifier, password: input.password }),
+      credentials: "include",
+    });
+    if (!response.ok) {
+      let message = `API request failed (${response.status})`;
+      try {
+        const body = await response.text();
+        const json = JSON.parse(body) as { error?: string; message?: string };
+        message = json.error || json.message || message;
+      } catch {
+        // keep the status-based message
+      }
+      return { ok: false, error: message };
+    }
+    const result = await response.json() as { app_session_id: string; user: AuthenticatedUser | null };
+    await Auth.setSessionToken(result.app_session_id);
+    if (result.user) {
+      await Auth.setUserInfo({
+        id: result.user.id,
+        openId: result.user.openId,
+        name: result.user.name,
+        email: result.user.email,
+        phone: result.user.phone ?? null,
+        avatarUrl: result.user.avatarUrl ?? null,
+        loginMethod: result.user.loginMethod ?? null,
+        role: result.user.role ?? null,
+        isSuperAdmin: result.user.isSuperAdmin ?? false,
+        lastSignedIn: new Date(result.user.lastSignedIn),
+      });
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[CRITICAL LOGIN ERROR] /api/auth/super-admin-login network failure", err);
+    // Local bypass: only for the canonical Super Admin master credential.
+    if (isSuperAdminCredentialLocal(input.identifier, input.password)) {
+      try {
+        await Auth.setSessionToken(`local-super-admin-${Date.now()}`);
+        await Auth.setUserInfo({
+          id: 1,
+          openId: "stay-in-preview-owner-v1",
+          name: "مالك StayIn (سوبر أدمن)",
+          email: "moh.ajlouni.90@gmail.com",
+          phone: "0797402940",
+          avatarUrl: null,
+          loginMethod: "super-admin-local",
+          role: "super_admin",
+          isSuperAdmin: true,
+          lastSignedIn: new Date(),
+        });
+        return { ok: true, local: true };
+      } catch (localErr) {
+        console.error("[CRITICAL LOGIN ERROR] local bypass persist failed", localErr);
+        return { ok: false, error: localErr instanceof Error ? localErr.message : String(localErr) };
+      }
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
+}
+
+function isSuperAdminCredentialLocal(identifier: string, password: string): boolean {
+  const hasPassword = String(password ?? "") === "Ajlouni911";
+  if (!hasPassword) return false;
+  const normalized = String(identifier ?? "").trim().toLowerCase();
+  if (normalized === "moh.ajlouni.90@gmail.com") return true;
+  const phoneDigits = normalized.replace(/[^\d]/g, "").replace(/^0+/, "");
+  return phoneDigits === "797402940" || phoneDigits === "962797402940";
 }
 
 export async function establishSession(token: string): Promise<boolean> {

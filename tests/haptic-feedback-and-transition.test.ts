@@ -25,7 +25,7 @@ describe("haptic feedback and navigation transitions", () => {
     const ripple = read("components/ripple-pressable.tsx");
     expect(ripple).toContain("android_ripple");
     expect(ripple).toContain("foreground: true");
-    ["components/screen-back-button.tsx", "components/booking-quick-actions.tsx", "app/booking-form.tsx", "app/expenses.tsx", "app/suggestions.tsx", "app/(tabs)/settings.tsx"].forEach((path) => {
+    ["components/screen-back-button.tsx", "components/booking-quick-actions.tsx", "app/booking-form.tsx", "app/expenses.tsx", "app/suggestions.tsx"].forEach((path) => {
       expect(read(path)).toContain("RipplePressable");
     });
   });

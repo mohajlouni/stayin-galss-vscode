@@ -526,6 +526,19 @@ export async function previewQaSandbox(input: { actorUserId: number; actor: QaSa
   };
 }
 
+/** Looks up an existing StayIn user by canonical (lowercased, trimmed) email. */
+export async function getUserByEmail(email: string | null | undefined) {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get user by email: database not available");
+    return undefined;
+  }
+  const normalized = (email ?? "").trim().toLowerCase();
+  if (!normalized) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, normalized)).limit(10);
+  return result.length > 0 ? result[0] : undefined;
+}
+
 export async function getWorkspaceMember(userId: number) {
   return getActiveWorkspaceMember(userId);
 }
@@ -567,6 +580,25 @@ export async function bootstrapOwnerWorkspace(user: { id: number; name: string |
   const existing = await getWorkspaceMember(user.id);
   if (existing) return existing;
   return createWorkspace({ user, name: "StayIn" });
+}
+
+/**
+ * Ensures a user (used for the Super Admin / canonical owner) resolves to their
+ * EXISTING workspace — never a freshly provisioned demo/data workspace. Returns
+ * the active/preferred existing workspace id, or `null` when the owner has no
+ * workspace at all (so we never bootstrap a brand-new empty one that would
+ * orphan their real data).
+ */
+export async function linkOwnerWorkspace(user: { id: number; name: string | null }): Promise<{ workspaceId: number | null }> {
+  const memberships = await listWorkspaceMemberships(user.id);
+  if (!memberships.length) return { workspaceId: null };
+
+  const activeId = await getActiveWorkspaceId(user.id);
+  const preferred = memberships.find((entry) => entry.workspace.id === activeId) ?? memberships[0];
+  if (!memberships.some((entry) => entry.workspace.id === activeId)) {
+    await setActiveWorkspace(user.id, preferred.workspace.id);
+  }
+  return { workspaceId: preferred.workspace.id };
 }
 
 export async function createWorkspace(input: { user: { id: number; name: string | null }; name: string }) {

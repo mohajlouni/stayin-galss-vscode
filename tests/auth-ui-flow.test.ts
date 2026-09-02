@@ -5,36 +5,33 @@ import { describe, expect, it } from "vitest";
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 describe("auth UI test flow", () => {
-  it("validates phone or email before opening the external identity portal", () => {
+  it("uses one smart identifier (email auto-detect) and strictly rejects non-Super-Admin phone login without opening a legacy portal", () => {
     const auth = source("components/unified-auth-screen.tsx");
-    expect(auth).toContain("normalizeInternationalPhone");
-    expect(auth).toContain("emailPattern");
-    expect(auth).toContain("startOAuthLogin()");
+    expect(auth).toContain("validateIdentifier");
+    expect(auth).toContain(`"البريد الإلكتروني أو رقم الهاتف"`);
+    expect(auth).toContain("signInWithPasswordFlow");
+    expect(auth).toContain("الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب");
+    expect(auth).not.toContain("startOAuthLogin(");
     expect(auth).toContain('pathname: "/auth/forgot-password"');
     expect(auth).toContain("LinearGradient");
     expect(auth).toContain("أهلاً بك مجدداً");
-    expect(auth).toContain("setShowSecret");
-    expect(auth).toContain("🇯🇴");
     expect(auth).toContain("biometricLogin");
     expect(auth).toContain("أنشئ حساباً جديداً");
     expect(auth).toContain('edges={["top", "bottom", "left", "right"]}');
-    expect(auth).toContain("phoneShell");
-    expect(auth).toContain("phoneInput");
-    expect(auth).toContain('[isRTL ? "left" : "right"]: 0');
     expect(auth).toContain("validateName");
-    expect(auth).toContain("validateContact");
-    expect(auth).toContain("nameLiveError");
-    expect(auth).toContain("contactLiveError");
     expect(auth).toContain("FieldValidation");
     expect(auth).toContain("أدخل الاسم الكامل للمتابعة.");
-    expect(auth).toContain("أدخل رقم الهاتف للمتابعة.");
-    expect(auth).toContain("أدخل البريد الإلكتروني للمتابعة.");
+    expect(auth).toContain("أدخل البريد الإلكتروني أو رقم الهاتف للمتابعة.");
     expect(auth).toContain("check-circle-outline");
     expect(auth).toContain('accessibilityRole="link"');
+    expect(auth).not.toContain("🇯🇴");
+    expect(auth).not.toContain("phoneShell");
+    expect(auth).not.toContain("phoneInput");
+    expect(auth).not.toContain("الدخول برمز عبر البريد الإلكتروني");
     expect(auth).not.toContain("مخصّصان لفحص الواجهة فقط");
   });
 
-  it("keeps the dark visual hierarchy and switches registration inside the same Arabic tabbed screen", () => {
+  it("keeps the dark visual hierarchy and a single-fixed registration inside the same Arabic tabbed screen", () => {
     const auth = source("components/unified-auth-screen.tsx");
     const login = source("app/auth/login.tsx");
     const root = source("app/_layout.tsx");
@@ -45,7 +42,10 @@ describe("auth UI test flow", () => {
     expect(auth).toContain("changeTab");
     expect(auth).toContain("Animated.timing(formOpacity");
     expect(auth).toContain("الاسم الكامل");
-    expect(auth).toContain("كلمة المرور أو رمز الدخول");
+    expect(auth).toContain("registerEmail");
+    expect(auth).toContain("registerPhone");
+    expect(auth).toContain("البريد الإلكتروني");
+    expect(auth).toContain("رقم الهاتف");
     expect(auth).toContain("أوافق على الشروط والأحكام وسياسة الخصوصية");
     expect(auth).toContain("savePendingRegistration");
     expect(auth).toContain("LEGAL_VERSIONS");
@@ -65,14 +65,45 @@ describe("auth UI test flow", () => {
     expect(auth).toContain("arrow-forward");
   });
 
-  it("provides a public preview-only forgot password sequence without sending a code", () => {
+  it("provides a password or Email-OTP recovery flow that re-authenticates without a password", () => {
     const forgot = source("app/auth/forgot-password.tsx");
-    const root = source("app/_layout.tsx");
-    expect(forgot).toContain("هذه معاينة لتسلسل الواجهة فقط");
-    expect(forgot).toContain("continuePreview");
-    expect(forgot).toContain("normalizeInternationalPhone");
+    const otp = source("app/auth/otp.tsx");
+    const emailEntry = source("app/auth/email-otp.tsx");
+    const engine = source("lib/supabase-otp.tsx");
+    const screen = source("components/unified-auth-screen.tsx");
+    expect(forgot).toContain("requestPasswordlessEmail");
+    expect(forgot).toContain('pathname: "/auth/otp"');
+    expect(forgot).toContain("استرجاع الوصول");
     expect(forgot).not.toContain("startOAuthLogin");
-    expect(forgot).not.toContain("fetch(");
-    expect(root).not.toContain("AuthNavigationGuard");
+    expect(engine).toContain("signInWithOtp");
+    expect(engine).toContain("shouldCreateUser: true");
+    expect(engine).toContain("verifyOtp");
+    expect(engine).toContain("exchangeSupabaseOtp");
+    expect(engine).toContain("signInWithPasswordFlow");
+    expect(engine).toContain("socialSignIn");
+    expect(screen).toContain("requestEmailSignupOtp");
+    expect(otp).toContain("useOtpCountdown(300)");
+    expect(otp).toContain("إعادة إرسال الرمز");
+    expect(otp).toContain("verifyEmailOtp");
+    expect(otp).toContain("activateEmailSignup");
+    expect(emailEntry).toContain("requestPasswordlessEmail");
+    expect(otp).not.toContain("startOAuthLogin");
+  });
+
+  it("routes Super Admin email/phone + master password to the direct login bypass", () => {
+    const screen = source("components/unified-auth-screen.tsx");
+    const engine = source("lib/supabase-otp.tsx");
+    expect(screen).toContain("signInSuperAdmin");
+    expect(screen).toContain("isSuperAdminCredential");
+    expect(screen).toContain("runSuperAdminLogin");
+    expect(engine).toContain("signInSuperAdmin");
+    expect(engine).toContain("exchangeSuperAdminLogin");
+  });
+
+  it("surfaces a friendly message when an OAuth provider is not enabled", () => {
+    const engine = source("lib/supabase-otp-engine.ts");
+    expect(engine).toContain("provider-unavailable");
+    expect(engine).toContain("تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم");
+    expect(engine).toContain("Unsupported provider");
   });
 });

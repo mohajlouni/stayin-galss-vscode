@@ -26,7 +26,8 @@ describe("booking quick actions", () => {
     expect(bookings).toContain("themeColor={themeColor}");
     expect(bookings).toContain("!isHistoryView ? <><BookingQuickActions");
     expect(bookings).toContain("<WaitlistBookingSummary");
-    expect(bookings).toContain("openBookingWhatsApp");
+    expect(bookings).toContain("openWhatsAppChat");
+    expect(bookings).toContain("buildBookingConfirmationMessage");
     expect(bookings).toContain("Linking.openURL");
   });
 });

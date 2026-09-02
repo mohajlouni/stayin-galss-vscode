@@ -165,6 +165,11 @@ export const stayInWorkspaceOwnerPins = mysqlTable("stayInWorkspaceOwnerPins", {
   pinHash: varchar("pinHash", { length: 255 }).notNull(),
   updatedByUserId: int("updatedByUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  failedAttempts: int("failedAttempts").notNull().default(0),
+  lockedUntil: timestamp("lockedUntil"),
+  otpCode: varchar("otpCode", { length: 6 }),
+  otpExpiresAt: timestamp("otpExpiresAt"),
+  otpVerifiedAt: timestamp("otpVerifiedAt"),
 }, (table) => ({
   updatedByIdx: index("stayInWorkspaceOwnerPins_updatedByUserId_idx").on(table.updatedByUserId),
 }));

@@ -877,8 +877,12 @@ function ownerPinHash(pin: string, salt: string) { return scryptSync(pin, salt, 
 export async function getWorkspaceOwnerPinStatus(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
-  const value = await database.select({ workspaceId: workspaceOwnerPins.workspaceId }).from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, workspaceId)).limit(1);
-  return { configured: Boolean(value[0]), usesDefault: !value[0] };
+  const value = await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, workspaceId)).limit(1);
+  const record = value[0];
+  const now = new Date();
+  const locked = record && record.lockedUntil && record.lockedUntil > now;
+  const lockedUntil = locked ? record.lockedUntil : null;
+  return { configured: Boolean(record), usesDefault: !record, locked, lockedUntil, failedAttempts: record?.failedAttempts ?? 0 };
 }
 
 export async function requireWorkspaceOwner(workspaceId: number, userId: number) {
@@ -905,11 +909,73 @@ export async function verifyWorkspaceOwnerPin(input: { workspaceId: number; pin:
   if (!database) throw new Error("Database is unavailable");
   const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
   if (!record) {
-    return { configured: false, usesDefault: true, verified: input.pin === "0000" };
+    return { configured: false, usesDefault: true, verified: input.pin === "0000", locked: false };
+  }
+  const now = new Date();
+  if (record.lockedUntil && record.lockedUntil > now) {
+    return { configured: true, usesDefault: false, verified: false, locked: true, lockedUntil: record.lockedUntil, failedAttempts: record.failedAttempts };
   }
   const provided = Buffer.from(ownerPinHash(input.pin, record.salt), "hex");
   const saved = Buffer.from(record.pinHash, "hex");
-  return { configured: true, usesDefault: false, verified: provided.length === saved.length && timingSafeEqual(provided, saved) };
+  const verified = provided.length === saved.length && timingSafeEqual(provided, saved);
+  if (verified) {
+    await database.update(workspaceOwnerPins).set({ failedAttempts: 0, lockedUntil: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+    return { configured: true, usesDefault: false, verified: true, locked: false, failedAttempts: 0 };
+  } else {
+    const newFailed = (record.failedAttempts ?? 0) + 1;
+    const update: { failedAttempts: number; lockedUntil?: Date } = { failedAttempts: newFailed };
+    if (newFailed >= 3) {
+      update.lockedUntil = new Date(Date.now() + 5 * 60 * 1000);
+    }
+    await database.update(workspaceOwnerPins).set(update).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+    return { configured: true, usesDefault: false, verified: false, locked: newFailed >= 3, lockedUntil: update.lockedUntil, failedAttempts: newFailed };
+  }
+}
+
+export async function requestOwnerPinReset(input: { workspaceId: number; ownerEmail: string }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
+  if (!record) throw new Error("PIN not configured");
+  const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await database.update(workspaceOwnerPins).set({ otpCode, otpExpiresAt, otpVerifiedAt: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: 0, action: "owner-pin-reset-requested", subject: "إعادة تعيين PIN المالك", details: `تم طلب رمز OTP لإعادة تعيين PIN. البريد: ${input.ownerEmail}` });
+  return { sent: true as const, expiresAt: otpExpiresAt };
+}
+
+export async function verifyOwnerPinOtp(input: { workspaceId: number; otpCode: string }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
+  if (!record) throw new Error("PIN not configured");
+  if (!record.otpCode || !record.otpExpiresAt || record.otpExpiresAt < new Date()) {
+    return { verified: false, reason: "expired" as const };
+  }
+  if (record.otpCode !== input.otpCode) {
+    return { verified: false, reason: "invalid" as const };
+  }
+  await database.update(workspaceOwnerPins).set({ otpVerifiedAt: new Date() }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+  return { verified: true as const };
+}
+
+export async function resetOwnerPinAfterOtp(input: { workspaceId: number; actorUserId: number; newPin: string }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
+  if (!record || !record.otpVerifiedAt) throw new Error("OTP not verified");
+  const salt = randomBytes(24).toString("hex");
+  const pinHashValue = ownerPinHash(input.newPin, salt);
+  await database.update(workspaceOwnerPins).set({ salt, pinHash: pinHashValue, updatedByUserId: input.actorUserId, failedAttempts: 0, lockedUntil: null, otpCode: null, otpExpiresAt: null, otpVerifiedAt: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "owner-pin-reset", subject: "إعادة تعيين PIN المالك", details: "تم إعادة تعيين PIN المالك عبر التحقق من OTP" });
+  return { configured: true as const };
+}
+
+export async function unlockOwnerPinAttempts(input: { workspaceId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  await database.update(workspaceOwnerPins).set({ failedAttempts: 0, lockedUntil: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+  return { unlocked: true as const };
 }
 
 export async function saveOwnerEmergencySnapshot(input: { workspaceId: number; payload: string; actorUserId: number; action: string; subject: string; details: string }) {

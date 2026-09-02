@@ -368,7 +368,23 @@ export const appRouter = router({
     verifyPin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
       await requireEmergencyOwner(ctx.user.id, input.workspaceId);
       const result = await db.verifyWorkspaceOwnerPin(input);
-      return { verified: result.verified };
+      return { verified: result.verified, locked: result.locked, lockedUntil: result.lockedUntil, failedAttempts: result.failedAttempts };
+    }),
+    requestPinReset: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), ownerEmail: z.string().email() })).mutation(async ({ ctx, input }) => {
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      return db.requestOwnerPinReset(input);
+    }),
+    verifyPinOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), otpCode: z.string().regex(/^\d{6}$/) })).mutation(async ({ ctx, input }) => {
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      return db.verifyOwnerPinOtp(input);
+    }),
+    resetPinAfterOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), newPin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      return db.resetOwnerPinAfterOtp({ workspaceId: input.workspaceId, actorUserId: ctx.user.id, newPin: input.newPin });
+    }),
+    unlockPinAttempts: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      return db.unlockOwnerPinAttempts(input);
     }),
     options: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).query(async ({ ctx, input }) => {
       await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);

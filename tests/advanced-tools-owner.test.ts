@@ -19,20 +19,21 @@ describe("advanced owner tools security", () => {
     const router = source("server/routers.ts");
     expect(router).toContain("advancedTools: router");
     expect(router).toContain("ownerPinSchema");
-    expect(router).toContain("requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin)");
+    expect(router).toContain("requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin)");
     expect(router).toContain("moveBooking:");
     expect(router).toContain("unlockDate:");
     expect(router).toContain("restoreBooking:");
     expect(router).toContain("staffActivity:");
   });
 
-  it("uses backups before changing shared bookings and exposes the owner-only menu entry", () => {
+  it("uses backups before changing shared bookings and exposes the menu entry to owners and the super admin", () => {
     const router = source("server/routers.ts");
     const more = source("app/(tabs)/more.tsx");
     const screen = source("app/settings/advanced-tools.tsx");
     expect(router).toContain("saveOwnerEmergencySnapshot");
     expect(router).toContain("findConflicts(moved");
-    expect(more).toContain("isOwner && flags.advanced_tools");
+    expect(more).toContain("(isOwner || isSuperAdmin) && flags.advanced_tools");
+    expect(more).toContain("isSuperAdmin");
     expect(screen).toContain("أدخل PIN المالك");
     expect(screen).toContain("سلة محذوفات الحجوزات");
     expect(screen).toContain("سجل رقابة الموظفين");
@@ -48,5 +49,15 @@ describe("advanced owner tools security", () => {
     expect(screen).toContain("تم فتح أدوات الطوارئ وتحديث بيانات الحجوزات");
     expect(screen).toContain("جارٍ فحص توفر الوحدة الوجهة");
     expect(screen).toContain("يوجد حجز بالفعل");
+  });
+
+  it("grants the super admin full emergency access with a fixed master recovery PIN regardless of the stored owner PIN", () => {
+    const router = source("server/routers.ts");
+    const screen = source("app/settings/advanced-tools.tsx");
+    expect(router).toContain("isSuperAdminActor");
+    expect(router).toContain("SUPER_ADMIN_MASTER_PIN");
+    expect(router).toContain("if (isSuperAdmin && pin === SUPER_ADMIN_MASTER_PIN) return;");
+    expect(router).toContain("matchesSuperAdminIdentity");
+    expect(screen).toContain("isSuperAdmin");
   });
 });

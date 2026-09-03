@@ -311,7 +311,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
 
     setBusy("register"); setError(null); setMessage(null);
     try {
-      const result = await requestEmailSignupOtp({ email, password, name });
+      const result = await requestEmailSignupOtp({ email, password, name, phone: registerPhone });
       if (result.error) {
         setError(result.error === "not-configured"
           ? (language === "ar" ? "إنشاء الحساب عبر البريد الإلكتروني غير مفعّل بعد على هذا التطبيق." : "Email sign-up is not enabled on this app yet.")

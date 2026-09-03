@@ -187,7 +187,7 @@ export type EmailSignupActivationResult =
  * enters on the verification screen. Account creation on the StayIn side is
  * deferred until the OTP is verified via `activateEmailSignup`.
  */
-export async function requestEmailSignupOtp(input: { email: string; password: string; name: string }): Promise<{ error: SupabaseOtpError | null }> {
+export async function requestEmailSignupOtp(input: { email: string; password: string; name: string; phone?: string | null }): Promise<{ error: SupabaseOtpError | null }> {
   const email = normalizeEmail(input.email);
   const validation = validateEmail(email);
   if (validation) return { error: "invalid-email" };
@@ -195,9 +195,20 @@ export async function requestEmailSignupOtp(input: { email: string; password: st
   if (passwordIssue) return { error: "unknown" };
   if (!isSupabaseConfigured || !supabase) return { error: "not-configured" };
 
+  // Numerical sign-up OTP. `shouldCreateUser: true` provisions the Supabase Auth
+  // identity on demand and emails a 6-digit numeric code (not a magic link); the
+  // name/phone/role ride along as user_metadata so the new owner profile is
+  // created complete once the code is verified.
   const { error } = await supabase.auth.signInWithOtp({
     email,
-    options: { shouldCreateUser: true },
+    options: {
+      shouldCreateUser: true,
+      data: {
+        fullName: input.name.trim(),
+        phone: (input.phone ?? "").trim(),
+        role: "owner",
+      },
+    },
   });
   if (error) return { error: classifyOtpError(error) };
   return { error: null };

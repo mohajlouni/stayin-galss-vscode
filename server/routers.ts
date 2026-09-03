@@ -5,6 +5,8 @@ import { COOKIE_NAME } from "../shared/const.js";
 import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { notifyOwner } from "./_core/notification";
+import { ENV } from "./_core/env";
+import { matchesSuperAdminIdentity } from "./_core/identity";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk, sessionTokenFromRequest } from "./_core/sdk";
@@ -33,9 +35,22 @@ const expenseCategorySchema = z.enum(["guards-salaries", "maintenance", "cleanin
 const expensePaymentSchema = z.enum(["cash", "click"]);
 const ownerPinSchema = z.string().regex(/^\d{4}$/, "Owner PIN must be four digits");
 
-async function requireEmergencyOwner(userId: number, workspaceId: number, pin?: string) {
-  try { await db.requireWorkspaceOwner(workspaceId, userId); } catch { throw new TRPCError({ code: "FORBIDDEN", message: "Owner access required" }); }
+/** رمز استرجاع سيد ثابت يمنح السوبر أدمن الدخول لأدوات الطوارئ مهما كان PIN المالك. */
+const SUPER_ADMIN_MASTER_PIN = "246810";
+type EmergencyActor = { id: number; openId?: string | null; email?: string | null; phone?: string | null; role?: string | null; isSuperAdmin?: boolean };
+function isSuperAdminActor(actor: EmergencyActor, ownerOpenId: string): boolean {
+  if (actor.isSuperAdmin) return true;
+  if (actor.role === "super_admin") return true;
+  return matchesSuperAdminIdentity({ openId: actor.openId, email: actor.email, phone: actor.phone }, ownerOpenId);
+}
+
+async function requireEmergencyOwner(userId: number, workspaceId: number, actor: EmergencyActor, pin?: string) {
+  const isSuperAdmin = isSuperAdminActor(actor, ENV.ownerOpenId);
+  if (!isSuperAdmin) {
+    try { await db.requireWorkspaceOwner(workspaceId, userId); } catch { throw new TRPCError({ code: "FORBIDDEN", message: "Owner access required" }); }
+  }
   if (pin) {
+    if (isSuperAdmin && pin === SUPER_ADMIN_MASTER_PIN) return;
     const verification = await db.verifyWorkspaceOwnerPin({ workspaceId, pin });
     if (!verification.configured) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Owner PIN must be configured" });
     if (!verification.verified) throw new TRPCError({ code: "FORBIDDEN", message: "Invalid owner PIN" });
@@ -358,43 +373,46 @@ export const appRouter = router({
   }),
   advancedTools: router({
     status: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.getWorkspaceOwnerPinStatus(input.workspaceId);
     }),
     configurePin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.configureWorkspaceOwnerPin({ workspaceId: input.workspaceId, actorUserId: ctx.user.id, pin: input.pin });
     }),
     verifyPin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
+      if (isSuperAdminActor(ctx.user, ENV.ownerOpenId) && input.pin === SUPER_ADMIN_MASTER_PIN) {
+        return { verified: true, locked: false, lockedUntil: null, failedAttempts: 0 };
+      }
       const result = await db.verifyWorkspaceOwnerPin(input);
       return { verified: result.verified, locked: result.locked, lockedUntil: result.lockedUntil, failedAttempts: result.failedAttempts };
     }),
     requestPinReset: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), ownerEmail: z.string().email() })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.requestOwnerPinReset(input);
     }),
     verifyPinOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), otpCode: z.string().regex(/^\d{6}$/) })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.verifyOwnerPinOtp(input);
     }),
     resetPinAfterOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), newPin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.resetOwnerPinAfterOtp({ workspaceId: input.workspaceId, actorUserId: ctx.user.id, newPin: input.newPin });
     }),
     unlockPinAttempts: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.unlockOwnerPinAttempts(input);
     }),
     options: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).query(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const stored = await db.getWorkspaceData(input.workspaceId);
       if (!stored) return { bookings: [], units: [] };
       const data = normalizeAppData(JSON.parse(stored.payload));
       return { bookings: data.bookings.filter((booking) => !["cancelled", "completed", "waitlisted"].includes(booking.status)).map((booking) => ({ id: booking.id, customerName: booking.customerName, chaletId: booking.chaletId, chaletName: booking.chaletName, startDate: booking.startDate, startTime: booking.startTime, endDate: booking.endDate, endTime: booking.endTime, bookingType: booking.bookingType })), units: data.chalets.map((chalet) => ({ id: chalet.id, name: chalet.name })) };
     }),
     movePreview: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema, bookingId: z.string().min(1).max(128), destinationChaletId: z.string().min(1).max(128) })).query(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const stored = await db.getWorkspaceData(input.workspaceId);
       if (!stored) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace data not found" });
       const data = normalizeAppData(JSON.parse(stored.payload));
@@ -409,7 +427,7 @@ export const appRouter = router({
       return { allowed: conflictDetails.length === 0, message, conflicts: conflictDetails };
     }),
     moveBooking: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema, bookingId: z.string().min(1).max(128), destinationChaletId: z.string().min(1).max(128) })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const stored = await db.getWorkspaceData(input.workspaceId);
       if (!stored) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace data not found" });
       const data = normalizeAppData(JSON.parse(stored.payload));
@@ -428,7 +446,7 @@ export const appRouter = router({
       return db.saveOwnerEmergencySnapshot({ workspaceId: input.workspaceId, payload: JSON.stringify(normalizeAppData(data)), actorUserId: ctx.user.id, action: "booking-moved", subject: moved.customerName, details: JSON.stringify({ bookingId: booking.id, from: booking.chaletId, to: unit.id }) });
     }),
     unlockDate: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema, chaletId: z.string().min(1).max(128), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const stored = await db.getWorkspaceData(input.workspaceId);
       if (!stored) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace data not found" });
       const data = normalizeAppData(JSON.parse(stored.payload));
@@ -440,7 +458,7 @@ export const appRouter = router({
       return { ...result, released: removed.length };
     }),
     recycleBin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).query(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const [stored, backups] = await Promise.all([db.getWorkspaceData(input.workspaceId), db.listWorkspaceRecoveryPoints(input.workspaceId, 100)]);
       const currentIds = new Set(stored ? normalizeAppData(JSON.parse(stored.payload)).bookings.map((booking) => booking.id) : []);
       const deleted = new Map<string, { id: string; customerName: string; chaletName?: string; startDate: string; backupId: number }>();
@@ -448,7 +466,7 @@ export const appRouter = router({
       return [...deleted.values()].slice(0, 30);
     }),
     restoreBooking: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema, bookingId: z.string().min(1).max(128), backupId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const [stored, backups] = await Promise.all([db.getWorkspaceData(input.workspaceId), db.listWorkspaceRecoveryPoints(input.workspaceId, 100)]);
       if (!stored) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace data not found" });
       const backup = backups.find((item) => item.id === input.backupId);
@@ -462,7 +480,7 @@ export const appRouter = router({
       return db.saveOwnerEmergencySnapshot({ workspaceId: input.workspaceId, payload: JSON.stringify(normalizeAppData(data)), actorUserId: ctx.user.id, action: "booking-restored", subject: booking.customerName, details: JSON.stringify({ bookingId: booking.id, backupId: backup.id }) });
     }),
     staffActivity: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).query(async ({ ctx, input }) => {
-      await requireEmergencyOwner(ctx.user.id, input.workspaceId, input.pin);
+      await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user, input.pin);
       const stored = await db.getWorkspaceData(input.workspaceId);
       if (!stored) return [];
       const data = normalizeAppData(JSON.parse(stored.payload));

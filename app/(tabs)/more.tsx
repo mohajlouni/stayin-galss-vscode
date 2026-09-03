@@ -67,7 +67,7 @@ export default function MoreScreen() {
   const colors = useColors();
   const { lastSyncedAt, refreshWorkspaceData } = useBookings();
   const { isRTL, language, t } = useI18n();
-  const { isAuthenticated, isManager, isOwner, can, isCaretaker, activeWorkspaceId } = useWorkspaceAccess();
+  const { isAuthenticated, isManager, isOwner, isSuperAdmin, can, isCaretaker, activeWorkspaceId } = useWorkspaceAccess();
   const { currentUser, activePropertyGroup } = useAuthSession();
   const masterControl = trpc.masterControl.overview.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const internetAvailability = useInternetAvailability();
@@ -125,9 +125,9 @@ export default function MoreScreen() {
   const teamSecurityItems: MenuEntry[] = useMemo(() => [
     ...(isManager ? [{ title: language === "ar" ? "إدارة المستخدمين والصلاحيات" : "User management & permissions", description: language === "ar" ? "فريق العمل والموظفون والدعوات والصلاحيات" : "Staff, employees, invitations, and permissions", icon: "group" as const, route: "/user-management" as const }] : []),
     ...(can("view_audit_logs") && flags.audit_logs ? [{ title: language === "ar" ? "سجل إجراءات النظام" : "System activity log", description: language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions", icon: "history" as const, route: "/audit-log" as const }] : []),
-    ...(isOwner && flags.advanced_tools ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجز وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
+    ...((isOwner || isSuperAdmin) && flags.advanced_tools ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجز وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
     ...(masterControl.data && flags.master_control ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
-  ], [isManager, isOwner, language, can, masterControl.data, flags.audit_logs, flags.advanced_tools, flags.master_control]);
+  ], [isManager, isOwner, isSuperAdmin, language, can, masterControl.data, flags.audit_logs, flags.advanced_tools, flags.master_control]);
 
   const communicationItems: MenuEntry[] = useMemo(() => [
     ...(isManager && flags.whatsapp_templates ? [{ title: language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates", description: language === "ar" ? "تخصيص القوالب والرسائل الذكية" : "Customize templates and smart messages", icon: "chat" as const, route: "/whatsapp-templates" as const }] : []),

@@ -77,7 +77,10 @@ describe("auth UI test flow", () => {
     expect(forgot).not.toContain("startOAuthLogin");
     expect(engine).toContain("signInWithOtp");
     expect(engine).toContain("shouldCreateUser: true");
+    expect(engine).toContain("fullName");
+    expect(engine).toContain("role: \"owner\"");
     expect(engine).toContain("verifyOtp");
+    expect(engine).toContain("signInWithOtp");
     expect(engine).toContain("exchangeSupabaseOtp");
     expect(engine).toContain("signInWithPasswordFlow");
     expect(engine).toContain("socialSignIn");
@@ -88,6 +91,20 @@ describe("auth UI test flow", () => {
     expect(otp).toContain("activateEmailSignup");
     expect(emailEntry).toContain("requestPasswordlessEmail");
     expect(otp).not.toContain("startOAuthLogin");
+  });
+
+  it("aligns the OTP screen to a strict 8-digit input with auto-submit and the verify config", () => {
+    const otp = source("app/auth/otp.tsx");
+    const engine = source("lib/supabase-otp.tsx");
+    expect(otp).toContain("const OTP_LENGTH = 8");
+    expect(otp).toContain('Array(OTP_LENGTH).fill("")');
+    expect(otp).toContain("maxLength={OTP_LENGTH}");
+    expect(otp).toContain('replace(/\\D/g, "").slice(0, OTP_LENGTH)');
+    expect(otp).toContain('currentCode.length === OTP_LENGTH');
+    expect(otp).toContain("المكوّن من 8 أرقام");
+    expect(otp).toContain("Auto-submit as soon as the user types or pastes all 8 digits");
+    expect(engine).toContain("supabase.auth.verifyOtp({ email, token, type: \"email\" })");
+    expect(engine).toContain('type: "email"');
   });
 
   it("routes Super Admin email/phone + master password to the direct login bypass", () => {

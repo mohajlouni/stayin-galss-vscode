@@ -11,7 +11,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAuthSession } from "@/lib/auth-session";
 import { formatCountdown, resendPasswordlessEmail, useOtpCountdown, useResendCooldown, verifyEmailOtp, activateEmailSignup, type SupabaseOtpError, type AuthError, AUTH_ERROR_MESSAGES } from "@/lib/supabase-otp";
 
-const OTP_LENGTH = 6;
+const OTP_LENGTH = 8;
 
 export default function OtpVerificationScreen() {
   const colors = useColors();
@@ -83,7 +83,7 @@ export default function OtpVerificationScreen() {
 
   const submit = async () => {
     if (busy || currentCode.length !== OTP_LENGTH) {
-      if (currentCode.length !== OTP_LENGTH) setError(language === "ar" ? "أدخل رمز التحقق الكامل المكوّن من 6 أرقام." : "Enter the complete 6-digit verification code.");
+      if (currentCode.length !== OTP_LENGTH) setError(language === "ar" ? "أدخل رمز التحقق الكامل المكوّن من 8 أرقام." : "Enter the complete 8-digit verification code.");
       return;
     }
     setBusy(true);
@@ -105,6 +105,14 @@ export default function OtpVerificationScreen() {
       setBusy(false);
     }
   };
+
+  // Auto-submit as soon as the user types or pastes all 8 digits — no need to
+  // press the button. Guarded by `busy` so an in-flight request is not re-fired
+  // (the `currentCode` value stays stable after a failure, preventing loops).
+  useEffect(() => {
+    if (currentCode.length === OTP_LENGTH && !busy) void submit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCode]);
 
   const resend = async () => {
     if (busy || !cooldown.ready) return;
@@ -141,7 +149,7 @@ export default function OtpVerificationScreen() {
             <View style={styles.glow}><MaterialIcons name="mark-email-read" size={40} color={colors.primary} /></View>
             <ThemedText variant="titleLarge" style={styles.title}>{language === "ar" ? "رمز التحقق" : "Verification code"}</ThemedText>
             <ThemedText variant="bodySmall" color={colors.muted} style={styles.subtitle}>
-              {language === "ar" ? "أدخل رمز التحقق المكوّن من 6 أرقام الذي أُرسل إلى بريدك الإلكتروني لتأكيد دخولك." : "Enter the 6-digit code sent to your email to confirm your sign-in."}
+              {language === "ar" ? "أدخل رمز التحقق المكوّن من 8 أرقام الذي أُرسل إلى بريدك الإلكتروني لتأكيد دخولك." : "Enter the 8-digit code sent to your email to confirm your sign-in."}
             </ThemedText>
             <View style={[styles.emailChip, { flexDirection: row }]}>
               <MaterialIcons name="alternate-email" size={16} color={colors.primary} />

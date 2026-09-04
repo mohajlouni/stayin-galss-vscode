@@ -7,6 +7,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
 import { startOAuthLogin } from "@/constants/oauth";
 import { useColors } from "@/hooks/use-colors";
+import { useDemoMode } from "@/lib/demo-mode";
 import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
@@ -28,6 +29,7 @@ export default function UserManagementScreen() {
   const colors = useColors();
   const { isRTL, language } = useI18n();
   const { isAuthenticated, loading, isManager, isOwner, role, refetchWorkspace } = useWorkspaceAccess();
+  const { exitDemo } = useDemoMode();
   const overview = trpc.workspace.overview.useQuery(undefined, { enabled: isAuthenticated && isManager, retry: false });
   const invite = trpc.workspace.inviteEmployee.useMutation();
   const revoke = trpc.workspace.revokeInvitation.useMutation();
@@ -103,6 +105,7 @@ export default function UserManagementScreen() {
     }
     try {
       await accept.mutateAsync({ phone: phone.trim(), pin });
+      exitDemo();
       await refetchWorkspace();
       Alert.alert(language === "ar" ? "تم التفعيل" : "Activated", language === "ar" ? "تم ربط حسابك كموظف بنجاح." : "Your employee account is now linked.");
     } catch {
@@ -110,7 +113,7 @@ export default function UserManagementScreen() {
     }
   };
   const activateOwnerWorkspace = async () => {
-    try { await bootstrapOwner.mutateAsync(); await refetchWorkspace(); } catch { Alert.alert(language === "ar" ? "تعذر إنشاء المساحة" : "Could not create workspace", language === "ar" ? "حاول مرة أخرى." : "Please try again."); }
+    try { await bootstrapOwner.mutateAsync(); exitDemo(); await refetchWorkspace(); } catch { Alert.alert(language === "ar" ? "تعذر إنشاء المساحة" : "Could not create workspace", language === "ar" ? "حاول مرة أخرى." : "Please try again."); }
   };
   const saveMemberPermissions = async () => {
     if (!editingMember || editingMember.role === "owner") return;

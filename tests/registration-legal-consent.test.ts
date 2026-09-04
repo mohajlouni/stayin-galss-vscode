@@ -14,9 +14,12 @@ describe("registration and legal consent", () => {
     expect(auth).toContain("savePendingRegistration");
     expect(auth).toContain("requestEmailSignupOtp");
     expect(auth).not.toContain("startOAuthLogin");
-    expect(auth).toContain('"/legal/terms"');
-    expect(auth).toContain('"/legal/privacy"');
-    expect(auth).toContain('"/legal/conditions"');
+    expect(auth).toContain("TermsModal");
+    expect(auth).toContain("PrivacyModal");
+    expect(auth).toContain("أوافق على");
+    expect(auth).toContain("شروط وأحكام الاستخدام");
+    expect(auth).toContain("سياسة الخصوصية");
+    expect(auth).toContain("accessibilityRole=\"checkbox\"");
   });
 
   it("persists the agreed document versions only after a protected session exists", () => {

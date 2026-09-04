@@ -46,7 +46,13 @@ describe("auth UI test flow", () => {
     expect(auth).toContain("registerPhone");
     expect(auth).toContain("البريد الإلكتروني");
     expect(auth).toContain("رقم الهاتف");
-    expect(auth).toContain("أوافق على الشروط والأحكام وسياسة الخصوصية");
+    expect(auth).toContain("أوافق على");
+    expect(auth).toContain("شروط وأحكام الاستخدام");
+    expect(auth).toContain("باستخدامك لتطبيق StayIn، فإنك تقر بقراءة الشروط وفهمها والالتزام بها.");
+    expect(auth).toContain("TermsModal");
+    expect(auth).toContain("PrivacyModal");
+    expect(auth).toContain("LanguageSwitcher");
+    expect(auth).toContain('accessibilityRole="checkbox"');
     expect(auth).toContain("savePendingRegistration");
     expect(auth).toContain("LEGAL_VERSIONS");
     expect(auth).toContain("إنشاء حساب ومتابعة");
@@ -93,16 +99,17 @@ describe("auth UI test flow", () => {
     expect(otp).not.toContain("startOAuthLogin");
   });
 
-  it("aligns the OTP screen to a strict 8-digit input with auto-submit and the verify config", () => {
+  it("aligns the OTP screen to a 6-digit standard that accepts longer tokens without truncation, with auto-submit and the verify config", () => {
     const otp = source("app/auth/otp.tsx");
     const engine = source("lib/supabase-otp.tsx");
-    expect(otp).toContain("const OTP_LENGTH = 8");
+    expect(otp).toContain("const OTP_LENGTH = 6");
+    expect(otp).toContain("const MAX_OTP_LENGTH");
     expect(otp).toContain('Array(OTP_LENGTH).fill("")');
-    expect(otp).toContain("maxLength={OTP_LENGTH}");
-    expect(otp).toContain('replace(/\\D/g, "").slice(0, OTP_LENGTH)');
-    expect(otp).toContain('currentCode.length === OTP_LENGTH');
-    expect(otp).toContain("المكوّن من 8 أرقام");
-    expect(otp).toContain("Auto-submit as soon as the user types or pastes all 8 digits");
+    expect(otp).toContain('replace(/[^\\d]/g, "").slice(0, MAX_OTP_LENGTH)');
+    expect(otp).toContain("cleanToken.length < OTP_LENGTH");
+    expect(otp).toContain("token length=");
+    expect(otp).toContain("المكوّن من 6 أرقام");
+    expect(otp).toContain("Auto-submit once the user types or pastes at least 6 digits");
     expect(engine).toContain("supabase.auth.verifyOtp({ email, token, type: \"email\" })");
     expect(engine).toContain('type: "email"');
   });

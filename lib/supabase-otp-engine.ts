@@ -33,8 +33,15 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * Normalizes an entered OTP: drops all whitespace, zero-width and other
+ * invisible characters, keeping only the ASCII digits that make up the token.
+ * Pasting an email code often carries trailing spaces / invisible separators;
+ * stripping them ensures the exact token is forwarded to `verifyOtp` with no
+ * truncation and no stray characters.
+ */
 export function normalizeOtpToken(token: string): string {
-  return token.replace(/\s+/g, "");
+  return String(token ?? "").replace(/[^\d]/g, "");
 }
 
 export function isOtpTokenPresent(token: string): boolean {
@@ -51,6 +58,39 @@ export function classifyOtpError(error: unknown): SupabaseOtpError {
   }
   if (/rate|too many|seconds|throttl|limit/i.test(message) || status === 429) return "rate-limited";
   return "unknown";
+}
+
+/**
+ * Outcome of probing whether an email corresponds to a signup that is pending
+ * email verification (`auth.users` with `email_confirmed_at IS NULL`).
+ */
+export type SignupProbeResult = "pending" | "confirmed" | "not-found" | "network" | "unknown";
+
+/**
+ * Classifies the error produced by `supabase.auth.resend({ type: "signup" })`
+ * (or `signInWithOtp` with `shouldCreateUser: false`) into a signup state:
+ * - "pending"     → an unverified signup exists (resend is accepted).
+ * - "confirmed"   → the email is already confirmed (resend refused as
+ *                   "already confirmed"), so it is a normal verified login.
+ * - "not-found"   → no such signup/account exists (fresh, or purged after 7d).
+ * - "network"     → transport failure.
+ * - "unknown"     → any other error.
+ */
+export function classifySignupProbeError(error: unknown): SignupProbeResult {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const status = (error as { status?: number })?.status;
+  if (/network|fetch failed|load failed|connection|timeout|abort|offline|internet/i.test(message)) return "network";
+  // A confirmed address refuses a signup resend ("already confirmed").
+  if (/already confirmed|already signed up|confirmed|email already registered|account already exists/i.test(message)) return "confirmed";
+  // No pending signup / no such user.
+  if (/user not found|signup not found|not found|does ?not exist|no user/i.test(message) || status === 400) return "not-found";
+  if (/rate|too many|seconds|throttl|limit/i.test(message) || status === 429) return "unknown";
+  return "unknown";
+}
+
+/** True when the resend probe indicates a pending (unverified) signup. */
+export function isSignupProbePending(result: SignupProbeResult): boolean {
+  return result === "pending";
 }
 
 export function formatCountdown(seconds: number): string {
@@ -145,6 +185,7 @@ export type AuthError =
   | "invalid-password"
   | "invalid-email"
   | "provider-unavailable"
+  | "email-not-confirmed"
   | "network"
   | "unknown";
 
@@ -155,6 +196,7 @@ export const AUTH_ERROR_MESSAGES: Record<AuthError, string> = {
   "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام.",
   "invalid-email": "أدخل بريدًا إلكترونيًا صحيحًا، مثل name@example.com.",
   "provider-unavailable": "تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم",
+  "email-not-confirmed": "حسابك مسجل ولكنه غير موثّق بعد. أرسلنا لك رمز تحقق جديداً إلى بريدك الإلكتروني.",
   network: "تعذر الاتصال بالشبكة. تحقق من اتصال الإنترنت ثم أعد المحاولة.",
   unknown: "حدث خطأ غير متوقع أثناء الدخول. حاول مرة أخرى.",
 };
@@ -168,7 +210,11 @@ export function classifyAuthError(error: unknown): AuthError {
   // server auth settings. Show a friendly notice instead of a raw JSON alert.
   if (/unsupported provider|provider is not enabled|not enabled|validation_failed/i.test(message)) return "provider-unavailable";
 
-  if (/invalid login credentials|invalid_credentials|invalidentries|user not found|email not confirmed|unconfirmed|not registered/i.test(message)) return "unregistered";
+  // A registered but still unverified account. Distinct from "Invalid login
+  // credentials": confirming requires resending the sign-up OTP, not a password.
+  if (/email not confirmed|not confirmed|email_not_confirmed|unconfirmed/i.test(message)) return "email-not-confirmed";
+
+  if (/invalid login credentials|invalid_credentials|invalidentries|user not found|not registered/i.test(message)) return "unregistered";
   if (/invalid password|invalid_credentials|wrong password|password/i.test(message)) return "wrong-password";
   if (message.includes("كلمة المرور غير صحيحة") || message.includes("كلمة المرور خاطئة") || message.includes("كلمة المرور غير مطابقة")) return "wrong-password";
 

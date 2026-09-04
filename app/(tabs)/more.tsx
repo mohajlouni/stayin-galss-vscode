@@ -23,6 +23,7 @@ type MenuRoute =
   | "/suggestions"
   | "/audit-log"
   | "/chalet-management"
+  | "/properties-hub"
   | "/user-management"
   | "/workspace-select"
   | "/whatsapp-templates"
@@ -111,6 +112,7 @@ export default function MoreScreen() {
   const showCustomers = flags.crm ?? true;
 
   const propertyOpsItems: MenuEntry[] = useMemo(() => [
+    ...(isManager ? [{ title: language === "ar" ? "منشآتي وإدارة المنشآت" : "My properties hub", description: language === "ar" ? "منشآتك وبياناتها ووحداتها وطرق دفعها وعداداتها" : "Your properties: profile, units, payment methods, and meters", icon: "business" as const, route: "/properties-hub" as const }] : []),
     ...(isManager ? [{ title: language === "ar" ? "إدارة الوحدات / العقارات" : "Property management", description: language === "ar" ? "ملف كل وحدة وأسعارها وحارسها وأوقاتها" : "Each property profile, pricing, guardian, and hours", icon: "home-work" as const, route: "/chalet-management" as const }] : []),
     { title: t("waitlist"), description: language === "ar" ? "طلبات العملاء بانتظار توفر الموعد" : "Customer requests waiting for availability", icon: "format-list-bulleted", route: "/(tabs)/waitlist" },
     ...(isManager && flags.maintenance ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),

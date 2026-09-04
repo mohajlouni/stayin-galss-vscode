@@ -5,6 +5,7 @@ import { Redirect, router } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
+import { useDemoMode } from "@/lib/demo-mode";
 import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
@@ -14,6 +15,7 @@ export default function WorkspaceSelectScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
   const { isAuthenticated } = useWorkspaceAccess();
+  const { exitDemo } = useDemoMode();
   const routing = trpc.workspace.routing.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const selectWorkspace = trpc.workspace.select.useMutation();
   const createWorkspace = trpc.workspace.create.useMutation();
@@ -27,6 +29,7 @@ export default function WorkspaceSelectScreen() {
   const select = async (workspaceId: number) => {
     try {
       await selectWorkspace.mutateAsync({ workspaceId });
+      exitDemo();
       await routing.refetch();
       router.replace("/(tabs)");
     } catch {
@@ -40,6 +43,7 @@ export default function WorkspaceSelectScreen() {
     }
     try {
       await createWorkspace.mutateAsync({ name: name.trim() });
+      exitDemo();
       await routing.refetch();
       router.replace("/(tabs)");
     } catch {

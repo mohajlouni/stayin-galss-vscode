@@ -9,7 +9,9 @@ import {
   classifyAuthError,
   classifyIdentifier,
   classifyOtpError,
+  classifySignupProbeError,
   isOtpTokenPresent,
+  isSignupProbePending,
   isSuperAdminCredential,
   isSuperAdminEmail,
   isSuperAdminPassword,
@@ -22,11 +24,12 @@ import {
   validatePassword,
   type AuthError,
   type IdentifierKind,
+  type SignupProbeResult,
   type SupabaseOtpError,
   SUPABASE_OTP_ERROR_MESSAGES,
 } from "@/lib/supabase-otp-engine";
 
-export type { AuthError, IdentifierKind, SupabaseOtpError } from "@/lib/supabase-otp-engine";
+export type { AuthError, IdentifierKind, SignupProbeResult, SupabaseOtpError } from "@/lib/supabase-otp-engine";
 export { AUTH_ERROR_MESSAGES, SUPABASE_OTP_ERROR_MESSAGES, classifyAuthError, classifyIdentifier, formatCountdown, isSuperAdminCredential, isSuperAdminEmail, isSuperAdminPassword, passwordsMatch, SUPER_ADMIN_EMAIL, validateIdentifier, validatePassword } from "@/lib/supabase-otp-engine";
 
 /**
@@ -66,6 +69,42 @@ export async function resendPasswordlessEmail(email: string): Promise<{ error: S
   return requestPasswordlessEmail(email);
 }
 
+/**
+ * Probes whether an email is a signup that is still awaiting verification
+ * (7-day window). It uses `supabase.auth.resend({ type: "signup" })` as the
+ * detector: a pending unverified signup accepts a resend, a confirmed account
+ * refuses it as "already confirmed", and an unknown email is "not found". This
+ * does not auto-send for confirmed/unregistered addresses, so normal logins are
+ * unaffected — only a genuinely pending signup receives the (wanted) code.
+ */
+export async function probePendingSignup(email: string): Promise<{ result: SignupProbeResult; error: SupabaseOtpError | null }> {
+  const normalized = normalizeEmail(email);
+  if (!isSupabaseConfigured || !supabase) return { result: "unknown", error: "not-configured" };
+  if (!isOtpTokenPresent(normalized) || !validateEmail(normalized)) return { result: "unknown", error: "invalid-email" };
+  try {
+    const { error } = await supabase.auth.resend({ type: "signup", email: normalized });
+    if (!error) return { result: "pending", error: null };
+    const classified = classifySignupProbeError(error);
+    return { result: classified, error: classifyOtpError(error) };
+  } catch (error) {
+    const classified = classifySignupProbeError(error);
+    return { result: classified, error: classifyOtpError(error) };
+  }
+}
+
+/** Re-sends the sign-up confirmation code for an unverified account. */
+export async function resendSignupCode(email: string): Promise<{ error: SupabaseOtpError | null }> {
+  const normalized = normalizeEmail(email);
+  if (!isSupabaseConfigured || !supabase) return { error: "not-configured" };
+  try {
+    const { error } = await supabase.auth.resend({ type: "signup", email: normalized });
+    if (error) return { error: classifyOtpError(error) };
+    return { error: null };
+  } catch (error) {
+    return { error: classifyOtpError(error) };
+  }
+}
+
 export type VerifyEmailOtpResult =
   | { ok: true; email: string }
   | { ok: false; error: SupabaseOtpError };
@@ -82,7 +121,10 @@ export async function verifyEmailOtp(input: { email: string; token: string; refr
   if (!isOtpTokenPresent(token)) return { ok: false, error: "invalid-otp" };
 
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
-  if (error) return { ok: false, error: classifyOtpError(error) };
+  if (error) {
+    console.error("[Email OTP verify] exact Supabase error:", error);
+    return { ok: false, error: classifyOtpError(error) };
+  }
 
   // The Supabase client now holds a session; send its access token to our API
   // so the app's own session (routing/workspace/tRPC/data) is established.
@@ -158,7 +200,7 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
   const { data, error } = await supabase.auth.signInWithPassword({ email, password: input.password });
   if (error || !data.session) {
     console.error("[Login Error] Supabase email/password sign-in failed", error ?? "no session");
-    return { ok: false, error: classifyAuthError(error ?? new Error("sign-in-failed")) };
+    return { ok: false, error: await classifyLoginFailure(email, error ?? new Error("sign-in-failed")) };
   }
 
   try {
@@ -172,6 +214,56 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
 
   await input.refresh();
   return { ok: true, email };
+}
+
+/**
+ * Probes whether an email corresponds to an existing account (confirmed OR a
+ * pending unverified signup) using `supabase.auth.resend({ type: "signup" })`:
+ * - resend accepted        -> a pending unverified signup exists ("exists")
+ * - "already confirmed"    -> a confirmed account exists ("exists")
+ * - "user not found"       -> no such identity ("absent")
+ * - anything else          -> "unknown"
+ */
+async function probeUserExistence(email: string): Promise<"exists" | "absent" | "unknown"> {
+  if (!isSupabaseConfigured || !supabase) return "unknown";
+  try {
+    const { error } = await supabase.auth.resend({ type: "signup", email });
+    if (!error) return "exists";
+    const state = classifySignupProbeError(error);
+    if (state === "confirmed" || state === "pending") return "exists";
+    if (state === "not-found") return "absent";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Turns a raw password-login failure into a precise user-facing code.
+ *
+ * - "Email not confirmed"      -> the account exists but is unverified: the
+ *   caller should resend the sign-up OTP and route to the OTP screen. This is
+ *   reported distinctly from "unregistered".
+ * - "Invalid login credentials"-> we cannot tell from the message alone whether
+ *   the email exists, so we probe: only a genuinely absent identity is
+ *   reported as "unregistered"; an existing user with a wrong password is a
+ *   password error.
+ */
+async function classifyLoginFailure(email: string, error: unknown): Promise<AuthError> {
+  const code = classifyAuthError(error);
+  if (code === "email-not-confirmed") return "email-not-confirmed";
+
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (code === "unregistered" || /invalid login credentials|invalid_credentials|user not found/i.test(message)) {
+    const existence = await probeUserExistence(email);
+    if (existence === "absent") return "unregistered";
+    if (existence === "exists") return "wrong-password";
+    // When the probe is inconclusive, fold back to "unregistered" (the original
+    // behaviour) so a genuine absent-identity login is never misreported as a
+    // password mismatch.
+    return "unregistered";
+  }
+  return code;
 }
 
 export type EmailSignupActivationResult =
@@ -219,6 +311,13 @@ export async function requestEmailSignupOtp(input: { email: string; password: st
  * sign-up (`mode: "signup"`) so it creates the account (only now), retains the
  * Super Admin merge, and provisions the first default workspace for a genuine
  * new user.
+ *
+ * Verification type MUST match the dispatch method. The code was sent via
+ * `signInWithOtp` (see `requestEmailSignupOtp`), so it verifies against the
+ * `email` OTP type — NOT `signup`. Verifying with a mismatched type makes
+ * Supabase reply "Token has expired or is invalid", which is easily misread as
+ * an expiry. We therefore verify strictly with `type: "email"` and surface the
+ * exact Supabase error to the dev console for diagnosis.
  */
 export async function activateEmailSignup(input: { email: string; token: string; name: string; refresh: ReturnType<typeof useAuthSession>["refresh"] }): Promise<EmailSignupActivationResult> {
   const email = normalizeEmail(input.email);
@@ -227,13 +326,12 @@ export async function activateEmailSignup(input: { email: string; token: string;
   if (!isSupabaseConfigured || !supabase) return { ok: false, error: "not-configured" };
   if (!isOtpTokenPresent(token)) return { ok: false, error: "invalid-otp" };
 
-  // The sign-up code was delivered through the native numeric OTP flow
-  // (`signInWithOtp`), so the token verifies against the `email` OTP type.
-  // Fall back to `signup` for providers that deliver a confirmation-style code.
-  const verified = await supabase.auth.verifyOtp({ email, token, type: "email" });
-  if (verified.error) {
-    const signup = await supabase.auth.verifyOtp({ email, token, type: "signup" });
-    if (signup.error) return { ok: false, error: classifyOtpError(verified.error) };
+  // The sign-up code was dispatched with `signInWithOtp`, so the token verifies
+  // against the `email` OTP type (strictly matching the send method).
+  const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  if (error) {
+    console.error("[SignUp OTP verify] exact Supabase error:", error);
+    return { ok: false, error: classifyOtpError(error) };
   }
 
   const session = supabase.auth.getSession();

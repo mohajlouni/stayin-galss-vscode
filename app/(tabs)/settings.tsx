@@ -7,18 +7,16 @@ import { Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, Text
 import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
 import { GlowGlassCard } from "@/components/glow-glass-card";
-import { RipplePressable } from "@/components/ripple-pressable";
 import { ThemedText } from "@/components/themed-text";
 import { AppToggle } from "@/components/app-toggle";
 import { SettingsRow, SettingsSwitch, SettingsStepper, SettingsValueBadge } from "@/components/settings-row";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { getApiBaseUrl } from "@/constants/oauth";
-import { DEFAULT_WHATSAPP_DISCLAIMER, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, effectiveContractPolicy, effectiveHolidayPricing, effectiveLoyaltyProgram, effectiveUtilityTracking, effectiveWeatherAdvisory, type ContractPolicyConfig, type HolidayPricingConfig, type LoyaltyProgramConfig, type Settings, type UtilityRatesConfig, type WeatherAdvisoryConfig, type WhatsAppMessageOptions, isValidBusinessLogoUrl } from "@/lib/booking-model";
+import { DEFAULT_WHATSAPP_DISCLAIMER, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, effectiveContractPolicy, effectiveHolidayPricing, effectiveLoyaltyProgram, effectiveWeatherAdvisory, type ContractPolicyConfig, type HolidayPricingConfig, type LoyaltyProgramConfig, type Settings, type WeatherAdvisoryConfig, type WhatsAppMessageOptions } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
-import { utilityTypeIcon, utilityTypeLabel, UTILITY_TYPES } from "@/lib/utility-readings";
 
 type IconName = ComponentProps<typeof MaterialIcons>["name"];
 
@@ -43,7 +41,7 @@ export default function SettingsScreen() {
   const { settings, updateSettings, exportBackup, openBackupForPreview } = useBookings();
   const { isRTL, language } = useI18n();
   const { deviceSettings, deviceLanguage, deviceTimezone, formatDate, formatTime, updateDeviceSettings, triggerHaptic, languageChangeStatus, acknowledgeLanguageChange, restartApp } = useAppPreferences();
-  const { isManager } = useWorkspaceAccess();
+  const { isManager, activeWorkspaceId } = useWorkspaceAccess();
   const [loadingDemo, setLoadingDemo] = useState(false);
 
   const loadDemoData = async () => {
@@ -62,10 +60,6 @@ export default function SettingsScreen() {
   const layoutDirection: "rtl" | "ltr" = isRTL ? "rtl" : "ltr";
   const row = isRTL ? "row-reverse" : "row";
 
-  const [businessName, setBusinessName] = useState(settings.businessName);
-  const [businessPhone, setBusinessPhone] = useState(settings.businessPhone);
-  const [currency, setCurrency] = useState(settings.currency);
-  const [businessLogoUrl, setBusinessLogoUrl] = useState(settings.businessLogoUrl ?? "");
   const [whatsAppEnabled, setWhatsAppEnabled] = useState(settings.whatsAppEnabled ?? false);
   const [ownerPhone, setOwnerPhone] = useState(settings.ownerPhone ?? "");
   const [enableDisclaimer, setEnableDisclaimer] = useState(settings.enableDisclaimer ?? true);
@@ -74,10 +68,6 @@ export default function SettingsScreen() {
   const [timezone, setTimezone] = useState(deviceSettings.timezone || deviceTimezone);
 
   useEffect(() => {
-    setBusinessName(settings.businessName);
-    setBusinessPhone(settings.businessPhone);
-    setCurrency(settings.currency);
-    setBusinessLogoUrl(settings.businessLogoUrl ?? "");
     setWhatsAppEnabled(settings.whatsAppEnabled ?? false);
     setOwnerPhone(settings.ownerPhone ?? "");
     setEnableDisclaimer(settings.enableDisclaimer ?? true);
@@ -112,32 +102,6 @@ export default function SettingsScreen() {
 
   const updateMessageOption = (key: keyof WhatsAppMessageOptions, value: boolean) => setWhatsAppOptions((current) => ({ ...current, [key]: value }));
 
-  const saveBusiness = async () => {
-    if (!businessName.trim()) {
-      Alert.alert(language === "ar" ? "اسم المنشأة مطلوب" : "Business name required");
-      return;
-    }
-    if (!isValidBusinessLogoUrl(businessLogoUrl)) {
-      Alert.alert(language === "ar" ? "رابط شعار غير صالح" : "Invalid logo URL", language === "ar" ? "استخدم رابط HTTPS أو اترك الحقل فارغًا." : "Use an HTTPS URL or leave the field empty.");
-      return;
-    }
-    await updateSettings({
-      ...settings,
-      businessName: businessName.trim(),
-      businessPhone: businessPhone.trim(),
-      currency: currency.trim() || settings.currency,
-      businessLogoUrl: businessLogoUrl.trim() || undefined,
-      whatsAppEnabled,
-      ownerPhone: ownerPhone.trim(),
-      enableDisclaimer,
-      disclaimerText: disclaimerText.trim() || DEFAULT_WHATSAPP_DISCLAIMER,
-      whatsAppOptions,
-    });
-    void triggerHaptic();
-    Alert.alert(language === "ar" ? "تم حفظ الإعدادات" : "Settings saved");
-  };
-
-  const utilityConfig = effectiveUtilityTracking(settings);
   const loyaltyConfig = effectiveLoyaltyProgram(settings);
   const holidayConfig = effectiveHolidayPricing(settings);
   const contractConfig = effectiveContractPolicy(settings);
@@ -149,7 +113,6 @@ export default function SettingsScreen() {
     await updateSettings({ ...settings, ...patch });
     void triggerHaptic();
   };
-  const saveUtility = (patch: Partial<UtilityRatesConfig>) => saveConfig({ utilityTracking: { ...utilityConfig, ...patch } });
   const saveLoyalty = (patch: Partial<LoyaltyProgramConfig>) => saveConfig({ loyaltyProgram: { ...loyaltyConfig, ...patch } });
   const saveHoliday = (patch: Partial<HolidayPricingConfig>) => saveConfig({ holidayPricing: { ...holidayConfig, ...patch } });
   const saveContract = (patch: Partial<ContractPolicyConfig>) => saveConfig({ contractPolicy: { ...contractConfig, ...patch } });
@@ -161,42 +124,21 @@ export default function SettingsScreen() {
         <SubScreenHeader title={language === "ar" ? "الإعدادات" : "Settings"} />
 
         <Section title={language === "ar" ? "المنشأة والوحدات" : "Chalet & property"} icon="business" colors={colors} align={align} isRTL={isRTL}>
-          <Field label={language === "ar" ? "اسم المنشأة" : "Business name"} labelView={sectionTitle}><TextInput value={businessName} onChangeText={setBusinessName} placeholderTextColor={colors.muted} style={inputStyle} /></Field>
-          <Field label={language === "ar" ? "هاتف الإدارة" : "Management phone"} labelView={sectionTitle}><TextInput value={businessPhone} onChangeText={setBusinessPhone} keyboardType="phone-pad" placeholder="07xxxxxxxx" placeholderTextColor={colors.muted} style={inputStyle} /></Field>
-          <View style={[styles.dual, { flexDirection: row }]}>
-            <View style={styles.flex}><Field label={language === "ar" ? "العملة الافتراضية" : "Default currency"} labelView={sectionTitle} compact><TextInput value={currency} onChangeText={setCurrency} placeholderTextColor={colors.muted} style={inputStyle} /></Field></View>
-            <View style={styles.flex}><Field label={language === "ar" ? "رابط الشعار (اختياري)" : "Logo URL (optional)"} labelView={sectionTitle} compact><TextInput value={businessLogoUrl} onChangeText={setBusinessLogoUrl} autoCapitalize="none" keyboardType="url" placeholder="https://..." placeholderTextColor={colors.muted} style={inputStyle} /></Field></View>
-          </View>
-
-          <View style={styles.divider} />
-
-          <SettingsRow icon="home-work" title={language === "ar" ? "إدارة الوحدات والشاليهات" : "Units management"} subtitle={language === "ar" ? "إضافة وتعديل الأسماء والألوان والصور والأسعار والحارس وأوقات الدخول" : "Add/edit names, accent colors, photos, pricing, guardian, and times"} onPress={() => router.push("/chalet-management" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} />
-
-          <View style={styles.divider} />
-
-          <SettingsRow icon="payments" title={language === "ar" ? "إدارة طرق الدفع" : "Payment methods"} subtitle={language === "ar" ? "أضف أو عدّل أو أوقف طرق التحصيل واختر رمزًا لكل طريقة" : "Add, edit, pause, and choose an icon for each collection method"} onPress={() => router.push("/payment-methods" as never)} trailing={<SettingsValueBadge label={language === "ar" ? "إدارة" : "Manage"} />} />
-
-          <View style={styles.divider} />
-
-          {sectionTitle(language === "ar" ? "إعدادات الطاقة والعدادات" : "Utility rates & meters")}
-          <SettingsSwitch disabled={configLocked} icon="bolt" label={language === "ar" ? "تتبع استهلاك العدادات" : "Track meter consumption"} description={language === "ar" ? "تسجيل قراءات الدخول والخروج أثناء التسليم والاستلام وتكلفة الاستهلاك" : "Record check-in/out readings during delivery & checkout and bill consumption"} value={utilityConfig.enabled} onChange={(enabled) => void saveUtility({ enabled })} />
-          {UTILITY_TYPES.map((type) => (
-            <View key={type}>
-              <SettingsRow
-                icon={utilityTypeIcon(type)}
-                title={utilityTypeLabel(type, language)}
-                subtitle={language === "ar" ? "السعر لكل وحدة وسقف الاستهلاك" : "Unit rate & consumption cap"}
-                disabled={configLocked || !utilityConfig.enabled}
-                trailing={<View style={styles.stepperColumn}>
-                  <SettingsStepper value={utilityConfig.rates[type] ?? 0} min={0} max={100} step={0.01} disabled={configLocked || !utilityConfig.enabled} onChange={(rate) => void saveUtility({ rates: { ...utilityConfig.rates, [type]: rate } })} formatValue={(value) => `${value} ${settings.currency}`} />
-                  <SettingsStepper value={utilityConfig.thresholds[type] ?? 0} min={0} max={2000} step={10} disabled={configLocked || !utilityConfig.enabled} onChange={(threshold) => void saveUtility({ thresholds: { ...utilityConfig.thresholds, [type]: threshold } })} formatValue={(value) => `${language === "ar" ? "حد" : "cap"} ${value}`} />
-                </View>}
-              />
-              {description(language === "ar" ? `تنبيه الاستهلاك الزائد: القراءة تتجاوز ${utilityConfig.thresholds[type] ?? 0}` : `Excess alert: reading exceeds ${utilityConfig.thresholds[type] ?? 0}`)}
+          <View style={[styles.currentCard, { backgroundColor: colors.primary + "0F", borderColor: colors.primary + "44" }]}>
+            <View style={[styles.currentIcon, { backgroundColor: colors.primary + "18" }]}><MaterialIcons name="holiday-village" size={20} color={colors.primary} /></View>
+            <View style={styles.flex}>
+              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة الحالية" : "Current property"}</Text>
+              <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{settings.businessName || (language === "ar" ? "منشأة بدون اسم" : "Unnamed property")}</Text>
             </View>
-          ))}
-
-          <RipplePressable rippleColor="#FFFFFF3D" onPress={() => void saveBusiness()} style={({ pressed }) => [styles.save, { backgroundColor: colors.primary, opacity: pressed ? 0.76 : 1 }]}><Text style={{ color: "#FFFFFF", fontWeight: "800" }}>{language === "ar" ? "حفظ بيانات المنشأة" : "Save business profile"}</Text></RipplePressable>
+          </View>
+          <Pressable onPress={() => router.push(activeWorkspaceId ? (`/property-detail?workspaceId=${activeWorkspaceId}` as never) : ("/properties-hub" as never))} style={({ pressed }) => [styles.manageButton, { backgroundColor: colors.primary, opacity: pressed ? 0.76 : 1, flexDirection: row }]}>
+            <MaterialIcons name="edit-location-alt" size={20} color="#FFFFFF" />
+            <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>{language === "ar" ? "إدارة وحدات وبيانات المنشأة" : "Manage property units & profile"}</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push("/properties-hub" as never)} style={({ pressed }) => [styles.hubLink, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}>
+            <MaterialIcons name="business" size={16} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "إدارة منشآتي وتبديل المنشأة" : "Manage my properties / switch property"}</Text>
+          </Pressable>
         </Section>
 
         <Section title={language === "ar" ? "التقويم والتسعير الذكي" : "Calendar & smart pricing"} icon="calendar-month" colors={colors} align={align} isRTL={isRTL}>
@@ -382,11 +324,12 @@ const styles = StyleSheet.create({
   field: { width: "100%", marginTop: 12 },
   compactField: { marginTop: 0 },
   flex: { flex: 1, minWidth: 0 },
-  dual: { flexDirection: "row", gap: 10, marginTop: 14 },
   input: { width: "100%", minHeight: 48, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11, marginTop: 8 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: "rgba(128,128,128,0.22)", marginVertical: 14 },
-  stepperColumn: { alignItems: "flex-end", gap: 6 },
-  save: { minHeight: 50, borderRadius: 16, marginTop: 17, alignItems: "center", justifyContent: "center" },
+  currentCard: { minHeight: 66, borderRadius: 16, borderWidth: 1, alignItems: "center", gap: 11, paddingHorizontal: 13 },
+  currentIcon: { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  manageButton: { minHeight: 52, borderRadius: 16, marginTop: 14, alignItems: "center", justifyContent: "center", gap: 7 },
+  hubLink: { minHeight: 40, alignItems: "center", justifyContent: "center", gap: 6, marginTop: 8 },
   backup: { minHeight: 46, borderRadius: 15, marginTop: 10, alignItems: "center", justifyContent: "center", gap: 7 },
   thresholdRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" },
   choiceRow: { flexDirection: "row", gap: 8, marginTop: 10 },

@@ -4,6 +4,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypt
 import { accountDeletionRequests, activeWorkspaces, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { matchesSuperAdminIdentity } from "./_core/identity";
+import { getSupabaseClient } from "./_core/supabase";
 import { MANAGER_PERMISSIONS, normalizeWorkspacePermissions, permissionsForWorkspaceRole, type WorkspacePermissions } from "../shared/workspace-permissions";
 import { DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, normalizeAppData } from "../lib/booking-model";
 
@@ -638,6 +639,50 @@ export async function getWorkspaceRouting(user: { id: number; name: string | nul
   return { destination: "selector" as const, activeWorkspace: null, memberships };
 }
 
+/**
+ * Enriches every workspace the user belongs to with the operational profile
+ * stored in that workspace's data payload (business name/phone/currency) plus
+ * its active unit count, and marks which one is currently active. Used by the
+ * Properties Hub (منشآتي) to render accurate per-property cards regardless of
+ * the workspace that is active at the moment.
+ */
+export async function getWorkspaceHub(user: { id: number; name: string | null }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const memberships = await listWorkspaceMemberships(user.id);
+  const activeId = await getActiveWorkspaceId(user.id);
+  const cards = await Promise.all(memberships.map(async ({ workspace, member }) => {
+    let businessName = workspace.name;
+    let businessPhone = "";
+    let currency: string | null = workspace.currency ?? null;
+    let unitCount = 0;
+    const stored = await getWorkspaceData(workspace.id);
+    if (stored) {
+      try {
+        const data = normalizeAppData(JSON.parse(stored.payload));
+        businessName = data.settings.businessName.trim() || workspace.name;
+        businessPhone = data.settings.businessPhone.trim() ?? "";
+        currency = data.settings.currency.trim() || (workspace.currency ?? null);
+        unitCount = data.chalets.length;
+      } catch {
+        // Fall back to the workspace row values if the payload is unreadable.
+      }
+    }
+    return {
+      workspaceId: workspace.id,
+      name: workspace.name,
+      businessName,
+      businessPhone,
+      currency,
+      logoUrl: workspace.logoUrl ?? null,
+      role: member.role,
+      unitCount,
+      isActive: workspace.id === activeId,
+    };
+  }));
+  return { memberships: cards };
+}
+
 export async function listWorkspaceMembers(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
@@ -969,23 +1014,34 @@ export async function requestOwnerPinReset(input: { workspaceId: number; ownerEm
   if (!database) throw new Error("Database is unavailable");
   const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
   if (!record) throw new Error("PIN not configured");
-  const otpCode = String(Math.floor(100000 + Math.random() * 900000));
-  const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  await database.update(workspaceOwnerPins).set({ otpCode, otpExpiresAt, otpVerifiedAt: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
-  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: 0, action: "owner-pin-reset-requested", subject: "إعادة تعيين PIN المالك", details: `تم طلب رمز OTP لإعادة تعيين PIN. البريد: ${input.ownerEmail}` });
-  return { sent: true as const, expiresAt: otpExpiresAt };
+  // The email OTP is delivered by Supabase Auth using the SMTP configured in
+  // the dashboard — no custom mailer. Mark pending so a reset can only proceed
+  // after a successful verification.
+  try {
+    const { error } = await getSupabaseClient().auth.signInWithOtp({ email: input.ownerEmail, options: { shouldCreateUser: false } });
+    if (error) throw error;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(`Could not send verification code: ${message}`);
+  }
+  await database.update(workspaceOwnerPins).set({ otpCode: null, otpExpiresAt: null, otpVerifiedAt: null }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: 0, action: "owner-pin-reset-requested", subject: "إعادة تعيين PIN المالك", details: `تم إرسال رمز OTP لإعادة تعيين PIN. البريد: ${input.ownerEmail}` });
+  return { sent: true as const };
 }
 
-export async function verifyOwnerPinOtp(input: { workspaceId: number; otpCode: string }) {
+export async function verifyOwnerPinOtp(input: { workspaceId: number; ownerEmail: string; otpCode: string }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const record = (await database.select().from(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId)).limit(1))[0];
   if (!record) throw new Error("PIN not configured");
-  if (!record.otpCode || !record.otpExpiresAt || record.otpExpiresAt < new Date()) {
-    return { verified: false, reason: "expired" as const };
-  }
-  if (record.otpCode !== input.otpCode) {
-    return { verified: false, reason: "invalid" as const };
+  try {
+    const { error } = await getSupabaseClient().auth.verifyOtp({ email: input.ownerEmail, token: input.otpCode, type: "email" });
+    if (error) {
+      const code = (error as { status?: number }).status;
+      return { verified: false as const, reason: code === 422 ? "expired" as const : "invalid" as const };
+    }
+  } catch {
+    return { verified: false as const, reason: "invalid" as const };
   }
   await database.update(workspaceOwnerPins).set({ otpVerifiedAt: new Date() }).where(eq(workspaceOwnerPins.workspaceId, input.workspaceId));
   return { verified: true as const };

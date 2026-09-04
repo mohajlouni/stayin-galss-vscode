@@ -47,17 +47,18 @@ async function syncUser(userInfo: {
 function buildUserResponse(
   user:
     | Awaited<ReturnType<typeof getUserByOpenId>>
-    | {
+    |       {
         openId?: string | null;
         name?: string | null;
         email?: string | null;
+        phone?: string | null;
         loginMethod?: string | null;
         lastSignedIn?: Date | null;
         role?: string | null;
       },
 ) {
   const isSuperAdmin = matchesSuperAdminIdentity(
-    { openId: user?.openId ?? null, email: user?.email ?? null },
+    { openId: user?.openId ?? null, email: user?.email ?? null, phone: (user as any)?.phone ?? null },
     ENV.ownerOpenId,
   );
   return {
@@ -65,6 +66,7 @@ function buildUserResponse(
     openId: user?.openId ?? null,
     name: user?.name ?? null,
     email: user?.email ?? null,
+    phone: (user as any)?.phone ?? null,
     loginMethod: user?.loginMethod ?? null,
     role: isSuperAdmin ? "super_admin" : (user as any)?.role ?? "user",
     isSuperAdmin,

@@ -17,6 +17,8 @@ import { useColors } from "@/hooks/use-colors";
 import { AppPreferencesProvider } from "@/lib/app-preferences";
 import { BookingProvider, useBookings } from "@/lib/booking-store";
 import { ChaletScopeProvider } from "@/lib/chalet-scope";
+import { useDemoMode } from "@/lib/demo-mode";
+import { DemoModeProvider } from "@/lib/demo-mode";
 import { ThemeProvider } from "@/lib/theme-provider";
 import { UndoDeleteBanner } from "@/components/undo-delete-banner";
 import { createTRPCClient, trpc } from "@/lib/trpc";
@@ -80,17 +82,19 @@ await Font.loadAsync({
     <AppErrorBoundary>
       <TrpcProvider>
         <AuthSessionProvider>
-          <BookingProvider>
-            <ChaletScopeProvider>
-              <AppPreferencesProvider>
-                <ThemeProvider>
-                  <RouteAccessGate>
-                    <AppNavigator />
-                  </RouteAccessGate>
-                </ThemeProvider>
-              </AppPreferencesProvider>
-            </ChaletScopeProvider>
-          </BookingProvider>
+          <DemoModeProvider>
+            <BookingProvider>
+              <ChaletScopeProvider>
+                <AppPreferencesProvider>
+                  <ThemeProvider>
+                    <RouteAccessGate>
+                      <AppNavigator />
+                    </RouteAccessGate>
+                  </ThemeProvider>
+                </AppPreferencesProvider>
+              </ChaletScopeProvider>
+            </BookingProvider>
+          </DemoModeProvider>
         </AuthSessionProvider>
       </TrpcProvider>
     </AppErrorBoundary>
@@ -122,7 +126,34 @@ function AppNavigator() {
     const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => { active = false; subscription.remove(); };
   }, []);
-  return <><StatusBar style="auto" /><Stack screenOptions={stackScreenOptions} /><WorkspaceSyncBanner /><UndoDeleteBanner /></>;
+  return <><StatusBar style="auto" /><Stack screenOptions={stackScreenOptions} /><DemoBanner /><DemoNotice /><WorkspaceSyncBanner /><UndoDeleteBanner /></>;
+}
+
+function DemoBanner() {
+  const { isDemo, exitDemo } = useDemoMode();
+  const { isRTL, language } = useI18n();
+  const colors = useColors();
+  const align = isRTL ? "right" : "left";
+  const row = isRTL ? "row-reverse" : "row";
+  if (!isDemo) return null;
+  const exit = () => {
+    exitDemo();
+  };
+  return <View pointerEvents="box-none" style={styles.demoLayer}><View style={[styles.demoBanner, { backgroundColor: colors.primary, flexDirection: row }]}><Pressable onPress={exit} style={({ pressed }) => [styles.demoCopy, { opacity: pressed ? 0.85 : 1 }]}><Text style={{ color: colors.background, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "👁️ الوضع التجريبي مفعّل — بيانات استعراضية غير محفوظة" : "👁️ Demo mode — preview data, nothing saved"}</Text><Text style={{ color: colors.background, fontSize: 10, lineHeight: 15, marginTop: 2, opacity: 0.94, textAlign: align }}>{language === "ar" ? "كل ما تفعله هنا يظهر فقط أثناء الجولة ولا يُحفظ في حسابك." : "Everything you do here stays in-memory and is never saved to your account."}</Text></Pressable><Pressable onPress={exit} style={({ pressed }) => [styles.demoExit, { backgroundColor: colors.background, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? "تأسيس منشأتك الحقيقية الآن" : "Set up your real property"}</Text></Pressable></View></View>;
+}
+
+function DemoNotice() {
+  const { isDemo, demoNotice, clearDemoNotice } = useDemoMode();
+  const { isRTL, language } = useI18n();
+  const colors = useColors();
+  const align = isRTL ? "right" : "left";
+  useEffect(() => {
+    if (!demoNotice) return;
+    const timer = setTimeout(() => clearDemoNotice(), 3200);
+    return () => clearTimeout(timer);
+  }, [demoNotice, clearDemoNotice]);
+  if (!demoNotice) return null;
+  return <View pointerEvents="box-none" style={styles.noticeLayer}><View style={[styles.noticeToast, { backgroundColor: colors.foreground, opacity: isDemo ? 0.97 : 0.97 }]}><Text style={{ color: colors.background, fontSize: 12, lineHeight: 18, fontWeight: "800", textAlign: align }}>{language === "ar" ? demoNotice : "This is a demo feature and will not be saved. Create your real property to use it."}</Text></View></View>;
 }
 
 function WorkspaceSyncBanner() {
@@ -144,6 +175,12 @@ function WorkspaceSyncBanner() {
 }
 
 const styles = StyleSheet.create({ 
+  demoLayer: { position: "absolute", top: 8, left: 12, right: 12, zIndex: 55 }, 
+  demoBanner: { borderRadius: 15, padding: 10, alignItems: "center", gap: 10, elevation: 7, shadowColor: "#0B1F1B", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } }, 
+  demoCopy: { flex: 1, minWidth: 0 }, 
+  demoExit: { minHeight: 34, borderRadius: 10, justifyContent: "center", alignItems: "center", paddingHorizontal: 11, flexShrink: 0 },
+  noticeLayer: { position: "absolute", left: 16, right: 16, bottom: 26, zIndex: 60 }, 
+  noticeToast: { borderRadius: 14, padding: 13, elevation: 8, shadowColor: "#000", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   syncLayer: { position: "absolute", top: 8, left: 12, right: 12, zIndex: 50 }, 
   syncBanner: { borderRadius: 15, padding: 10, alignItems: "center", gap: 10, elevation: 7, shadowColor: "#0B1F1B", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } }, 
   syncCopy: { flex: 1, minWidth: 0 }, 

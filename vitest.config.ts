@@ -11,5 +11,8 @@ export default defineConfig({
   },
   test: {
     setupFiles: ["./scripts/load-env.js"],
+    cache: {
+      dir: resolve(__dirname, ".vitest-cache"),
+    },
   },
 });

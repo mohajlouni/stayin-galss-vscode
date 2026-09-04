@@ -19,7 +19,10 @@ describe("account deletion request", () => {
   it("requires typed confirmation and offers cancellation from the dedicated screen", () => {
     const screen = source("app/account-deletion.tsx");
     const security = source("app/account-security.tsx");
-    expect(screen).toContain('confirmation.trim().toUpperCase() !== "DELETE"');
+    expect(screen).toContain('confirmationValid');
+    expect(screen).toContain('v === "DELETE"');
+    expect(screen).toContain('"حذف"');
+    expect(screen).toContain('confirmation: "DELETE"');
     expect(screen).toContain("إلغاء طلب الحذف والاحتفاظ بالحساب");
     expect(screen).toContain("لا يُحذف شيء فورًا");
     expect(security).toContain('router.push("/account-deletion")');

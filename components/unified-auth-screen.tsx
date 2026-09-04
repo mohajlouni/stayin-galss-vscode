@@ -5,11 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, TextInput, View, type ViewStyle, type TextStyle } from "react-native";
 
 import { AppToggle } from "@/components/app-toggle";
+import { PrivacyModal, TermsModal } from "@/components/legal-modals";
 import { ScreenContainer } from "@/components/screen-container";
 import { ThemedText } from "@/components/themed-text";
+import { useAppPreferences } from "@/lib/app-preferences";
 import { useAuthSession } from "@/lib/auth-session";
 import { LEGAL_VERSIONS, savePendingRegistration } from "@/lib/legal-consent";
-import { AUTH_ERROR_MESSAGES, isSuperAdminCredential, requestEmailSignupOtp, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
+import { AUTH_ERROR_MESSAGES, isSuperAdminCredential, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 
@@ -90,20 +92,37 @@ function TabButton(props: { colors: AuthColors; styles: AuthStyles; label: strin
   );
 }
 
-function LegalConsent(props: { colors: AuthColors; styles: AuthStyles; value: boolean; onValueChange: (value: boolean) => void }) {
-  const { colors, styles, value, onValueChange } = props;
+function LanguageSwitcher(props: { colors: AuthColors; styles: AuthStyles; language: "ar" | "en"; onToggle: () => void }) {
+  const { colors, styles, language, onToggle } = props;
+  return (
+    <View style={styles.langRow}>
+      <Pressable accessibilityRole="button" accessibilityState={{ selected: language === "en" }} onPress={() => { if (language !== "en") onToggle(); }} style={[styles.langPill, { borderColor: colors.border }, language === "en" && { backgroundColor: colors.primary }]}>
+        <ThemedText variant="label" color={language === "en" ? colors.background : colors.muted} style={styles.langText}>EN</ThemedText>
+      </Pressable>
+      <ThemedText variant="caption" color={colors.muted} style={styles.langSeparator}>|</ThemedText>
+      <Pressable accessibilityRole="button" accessibilityState={{ selected: language === "ar" }} onPress={() => { if (language !== "ar") onToggle(); }} style={[styles.langPill, { borderColor: colors.border }, language === "ar" && { backgroundColor: colors.primary }]}>
+        <ThemedText variant="label" color={language === "ar" ? colors.background : colors.muted} style={styles.langText}>AR</ThemedText>
+      </Pressable>
+    </View>
+  );
+}
+
+function LegalConsent(props: { colors: AuthColors; styles: AuthStyles; language: "ar" | "en"; value: boolean; onValueChange: (value: boolean) => void; onShowTerms: () => void; onShowPrivacy: () => void }) {
+  const { colors, styles, language, value, onValueChange, onShowTerms, onShowPrivacy } = props;
+  const isAr = language === "ar";
   return (
     <View style={styles.consent}>
-      <AppToggle value={value} onValueChange={onValueChange} isRTL activeColor={colors.primary} inactiveColor={colors.border} accessibilityLabel="الموافقة على الشروط والأحكام وسياسة الخصوصية" />
+      <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: value }} onPress={() => onValueChange(!value)} style={[styles.checkbox, { borderColor: value ? colors.primary : colors.border, backgroundColor: value ? colors.primary : "transparent" }]}>
+        {value ? <MaterialIcons name="check" size={15} color={colors.background} /> : null}
+      </Pressable>
       <View style={styles.flex}>
-        <ThemedText variant="bodySmall" style={styles.consentTitle}>أوافق على الشروط والأحكام وسياسة الخصوصية</ThemedText>
-        <View style={styles.links}>
-          <Pressable accessibilityRole="link" onPress={() => router.push("/legal/terms")}><ThemedText variant="label" color={colors.primary} style={styles.link}>الشروط والأحكام</ThemedText></Pressable>
-          <ThemedText variant="label" color={colors.muted} style={styles.join}>، </ThemedText>
-          <Pressable accessibilityRole="link" onPress={() => router.push("/legal/privacy")}><ThemedText variant="label" color={colors.primary} style={styles.link}>سياسة الخصوصية</ThemedText></Pressable>
-          <ThemedText variant="label" color={colors.muted} style={styles.join}>، و</ThemedText>
-          <Pressable accessibilityRole="link" onPress={() => router.push("/legal/conditions")}><ThemedText variant="label" color={colors.primary} style={styles.link}>الأحكام التشغيلية</ThemedText></Pressable>
+        <View style={styles.consentTitleRow}>
+          <ThemedText variant="bodySmall" style={styles.consentTitle}>{isAr ? "أوافق على" : "I agree to the"}{" "}</ThemedText>
+          <Pressable accessibilityRole="link" onPress={onShowTerms}><ThemedText variant="label" color={colors.primary} style={styles.link}>{isAr ? "شروط وأحكام الاستخدام" : "Terms & Conditions"}</ThemedText></Pressable>
+          <ThemedText variant="bodySmall" style={styles.consentTitle}>{isAr ? " و " : " and "}</ThemedText>
+          <Pressable accessibilityRole="link" onPress={onShowPrivacy}><ThemedText variant="label" color={colors.primary} style={styles.link}>{isAr ? "سياسة الخصوصية" : "Privacy Policy"}</ThemedText></Pressable>
         </View>
+        <ThemedText variant="caption" color={colors.muted} style={styles.consentHint}>{isAr ? "باستخدامك لتطبيق StayIn، فإنك تقر بقراءة الشروط وفهمها والالتزام بها." : "By using StayIn, you acknowledge that you have read, understood, and agree to these terms."}</ThemedText>
       </View>
     </View>
   );
@@ -153,6 +172,7 @@ function rawErrorMessage(err: unknown): string {
 export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = false }: { initialTab?: Tab; standaloneRegister?: boolean }) {
   const colors = useColors();
   const { isRTL, language } = useI18n();
+  const { updateDeviceSettings } = useAppPreferences();
   const { isAuthenticated, biometricAvailable, activeSession, setRememberMe, unlockWithBiometrics, refresh } = useAuthSession();
 
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -169,9 +189,12 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
   const [showConfirm, setShowConfirm] = useState(false);
 
   const [accepted, setAccepted] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingUnverified, setPendingUnverified] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [touched, setTouched] = useState<Record<ValidatedField, boolean>>({ name: false, loginIdentifier: false, loginPassword: false, email: false, phone: false, password: false, confirm: false });
 
@@ -185,7 +208,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     return () => animation.stop();
   }, [pulse]);
 
-  const resetFeedback = () => { setError(null); setMessage(null); };
+  const resetFeedback = () => { setError(null); setMessage(null); setPendingUnverified(null); };
+  const toggleLanguage = () => {
+    const next: "ar" | "en" = language === "ar" ? "en" : "ar";
+    void updateDeviceSettings({ language: next, useDeviceLanguage: false });
+  };
   const changeTab = (next: Tab) => {
     if (next === tab || isBusy) return;
     resetFeedback();
@@ -264,13 +291,36 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       return;
     }
 
+    // Login-screen guard: if the entered email belongs to a signup that is still
+    // awaiting verification (within the 7-day window), surface the pending state
+    // with "[إدخال رمز التحقق]" and "[إعادة إرسال الرمز]" instead of trying a
+    // password login that Supabase will reject as unconfirmed/unregistered.
+    resetFeedback();
+    const probe = await probePendingSignup(email);
+    if (probe.result === "pending") {
+      setPendingUnverified(email);
+      return;
+    }
+
     const invalidPassword = validatePasswordValue(loginPassword);
     if (invalidPassword) { setTouched((current) => ({ ...current, loginPassword: true })); setError(invalidPassword); return; }
     setBusy("login"); setError(null); setMessage(null);
     try {
-      const result = await signInWithPasswordFlow({ email, password: loginPassword, refresh });
-      if (result.ok) { router.replace("/workspace-gate"); return; }
-      setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
+    const result = await signInWithPasswordFlow({ email, password: loginPassword, refresh });
+    if (result.ok) { router.replace("/workspace-gate"); return; }
+    if (result.error === "email-not-confirmed") {
+      // The account exists but is not verified yet. Do not show "الحساب غير
+      // مسجل"; instead resend the sign-up code, inform the user, and route them
+      // to the OTP screen with the email pre-filled for signup verification.
+      try { await resendSignupCode(email); } catch { /* best-effort resend */ }
+      setMessage(language === "ar"
+        ? "حسابك مسجل ولكنه غير موثّق بعد. أرسلنا لك رمز تحقق جديداً إلى بريدك الإلكتروني."
+        : "Your account is registered but not yet verified. We sent you a new verification code to your email.");
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      router.push({ pathname: "/auth/otp", params: { email, mode: "signup" } });
+      return;
+    }
+    setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
       setError(rawErrorMessage(err));
@@ -324,6 +374,22 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     } catch {
       setError(language === "ar" ? "تعذر إرسال رمز التحقق. تحقق من اتصال الإنترنت ثم أعد المحاولة." : "Could not send the verification code. Check your connection and try again.");
     } finally { setBusy(null); }
+  };
+
+  const handleResendSignup = async (email: string) => {
+    setBusy("login"); setError(null); setMessage(null);
+    try {
+      const { error: resendError } = await resendSignupCode(email);
+      if (resendError) {
+        setError(AUTH_ERROR_MESSAGES[resendError === "not-configured" ? "not-configured" : resendError === "network" ? "network" : "unknown"] ?? "");
+        return;
+      }
+      router.push({ pathname: "/auth/otp", params: { email, mode: "signup" } });
+    } finally { setBusy(null); }
+  };
+
+  const handleEnterVerificationCode = (email: string) => {
+    router.push({ pathname: "/auth/otp", params: { email, mode: "signup" } });
   };
 
   const submit = async () => {
@@ -384,6 +450,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     <ScreenContainer containerClassName="bg-transparent" safeAreaClassName="bg-transparent" edges={["top", "bottom", "left", "right"]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.shell}>
+          <LanguageSwitcher colors={colors} styles={styles} language={language} onToggle={toggleLanguage} />
           {standaloneRegister ? (
             <Pressable accessibilityRole="button" accessibilityLabel="العودة إلى تسجيل الدخول" onPress={() => router.replace("/auth/login")} style={({ pressed }) => [styles.back, { opacity: pressed ? 0.65 : 1 }]}>
               <MaterialIcons name="arrow-forward" size={22} color={colors.primary} />
@@ -438,6 +505,25 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
                   onToggleReveal={() => setShowLoginPassword((value) => !value)}
                 />
                 <FieldValidation colors={colors} styles={styles} error={loginPasswordLiveError} valid={loginPasswordIsValid} successText="كلمة المرور مقبولة." />
+                {pendingUnverified ? (
+                  <View accessibilityLiveRegion="polite" style={[styles.verifyNotice, { borderColor: colors.warning + "66", backgroundColor: colors.warning + "12" }]}>
+                    <MaterialIcons name="mark-email-unread" size={20} color={colors.warning} />
+                    <View style={styles.flex}>
+                      <ThemedText variant="label" color={colors.warning} style={styles.verifyNoticeTitle}>الحساب بانتظار التوثيق: يرجى فحص صندوق الوارد أو البريد غير الهام (Spam)</ThemedText>
+                      <ThemedText variant="caption" color={colors.muted} style={styles.verifyNoticeHint}>أدخل رمز التحقق المرسل إلى بريدك لتأكيد الحساب وتفعيله، أو أعد إرسال الرمز إن لم يصلك.</ThemedText>
+                      <View style={styles.verifyActions}>
+                        <Pressable accessibilityRole="button" disabled={isBusy} onPress={() => handleEnterVerificationCode(pendingUnverified)} style={[styles.verifyButton, { backgroundColor: colors.primary }]}>
+                          <MaterialIcons name="pin" size={16} color={colors.background} />
+                          <ThemedText variant="button" color={colors.background} style={styles.verifyButtonText}>إدخال رمز التحقق</ThemedText>
+                        </Pressable>
+                        <Pressable accessibilityRole="button" disabled={isBusy} onPress={() => void handleResendSignup(pendingUnverified)} style={[styles.verifyButton, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning }]}>
+                          <MaterialIcons name="refresh" size={16} color={colors.warning} />
+                          <ThemedText variant="button" color={colors.warning} style={styles.verifyButtonText}>إعادة إرسال الرمز</ThemedText>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </View>
+                ) : null}
                 <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: "/auth/forgot-password", params: { mode: "email", identifier: loginIdentifier.trim() } })} style={styles.forgot}>
                   <ThemedText variant="label" color={colors.primary} style={styles.forgotText}>نسيت كلمة المرور؟</ThemedText>
                 </Pressable>
@@ -537,13 +623,13 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
                 />
                 <FieldValidation colors={colors} styles={styles} error={confirmLiveError} valid={confirmIsValid} successText="كلمتا المرور متطابقتان." />
                 <ThemedText variant="caption" color={colors.muted} style={styles.identityHint}>كلمة المرور تُخزَّن بأمان عبر مزوّد الهوية وتُستخدم لتسجيل الدخول لاحقًا. الحساب يُفعَّل بعد إدخال رمز التحقق المرسل إلى بريدك الإلكتروني.</ThemedText>
-                <LegalConsent colors={colors} styles={styles} value={accepted} onValueChange={setAccepted} />
+                <LegalConsent colors={colors} styles={styles} language={language} value={accepted} onValueChange={setAccepted} onShowTerms={() => setTermsOpen(true)} onShowPrivacy={() => setPrivacyOpen(true)} />
               </>
             )}
             {error ? <Feedback colors={colors} styles={styles} text={error} color={colors.error} icon="error-outline" /> : null}
             {message ? <Feedback colors={colors} styles={styles} text={message} color={colors.success} icon="info-outline" /> : null}
           </Animated.View>
-          <Pressable disabled={isBusy} accessibilityRole="button" accessibilityState={{ busy: isBusy }} onPress={() => void submit()} style={({ pressed }) => [styles.primaryWrap, { opacity: pressed || isBusy ? 0.68 : 1 }]}>
+          <Pressable disabled={isBusy || (tab === "register" && !accepted)} accessibilityRole="button" accessibilityState={{ busy: isBusy, disabled: tab === "register" && !accepted }} onPress={() => void submit()} style={({ pressed }) => [styles.primaryWrap, { opacity: pressed || isBusy || (tab === "register" && !accepted) ? 0.68 : 1 }]}>
             <LinearGradient colors={[colors.primary, colors.secondary, colors.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primary}>
               {busy === tab ? <ActivityIndicator color={colors.foreground} /> : <MaterialIcons name={isRTL ? "arrow-forward" : "arrow-back"} size={21} color={colors.foreground} />}
               <ThemedText variant="button" color={colors.foreground} style={styles.primaryText}>{submitPrimaryText}</ThemedText>
@@ -573,6 +659,8 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
           ) : null}
         </View>
       </ScrollView>
+      <TermsModal visible={termsOpen} onClose={() => setTermsOpen(false)} />
+      <PrivacyModal visible={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </ScreenContainer>
   );
 }
@@ -583,6 +671,10 @@ function makeStyles(colors: AuthColors, isRTL: boolean) {
     shell: { width: "100%", maxWidth: 440, alignSelf: "center" },
     back: { alignSelf: "flex-end", minHeight: 40, alignItems: "center", flexDirection: "row", gap: 5, marginBottom: 12 },
     backText: { color: colors.primary, fontSize: 13, fontWeight: "900" },
+    langRow: { alignSelf: "flex-end", alignItems: "center", flexDirection: "row", gap: 4, marginBottom: 10, minHeight: 32 },
+    langPill: { minWidth: 44, height: 30, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+    langText: { fontSize: 12, fontWeight: "900" },
+    langSeparator: { fontSize: 12, fontWeight: "800" },
     brandArea: { alignItems: "center", marginBottom: 26 },
     glow: { width: 104, height: 104, borderRadius: 52, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.26, shadowRadius: 22, elevation: 10 },
     logoWrap: { width: 84, height: 84, borderRadius: 42, overflow: "hidden", borderWidth: 1, borderColor: colors.primary + "88" },
@@ -609,12 +701,19 @@ function makeStyles(colors: AuthColors, isRTL: boolean) {
     rememberTitle: { color: colors.foreground, fontSize: 13, fontWeight: "900", textAlign: "right" },
     rememberHint: { color: colors.muted, fontSize: 10, marginTop: 2, textAlign: "right" },
     consent: { alignItems: "center", gap: 10, minHeight: 76, borderWidth: 1, borderRadius: 16, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 13, marginTop: 18, flexDirection: "row-reverse" },
+    checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+    consentTitleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 1 },
     consentTitle: { color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: "right" },
-    links: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 2 },
+    consentHint: { color: colors.muted, fontSize: 10, lineHeight: 15, marginTop: 5, textAlign: "right" },
     link: { color: colors.primary, fontSize: 11, fontWeight: "900" },
-    join: { color: colors.muted, fontSize: 11 },
     feedback: { minHeight: 40, borderRadius: 12, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12 },
     feedbackText: { fontSize: 12, fontWeight: "800", lineHeight: 18, textAlign: "right", flex: 1 },
+    verifyNotice: { minHeight: 40, borderRadius: 14, borderWidth: 1, padding: 12, flexDirection: "row-reverse", alignItems: "flex-start", gap: 9, marginTop: 12 },
+    verifyNoticeTitle: { fontSize: 12, fontWeight: "900", lineHeight: 18, textAlign: "right" },
+    verifyNoticeHint: { fontSize: 11, lineHeight: 17, textAlign: "right", marginTop: 4 },
+    verifyActions: { flexDirection: "row-reverse", gap: 9, marginTop: 11 },
+    verifyButton: { height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 14 },
+    verifyButtonText: { fontSize: 13, fontWeight: "900" },
     primaryWrap: { marginTop: 24, borderRadius: 30, overflow: "hidden", shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: colors.appTheme.shadow.opacity, shadowRadius: colors.appTheme.shadow.radius, elevation: colors.appTheme.shadow.elevation },
     primary: { minHeight: 58, borderRadius: 30, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10 },
     primaryText: { color: colors.foreground, fontSize: 16, fontWeight: "900" },

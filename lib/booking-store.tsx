@@ -6,6 +6,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Alert, Platform } from "react-native";
 
 import { parseBackupData, parseStoredAppData, serializeBackup } from "./backup-import";
+import { buildDemoAppData } from "./demo-data";
+import { useDemoMode } from "./demo-mode";
 import { persistChaletImage, removeManagedChaletImage } from "./chalet-image";
 import { persistPaymentReceipt } from "./payment-receipt";
 import { syncCheckoutNotifications } from "./checkout-notifications";
@@ -116,6 +118,7 @@ function maintenanceDueNotificationsFor(tasks: MaintenanceTask[], notifications:
 
 export function BookingProvider({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, isEmployee, isManager, isGuest, activeWorkspaceId, can } = useWorkspaceAccess();
+  const { isDemo, showDemoNotice } = useDemoMode();
   const scopedStorageKey = activeWorkspaceId ? `${STORAGE_KEY}:workspace-${activeWorkspaceId}` : STORAGE_KEY;
   const scopedSyncKey = activeWorkspaceId ? `${LAST_SYNC_KEY}:workspace-${activeWorkspaceId}` : LAST_SYNC_KEY;
   const paymentMethodsStorageScope = activeWorkspaceId ? `workspace-${activeWorkspaceId}` : "local";
@@ -226,6 +229,12 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   };
 
   const persist = async (next: AppData) => {
+    if (isDemo) {
+      // The demo tour is fully in-memory: intercept every write with a notice
+      // and never touch AsyncStorage, tRPC, or Supabase.
+      showDemoNotice();
+      return;
+    }
     const normalized = expireElapsedRecords(normalizeAppData(next));
     // Treat `next` as a partial writer: only adopt its top-level keys that
     // actually changed, layering them over the latest committed snapshot. This
@@ -277,6 +286,15 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       remoteSyncStarted.current = false;
       setLastSyncedAt(null);
       try {
+        if (isDemo) {
+          const demoData = buildDemoAppData(user?.name);
+          if (mounted) {
+            setData(demoData);
+            dataRef.current = demoData;
+            setHydrated(true);
+          }
+          return;
+        }
         const raw = await AsyncStorage.getItem(scopedStorageKey);
         const paymentMethodsRaw = await AsyncStorage.getItem(PAYMENT_METHODS_STORAGE_KEY);
         const migratedWorkspaceId = activeWorkspaceId ? await AsyncStorage.getItem(LEGACY_MIGRATION_WORKSPACE_KEY) : null;
@@ -311,7 +329,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     };
     void load();
     return () => { mounted = false; };
-  }, [activeWorkspaceId, scopedStorageKey, scopedSyncKey]);
+  }, [activeWorkspaceId, isDemo, scopedStorageKey, scopedSyncKey]);
 
   useEffect(() => {
     if (!canSyncWorkspace) {
@@ -382,7 +400,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || isDemo) return;
     const interval = setInterval(() => {
       const next = expireElapsedRecords(data);
       if (next === data) return;
@@ -391,24 +409,24 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
     }, 60_000);
     return () => clearInterval(interval);
-  }, [data, hydrated, scopedStorageKey]);
+  }, [data, hydrated, isDemo, scopedStorageKey]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || isDemo) return;
     const device = data.settings.device;
     void syncCheckoutNotifications(data.bookings, data.chalets, device?.notificationsEnabled ?? false, device?.language ?? "ar");
     void syncWaitlistPriorityNotifications(data.bookings, data.waitlist, device?.notificationsEnabled ?? false, device?.language ?? "ar");
-  }, [data.bookings, data.chalets, data.settings.device?.language, data.settings.device?.notificationsEnabled, data.waitlist, hydrated]);
+  }, [data.bookings, data.chalets, data.settings.device?.language, data.settings.device?.notificationsEnabled, data.waitlist, hydrated, isDemo]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || isDemo) return;
     const extra = maintenanceDueNotificationsFor(data.maintenanceTasks ?? [], data.notifications ?? [], data.settings.device?.language ?? "ar");
     if (!extra.length) return;
     const next = { ...data, notifications: [...extra, ...(data.notifications ?? [])] };
     setData(next);
     dataRef.current = next;
     void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
-  }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, scopedStorageKey]);
+  }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, isDemo, scopedStorageKey]);
 
   const value = useMemo<BookingContextValue>(() => ({
     ...data,
@@ -417,6 +435,10 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     lastSyncedAt,
     refreshWorkspaceData,
     resetOperationalRecords: async () => {
+      if (isDemo) {
+        showDemoNotice();
+        return { bookings: 0, expenses: 0 };
+      }
       const result = await resetOperationsRemote.mutateAsync({ confirmation: "RESET-OPERATIONS" });
       if (!result.payload) {
         // Remote wipe produced no payload to commit. Preserve a scoped rescue of
@@ -879,7 +901,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       return true;
     },
     clearLastDeleted: () => setLastDeleted(null),
-  }), [data, hydrated, lastDeleted, lastSyncedAt, pendingBackupImport, remoteVersion, remoteReady, resetOperationsRemote, scopedStorageKey]);
+  }), [data, hydrated, isDemo, lastDeleted, lastSyncedAt, pendingBackupImport, remoteVersion, remoteReady, resetOperationsRemote, scopedStorageKey, showDemoNotice]);
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>;
 }

@@ -11,7 +11,12 @@ import { useI18n } from "@/lib/i18n";
 import { useAuthSession } from "@/lib/auth-session";
 import { formatCountdown, resendPasswordlessEmail, useOtpCountdown, useResendCooldown, verifyEmailOtp, activateEmailSignup, type SupabaseOtpError, type AuthError, AUTH_ERROR_MESSAGES } from "@/lib/supabase-otp";
 
-const OTP_LENGTH = 8;
+// Expected standard OTP length (6). The provider may deliver longer numeric
+// tokens (e.g. 8-digit codes). We render 6 boxes by default but dynamically grow
+// and NEVER truncate a pasted token, so a longer real code reaches verifyOtp intact.
+const OTP_LENGTH = 6;
+// Hard safety ceiling so an accidental huge paste cannot flood the input.
+const MAX_OTP_LENGTH = 12;
 
 export default function OtpVerificationScreen() {
   const colors = useColors();
@@ -64,10 +69,12 @@ export default function OtpVerificationScreen() {
 
   const handleChange = (text: string) => {
     setError(null);
-    const clean = text.replace(/\D/g, "").slice(0, OTP_LENGTH);
-    const next = Array(OTP_LENGTH).fill("");
-    clean.split("").forEach((ch, i) => { next[i] = ch; });
-    setDigits(next);
+    // Capture the COMPLETE token — strip all whitespace / invisible characters
+    // (spaces, zero-width chars) but never truncate real digits, so an 8-digit
+    // code like "57942595" is forwarded to verifyOtp intact instead of being
+    // silently cut down to 6.
+    const clean = text.replace(/[^\d]/g, "").slice(0, MAX_OTP_LENGTH);
+    setDigits(clean.split("").length ? clean.split("") : Array(OTP_LENGTH).fill(""));
   };
 
   const handleKeyPress = (e: { nativeEvent: { key: string } }) => {
@@ -82,10 +89,13 @@ export default function OtpVerificationScreen() {
   };
 
   const submit = async () => {
-    if (busy || currentCode.length !== OTP_LENGTH) {
-      if (currentCode.length !== OTP_LENGTH) setError(language === "ar" ? "أدخل رمز التحقق الكامل المكوّن من 8 أرقام." : "Enter the complete 8-digit verification code.");
+    const cleanToken = currentCode.replace(/\s+/g, "").trim();
+    if (busy || cleanToken.length < OTP_LENGTH) {
+      if (cleanToken.length < OTP_LENGTH) setError(language === "ar" ? "أدخل رمز التحقق الكامل المكوّن من 6 أرقام." : "Enter the complete 6-digit verification code.");
       return;
     }
+    // Debug: confirm the exact token length + type sent to Supabase.
+    console.log(`[OTP submit] token length=${cleanToken.length} type=${isSignup ? "signup" : "email"}`);
     setBusy(true);
     setError(null);
     setInfo(null);
@@ -106,11 +116,11 @@ export default function OtpVerificationScreen() {
     }
   };
 
-  // Auto-submit as soon as the user types or pastes all 8 digits — no need to
+  // Auto-submit once the user types or pastes at least 6 digits — no need to
   // press the button. Guarded by `busy` so an in-flight request is not re-fired
   // (the `currentCode` value stays stable after a failure, preventing loops).
   useEffect(() => {
-    if (currentCode.length === OTP_LENGTH && !busy) void submit();
+    if (currentCode.replace(/\s+/g, "").trim().length >= OTP_LENGTH && !busy) void submit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCode]);
 
@@ -149,7 +159,7 @@ export default function OtpVerificationScreen() {
             <View style={styles.glow}><MaterialIcons name="mark-email-read" size={40} color={colors.primary} /></View>
             <ThemedText variant="titleLarge" style={styles.title}>{language === "ar" ? "رمز التحقق" : "Verification code"}</ThemedText>
             <ThemedText variant="bodySmall" color={colors.muted} style={styles.subtitle}>
-              {language === "ar" ? "أدخل رمز التحقق المكوّن من 8 أرقام الذي أُرسل إلى بريدك الإلكتروني لتأكيد دخولك." : "Enter the 8-digit code sent to your email to confirm your sign-in."}
+              {language === "ar" ? "أدخل رمز التحقق المكوّن من 6 أرقام الذي أُرسل إلى بريدك الإلكتروني لتأكيد دخولك." : "Enter the 6-digit code sent to your email to confirm your sign-in."}
             </ThemedText>
             <View style={[styles.emailChip, { flexDirection: row }]}>
               <MaterialIcons name="alternate-email" size={16} color={colors.primary} />
@@ -179,7 +189,7 @@ export default function OtpVerificationScreen() {
             onChangeText={handleChange}
             onKeyPress={handleKeyPress}
             keyboardType="number-pad"
-            maxLength={OTP_LENGTH}
+            maxLength={MAX_OTP_LENGTH}
             autoFocus
             caretHidden
             accessibilityLabel="رمز التحقق"

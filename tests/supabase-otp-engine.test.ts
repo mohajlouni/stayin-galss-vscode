@@ -112,6 +112,13 @@ describe("Auth error classification and messages", () => {
     expect(classifyAuthError(new Error("boom"))).toBe("unknown");
   });
 
+  it("classifies an unverified account (Email not confirmed) distinctly from unregistered", () => {
+    expect(classifyAuthError(new Error("Email not confirmed"))).toBe("email-not-confirmed");
+    expect(classifyAuthError(new Error("email_not_confirmed"))).toBe("email-not-confirmed");
+    expect(classifyAuthError(new Error("New user email not confirmed Gmail email"))).toBe("email-not-confirmed");
+    expect(AUTH_ERROR_MESSAGES["email-not-confirmed"]).toContain("غير موثّق بعد");
+  });
+
   it("classifies an unsupported OAuth provider as provider-unavailable", () => {
     expect(classifyAuthError(new Error("400 validation_failed: Unsupported provider: provider is not enabled"))).toBe("provider-unavailable");
     expect(classifyAuthError(new Error("Unsupported provider: Provider is not enabled"))).toBe("provider-unavailable");

@@ -148,6 +148,7 @@ export const appRouter = router({
       const [members, invitations, activity] = await Promise.all([db.listWorkspaceMembers(summary.member.workspaceId), db.listWorkspaceInvitations(summary.member.workspaceId), db.listWorkspaceActivity(summary.member.workspaceId)]);
       return { workspace: summary.workspace, member: summary.member, members, invitations, activity };
     }),
+    hub: protectedProcedure.query(async ({ ctx }) => db.getWorkspaceHub(ctx.user)),
     collectionRecipients: protectedProcedure.query(async ({ ctx }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.member) throw new TRPCError({ code: "FORBIDDEN", message: "Workspace membership required" });
@@ -392,7 +393,7 @@ export const appRouter = router({
       await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.requestOwnerPinReset(input);
     }),
-    verifyPinOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), otpCode: z.string().regex(/^\d{6}$/) })).mutation(async ({ ctx, input }) => {
+    verifyPinOtp: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), ownerEmail: z.string().email(), otpCode: z.string().regex(/^\d{6}$/) })).mutation(async ({ ctx, input }) => {
       await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
       return db.verifyOwnerPinOtp(input);
     }),

@@ -70,3 +70,7 @@ dist-web-*/
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
 .project-config.json
+
+# Local test/temp directories (C: is full; these live on D:)
+.tmp/
+.vitest-cache/

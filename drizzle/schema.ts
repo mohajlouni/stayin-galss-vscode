@@ -5,6 +5,7 @@ import {
   longtext,
   mysqlEnum,
   mysqlTable,
+  primaryKey,
   text,
   timestamp,
   varchar,
@@ -22,6 +23,7 @@ export const stayInUsers = mysqlTable("stayInUsers", {
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
   avatarUrl: text("avatarUrl"),
+  userCode: varchar("userCode", { length: 16 }),
   termsVersion: varchar("termsVersion", { length: 32 }),
   privacyVersion: varchar("privacyVersion", { length: 32 }),
   conditionsVersion: varchar("conditionsVersion", { length: 32 }),
@@ -199,6 +201,24 @@ export const stayInSuperAdminAudit = mysqlTable("stayInSuperAdminAudit", {
   workspaceIdx: index("stayInSuperAdminAudit_targetWorkspaceId_idx").on(table.targetWorkspaceId),
 }));
 
+export const stayInGlobalFeatureFlags = mysqlTable("stayInGlobalFeatureFlags", {
+  flag: varchar("flag", { length: 64 }).primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const stayInWorkspaceFeatureSettings = mysqlTable("stayInWorkspaceFeatureSettings", {
+  workspaceId: int("workspaceId").notNull(),
+  flag: varchar("flag", { length: 64 }).notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedByUserId: int("updatedByUserId"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  workspaceIdx: index("stayInWorkspaceFeatureSettings_workspaceId_idx").on(table.workspaceId),
+  pk: primaryKey({ name: "stayInWorkspaceFeatureSettings_pk", columns: [table.workspaceId, table.flag] }),
+}));
+
 export const users = stayInUsers;
 export const accountDeletionRequests = stayInAccountDeletionRequests;
 export const suggestions = stayInSuggestions;
@@ -212,6 +232,8 @@ export const workspaceActivity = stayInWorkspaceActivity;
 export const workspaceOwnerPins = stayInWorkspaceOwnerPins;
 export const sessions = stayInSessions;
 export const superAdminAudit = stayInSuperAdminAudit;
+export const globalFeatureFlags = stayInGlobalFeatureFlags;
+export const workspaceFeatureSettings = stayInWorkspaceFeatureSettings;
 
 export type User = typeof stayInUsers.$inferSelect;
 export type InsertUser = typeof stayInUsers.$inferInsert;
@@ -239,3 +261,5 @@ export type SessionRow = typeof stayInSessions.$inferSelect;
 export type InsertSession = typeof stayInSessions.$inferInsert;
 export type AccountDeletionRequest = typeof stayInAccountDeletionRequests.$inferSelect;
 export type InsertAccountDeletionRequest = typeof stayInAccountDeletionRequests.$inferInsert;
+export type GlobalFeatureFlagRow = typeof stayInGlobalFeatureFlags.$inferSelect;
+export type WorkspaceFeatureSettingRow = typeof stayInWorkspaceFeatureSettings.$inferSelect;

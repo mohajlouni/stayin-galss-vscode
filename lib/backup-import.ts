@@ -39,6 +39,7 @@ const paymentSchema = z.object({
   recipientAccountLabel: z.string().max(180).optional(),
   calculatedCommission: moneySchema.optional(),
   commissionType: z.enum(["percent", "fixed"]).optional(),
+  recipientTargetId: z.string().regex(/^(?:owner|member-\d+|float-[a-zA-Z0-9-]{1,64})$/).optional(),
   receiptUri: optionalText,
   voidedAt: z.string().datetime().optional(),
   voidReason: optionalText,
@@ -57,6 +58,9 @@ const depositRefundSchema = z.object({
   recordedAt: z.string().datetime().optional(),
   note: optionalText,
   paymentMethod: z.string().regex(/^[a-z0-9-]{2,48}$/).optional(),
+  sourceFloatId: z.string().regex(/^[a-zA-Z0-9-]{2,72}$/).optional(),
+  returnedByUserId: z.number().int().positive().optional(),
+  returnedByName: z.string().max(120).optional(),
 }) satisfies z.ZodType<DepositRefund>;
 
 const checkInConfirmationSchema = z.object({
@@ -90,6 +94,7 @@ const bookingSchema = z.object({
   depositCollection: paymentSchema.optional(),
   payments: z.array(paymentSchema),
   depositRefunds: z.array(depositRefundSchema).optional(),
+  depositCompensation: z.object({ amount: moneySchema, date: dateSchema, recordedAt: z.string().datetime().optional(), note: optionalText, sourceFloatId: z.string().regex(/^[a-zA-Z0-9-]{2,72}$/).optional(), returnedByUserId: z.number().int().positive().optional(), returnedByName: z.string().max(120).optional() }).optional(),
   notes: z.string(),
   status: z.enum(bookingStatuses),
   createdAt: z.string(),
@@ -190,7 +195,7 @@ const settingsSchema = z.object({
   }).optional(),
   bookingTypes: z.record(z.string(), bookingTypeSettingsSchema).optional(),
   paymentMethods: z.array(z.object({ id: z.string().regex(/^[a-z0-9-]{2,48}$/), label: z.string().min(1).max(40), isActive: z.boolean(), icon: z.string().min(1).max(8).optional(), isArchived: z.boolean().optional(), defaultRecipientType: z.enum(["owner", "staff", "guard"]).optional() })).optional(),
-  paymentRouting: z.object({ masterAccounts: z.object({ cliqAlias: z.string().max(160).optional(), bankDetails: z.string().max(1000).optional(), cashHandlerLabel: z.string().max(120).optional() }).optional() }).optional(),
+  paymentRouting: z.object({ masterAccounts: z.object({ cliqAlias: z.string().max(160).optional(), bankDetails: z.string().max(1000).optional(), cashHandlerLabel: z.string().max(120).optional(), directCliqEnabled: z.boolean().optional(), directBankEnabled: z.boolean().optional(), directCashEnabled: z.boolean().optional() }).optional(), staffFloats: z.array(z.object({ id: z.string().regex(/^[a-z0-9-]{2,72}$/), memberUserId: z.number().int().positive().optional(), memberName: z.string().max(120).optional(), label: z.string().min(1).max(120), cliqAlias: z.string().max(160).optional(), bankDetails: z.string().max(1000).optional(), maxFloatLimit: moneySchema.optional(), isActive: z.boolean().optional() })).optional() }).optional(),
   whatsAppEnabled: z.boolean().optional(),
   ownerPhone: z.string().optional(),
   guardPhone: z.string().optional(),
@@ -395,9 +400,10 @@ const backupSchema = z.object({
   waitlist: z.array(waitlistSchema).optional(),
   turnoverTasks: z.array(turnoverTaskSchema).optional(),
   expenses: z.array(expenseSchema).optional(),
+  staffFloatSettlements: z.array(z.object({ id: z.string().regex(/^[a-zA-Z0-9-]{2,72}$/), floatId: z.string().regex(/^[a-zA-Z0-9-]{2,72}$/), amount: moneySchema, settledAt: z.string().datetime(), note: optionalText, settledByUserId: z.number().int().positive().optional(), settledByName: z.string().max(120).optional() })).optional(),
   chalets: z.array(chaletSchema).optional(),
   specialPriceRules: z.array(z.object({ id: z.string(), name: z.string(), startDate: dateSchema, endDate: dateSchema, price: moneySchema, kind: z.enum(["season", "occasion"]), createdAt: z.string() })).optional(),
-  auditLog: z.array(z.object({ id: z.string(), action: z.enum(["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"]), subjectName: z.string(), details: z.string(), createdAt: z.string(), actorName: z.string().optional(), bookingId: z.string().optional() })).optional(),
+  auditLog: z.array(z.object({ id: z.string(), action: z.enum(["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved"]), subjectName: z.string(), details: z.string(), createdAt: z.string(), actorName: z.string().optional(), bookingId: z.string().optional() })).optional(),
   customers: z.array(customerSchema).optional(),
   contracts: z.array(leaseContractSchema).optional(),
   assets: z.array(assetSchema).optional(),
@@ -494,5 +500,6 @@ export function parseBackupData(raw: string): AppData {
     loyaltyAccounts: imported.loyaltyAccounts as unknown as LoyaltyAccount[],
     loyaltyTransactions: imported.loyaltyTransactions as unknown as LoyaltyTransaction[],
     settings: mergeSettings(imported.settings),
+    staffFloatSettlements: imported.staffFloatSettlements ?? [],
   });
 }

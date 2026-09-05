@@ -34,6 +34,7 @@ export function useAuth(options?: UseAuthOptions) {
           email: apiUser.email,
           phone: apiUser.phone ?? null,
           avatarUrl: apiUser.avatarUrl ?? null,
+          userCode: apiUser.userCode ?? null,
           loginMethod: apiUser.loginMethod,
           lastSignedIn: new Date(apiUser.lastSignedIn),
         };
@@ -44,8 +45,27 @@ export function useAuth(options?: UseAuthOptions) {
 
       const sessionToken = await Auth.getSessionToken();
       if (sessionToken) {
-        const stored = await Auth.getUserInfo();
-        setUser(stored ? { ...stored, lastSignedIn: stored.lastSignedIn ? new Date(stored.lastSignedIn) : new Date() } : null);
+        // Refresh from the API so upgraded users (userCode, role, workspace sync)
+        // always see current data, falling back to the stored snapshot offline.
+        const freshUser = await Api.getMe();
+        if (freshUser) {
+          const userInfo: Auth.User = {
+            id: freshUser.id,
+            openId: freshUser.openId,
+            name: freshUser.name,
+            email: freshUser.email,
+            phone: freshUser.phone ?? null,
+            avatarUrl: freshUser.avatarUrl ?? null,
+            userCode: freshUser.userCode ?? null,
+            loginMethod: freshUser.loginMethod,
+            lastSignedIn: new Date(freshUser.lastSignedIn),
+          };
+          setUser(userInfo);
+          await Auth.setUserInfo(userInfo);
+        } else {
+          const stored = await Auth.getUserInfo();
+          setUser(stored ? { ...stored, lastSignedIn: stored.lastSignedIn ? new Date(stored.lastSignedIn) : new Date() } : null);
+        }
       } else {
         setUser(null);
       }

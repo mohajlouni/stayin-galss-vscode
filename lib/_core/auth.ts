@@ -10,6 +10,7 @@ export type User = {
   email: string | null;
   phone?: string | null;
   avatarUrl?: string | null;
+  userCode?: string | null;
   loginMethod: string | null;
   role?: string | null;
   isSuperAdmin?: boolean;
@@ -86,5 +87,75 @@ export async function clearUserInfo(): Promise<void> {
     await SecureStore.deleteItemAsync(USER_INFO_KEY);
   } catch {
     // A failed local cleanup must not prevent the caller from clearing UI state.
+  }
+}
+
+const POST_LOGOUT_NOTICE_KEY = "stay-in.post-logout-notice.v1";
+
+export type DeletionNotice = {
+  message: string;
+  scheduledFor?: string;
+};
+
+function readDeletionNotice(value: string | null): DeletionNotice | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { message?: unknown; scheduledFor?: unknown };
+    if (typeof parsed.message === "string" && parsed.message) {
+      return { message: parsed.message, scheduledFor: typeof parsed.scheduledFor === "string" ? parsed.scheduledFor : undefined };
+    }
+  } catch {
+    // Legacy plain-string format written before the structured payload.
+  }
+  return value.trim() ? { message: value } : null;
+}
+
+/**
+ * Persists the account-deletion confirmation so the login screen can PIN it
+ * (show it as an in-screen notice with the remaining grace period and a
+ * recovery action) instead of a transient alert that can be lost. `scheduledFor`
+ * is the ISO date of the permanent deletion so the screen can show a countdown.
+ */
+export async function setPostLogoutNotice(message: string, scheduledFor?: string): Promise<void> {
+  const payload = JSON.stringify({ message, scheduledFor: scheduledFor ?? null });
+  try {
+    if (Platform.OS === "web") {
+      if (typeof window === "undefined") return;
+      window.localStorage.setItem(POST_LOGOUT_NOTICE_KEY, payload);
+      return;
+    }
+    await SecureStore.setItemAsync(POST_LOGOUT_NOTICE_KEY, payload);
+  } catch {
+    // Best-effort only: a failure must not block the forced sign-out.
+  }
+}
+
+/** Reads the persisted deletion notice WITHOUT removing it (pinned until dismissed). */
+export async function peekPostLogoutNotice(): Promise<DeletionNotice | null> {
+  try {
+    if (Platform.OS === "web") {
+      if (typeof window === "undefined") return null;
+      return readDeletionNotice(window.localStorage.getItem(POST_LOGOUT_NOTICE_KEY));
+    }
+    return readDeletionNotice(await SecureStore.getItemAsync(POST_LOGOUT_NOTICE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+/** Reads and removes the persisted deletion notice (called only when dismissed). */
+export async function consumePostLogoutNotice(): Promise<DeletionNotice | null> {
+  try {
+    if (Platform.OS === "web") {
+      if (typeof window === "undefined") return null;
+      const value = window.localStorage.getItem(POST_LOGOUT_NOTICE_KEY);
+      if (value) window.localStorage.removeItem(POST_LOGOUT_NOTICE_KEY);
+      return readDeletionNotice(value);
+    }
+    const value = await SecureStore.getItemAsync(POST_LOGOUT_NOTICE_KEY);
+    if (value) await SecureStore.deleteItemAsync(POST_LOGOUT_NOTICE_KEY);
+    return readDeletionNotice(value);
+  } catch {
+    return null;
   }
 }

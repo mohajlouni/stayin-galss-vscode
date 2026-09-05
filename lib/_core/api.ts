@@ -9,10 +9,16 @@ export type AuthenticatedUser = {
   email: string | null;
   phone?: string | null;
   avatarUrl?: string | null;
+  userCode?: string | null;
   loginMethod: string | null;
   role?: string | null;
   isSuperAdmin?: boolean;
   lastSignedIn: string;
+};
+
+export type PendingDeletionInfo = {
+  scheduledFor: string;
+  requestedAt: string;
 };
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -87,6 +93,7 @@ export async function startLocalLogin(input: { phone: string; password: string }
       email: result.user.email,
       phone: result.user.phone ?? null,
       avatarUrl: result.user.avatarUrl ?? null,
+      userCode: result.user.userCode ?? null,
       loginMethod: result.user.loginMethod ?? null,
       lastSignedIn: new Date(result.user.lastSignedIn),
     });
@@ -116,8 +123,8 @@ export async function getMe(): Promise<AuthenticatedUser | null> {
  * Stores the pair exactly like the OAuth/local login paths so routing, tRPC
  * headers, and workspace access keep working unchanged.
  */
-export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; name?: string | null; mode?: "signin" | "signup"; provider?: string | null }): Promise<boolean> {
-  const result = await apiCall<{ app_session_id: string; user: AuthenticatedUser | null }>("/api/auth/supabase-otp", {
+export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; name?: string | null; mode?: "signin" | "signup"; provider?: string | null }): Promise<{ pendingDeletion?: PendingDeletionInfo | null }> {
+  const result = await apiCall<{ app_session_id: string; user: AuthenticatedUser | null; pendingDeletion?: PendingDeletionInfo | null }>("/api/auth/supabase-otp", {
     method: "POST",
     body: JSON.stringify({
       supabaseAccessToken: input.supabaseAccessToken,
@@ -136,13 +143,65 @@ export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; 
       email: result.user.email,
       phone: result.user.phone ?? null,
       avatarUrl: result.user.avatarUrl ?? null,
+      userCode: result.user.userCode ?? null,
       loginMethod: result.user.loginMethod ?? null,
       role: result.user.role ?? null,
       isSuperAdmin: result.user.isSuperAdmin ?? false,
       lastSignedIn: new Date(result.user.lastSignedIn),
     });
   }
-  return true;
+  return { pendingDeletion: result.pendingDeletion ?? null };
+}
+
+/**
+ * Checks whether an email currently has an active (within-grace-period) account
+ * deletion request. Public and keyed by email so the login screen can detect a
+ * pending-deletion account and show the recovery message instead of a generic
+ * "wrong password" dead-end.
+ */
+export async function checkPendingDeletion(email: string): Promise<{ pending: boolean; scheduledFor: string | null }> {
+  const baseUrl = getApiBaseUrl();
+  const url = baseUrl ? `${baseUrl}/api/auth/check-pending-deletion` : "/api/auth/check-pending-deletion";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+      credentials: "include",
+    });
+    if (!response.ok) return { pending: false, scheduledFor: null };
+    const body = (await response.json()) as { pending?: boolean; scheduledFor?: string | null };
+    return { pending: Boolean(body.pending), scheduledFor: body.scheduledFor ?? null };
+  } catch {
+    return { pending: false, scheduledFor: null };
+  }
+}
+
+/**
+ * Authoritative identity-existence check against the backend. After a failed
+ * password login the screen calls this to separate two honest messages:
+ * - `registered: true`  -> the email exists in the system, the password failed.
+ * - `registered: false` -> the email is not registered at all.
+ * `checked: false` signals the backend could not be reached (network/server
+ * unavailable); callers then fall back to the last-resort message instead of
+ * guessing.
+ */
+export async function checkIdentityStatus(email: string): Promise<{ registered: boolean; checked: boolean }> {
+  const baseUrl = getApiBaseUrl();
+  const url = baseUrl ? `${baseUrl}/api/auth/identity-status` : "/api/auth/identity-status";
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+      credentials: "include",
+    });
+    if (!response.ok) return { registered: false, checked: false };
+    const body = (await response.json()) as { registered?: boolean };
+    return { registered: Boolean(body.registered), checked: true };
+  } catch {
+    return { registered: false, checked: false };
+  }
 }
 
 /**
@@ -190,6 +249,7 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
         email: result.user.email,
         phone: result.user.phone ?? null,
         avatarUrl: result.user.avatarUrl ?? null,
+        userCode: result.user.userCode ?? null,
         loginMethod: result.user.loginMethod ?? null,
         role: result.user.role ?? null,
         isSuperAdmin: result.user.isSuperAdmin ?? false,
@@ -210,6 +270,7 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
           email: "moh.ajlouni.90@gmail.com",
           phone: "0797402940",
           avatarUrl: null,
+          userCode: "U1000",
           loginMethod: "super-admin-local",
           role: "super_admin",
           isSuperAdmin: true,

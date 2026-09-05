@@ -17,6 +17,7 @@ import { DEFAULT_WHATSAPP_DISCLAIMER, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, effectiv
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
+import { useGlobalFeatureFlags, useWorkspaceFeatureFlags } from "@/lib/feature-flags";
 
 type IconName = ComponentProps<typeof MaterialIcons>["name"];
 
@@ -42,6 +43,8 @@ export default function SettingsScreen() {
   const { isRTL, language } = useI18n();
   const { deviceSettings, deviceLanguage, deviceTimezone, formatDate, formatTime, updateDeviceSettings, triggerHaptic, languageChangeStatus, acknowledgeLanguageChange, restartApp } = useAppPreferences();
   const { isManager, activeWorkspaceId } = useWorkspaceAccess();
+  const globalFlags = useGlobalFeatureFlags();
+  const featureFlags = useWorkspaceFeatureFlags(activeWorkspaceId);
   const [loadingDemo, setLoadingDemo] = useState(false);
 
   const loadDemoData = async () => {
@@ -108,6 +111,15 @@ export default function SettingsScreen() {
   const weatherConfig = effectiveWeatherAdvisory(settings);
   const appVersion = Constants.expoConfig?.version ?? "1.0.0";
   const configLocked = !isManager;
+  const lunarPhaseEnabled = globalFlags.feat_lunar_calendar;
+  const weatherFlowEnabled = globalFlags.feat_automation_weather;
+  const guestCheckInEnabled = globalFlags.feat_guest_checkin;
+  const cleaningFlowEnabled = globalFlags.feat_cleaning_inspection;
+  const contractsEnabled = globalFlags.feat_digital_contracts;
+  const whatsappIntegrationEnabled = globalFlags.feat_whatsapp_integration;
+  const crmEnabled = globalFlags.feat_customers_blacklist && globalFlags.feat_loyalty_suite;
+  const loyaltyFlowEnabled = featureFlags.loyalty;
+  const notificationsFlowEnabled = featureFlags.notifications;
 
   const saveConfig = async (patch: Partial<Settings>) => {
     await updateSettings({ ...settings, ...patch });
@@ -153,7 +165,7 @@ export default function SettingsScreen() {
           <View style={[styles.choiceRow, { flexDirection: row }]}><Choice label="12h" selected={deviceSettings.timeFormat === "12h"} onPress={() => void updateDeviceSettings({ timeFormat: "12h" })} colors={colors} /><Choice label="24h" selected={deviceSettings.timeFormat === "24h"} onPress={() => void updateDeviceSettings({ timeFormat: "24h" })} colors={colors} /></View>
           <View style={[styles.choiceWrap, { flexDirection: row }]}>{([{ value: "DD/MM/YYYY", label: "18/08/2026" }, { value: "YYYY-MM-DD", label: "2026-08-18" }, { value: "english-month", label: "18 August 2026" }, { value: "arabic-gregorian", label: language === "ar" ? "18 أغسطس 2026" : "18 August 2026" }] as const).map((choice) => <Choice key={choice.value} label={choice.label} selected={deviceSettings.dateFormat === choice.value} onPress={() => void updateDeviceSettings({ dateFormat: choice.value })} colors={colors} />)}</View>
           <SettingsSwitch icon="calendar-view-day" label={language === "ar" ? "إظهار التاريخ الهجري" : "Show Hijri date"} value={deviceSettings.showHijriDate} onChange={(value) => void updateDeviceSettings({ showHijriDate: value })} />
-          <SettingsSwitch icon="nightlight" label={language === "ar" ? "لوحة القمر والتقويم الهجري" : "Lunar phase & Hijri panel"} description={language === "ar" ? "يعرض طور القمر والتقويم الهجري ضمن بطاقة الرأس في الرئيسية" : "Shows the lunar phase and Hijri date inside the top widget on Home"} value={deviceSettings.showLunarPhase} onChange={(value) => void updateDeviceSettings({ showLunarPhase: value })} />
+          {lunarPhaseEnabled ? <SettingsSwitch icon="nightlight" label={language === "ar" ? "لوحة القمر والتقويم الهجري" : "Lunar phase & Hijri panel"} description={language === "ar" ? "يعرض طور القمر والتقويم الهجري ضمن بطاقة الرأس في الرئيسية" : "Shows the lunar phase and Hijri date inside the top widget on Home"} value={deviceSettings.showLunarPhase} onChange={(value) => void updateDeviceSettings({ showLunarPhase: value })} /> : null}
           <Field label={language === "ar" ? "المنطقة الزمنية" : "Timezone"} labelView={sectionTitle}><TextInput value={timezone} onChangeText={setTimezone} autoCapitalize="none" onEndEditing={() => void updateDeviceSettings({ timezone: timezone.trim() || deviceTimezone })} placeholderTextColor={colors.muted} style={inputStyle} />{description(`${language === "ar" ? "منطقة الجهاز" : "Device timezone"}: ${deviceTimezone}`)}</Field>
 
           <View style={styles.divider} />
@@ -163,16 +175,17 @@ export default function SettingsScreen() {
           {holidayConfig.enabled ? <SettingsRow icon="percent" title={language === "ar" ? "نسبة الزيادة على العطل" : "Holiday uplift"} disabled={configLocked} trailing={<SettingsStepper value={holidayConfig.upliftPercent} min={0} max={200} step={5} disabled={configLocked} onChange={(upliftPercent) => void saveHoliday({ upliftPercent })} formatValue={(value) => `+${value}%`} />} /> : null}
         </Section>
 
-        <Section title={language === "ar" ? "العقود الإلكترونية والتأمين" : "Digital contracts & deposits"} icon="description" colors={colors} align={align} isRTL={isRTL}>
+        {contractsEnabled ? <Section title={language === "ar" ? "العقود الإلكترونية والتأمين" : "Digital contracts & deposits"} icon="description" colors={colors} align={align} isRTL={isRTL}>
           {sectionTitle(language === "ar" ? "التواصل وعقد الإقامة" : "Messaging & stay contract")}
           <SettingsSwitch disabled={configLocked} icon="draw" label={language === "ar" ? "إلزامية التوقيع الإلكتروني" : "Require digital signature"} description={language === "ar" ? "فرض التوقيع على عقد الإقامة قبل تسليم الشاليه أو جعله اختيارياً" : "Require the stay contract signature before handover, or keep it optional"} value={contractConfig.requireSignature} onChange={(requireSignature) => void saveContract({ requireSignature })} />
           <SettingsRow icon="safety-divider" title={language === "ar" ? "التأمين النقدي الافتراضي" : "Default security deposit"} subtitle={language === "ar" ? "قيمة الإيداع المبدئية لكل شاليه (يمكن تعديلها لكل وحدة)" : "Initial deposit per chalet (adjustable per unit)"} disabled={configLocked} trailing={<SettingsStepper value={contractConfig.defaultDepositAmount} min={0} max={500} step={5} disabled={configLocked} onChange={(defaultDepositAmount) => void saveContract({ defaultDepositAmount })} formatValue={(value) => `${value} ${settings.currency}`} />} />
           <SettingsSwitch icon="article" label={language === "ar" ? "إظهار عقد الإقامة" : "Show stay contract"} description={language === "ar" ? "يعرض ملخص العقد وشروطه ضمن واتساب" : "Shows contract summary and terms in WhatsApp"} value={deviceSettings.showStayContract} onChange={(value) => void updateDeviceSettings({ showStayContract: value })} />
           <SettingsSwitch icon="quickreply" label={language === "ar" ? "إظهار الرسائل الجاهزة" : "Show ready messages"} description={language === "ar" ? "يعرض خيارات الرسائل في تفاصيل الحجز" : "Shows message options in booking details"} value={deviceSettings.showReadyMessages} onChange={(value) => void updateDeviceSettings({ showReadyMessages: value })} />
-          <SettingsRow icon="edit-note" title={language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates"} subtitle={language === "ar" ? "تحرير نصوص التأكيد والموقع والتقييم والتعليمات" : "Edit confirmation, location, rating, and instructions texts"} onPress={() => router.push("/whatsapp-templates" as never)} trailing={<SettingsValueBadge label={language === "ar" ? "تحرير" : "Edit"} />} />
+          {whatsappIntegrationEnabled ? <SettingsRow icon="edit-note" title={language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates"} subtitle={language === "ar" ? "تحرير نصوص التأكيد والموقع والتقييم والتعليمات" : "Edit confirmation, location, rating, and instructions texts"} onPress={() => router.push("/whatsapp-templates" as never)} trailing={<SettingsValueBadge label={language === "ar" ? "تحرير" : "Edit"} />} /> : null}
 
           <View style={styles.divider} />
 
+          {whatsappIntegrationEnabled ? (<>
           {sectionTitle(language === "ar" ? "إعدادات واتساب" : "WhatsApp")}
           <SettingsSwitch icon="chat" label={language === "ar" ? "إرسال الرسائل عبر واتساب" : "Send messages over WhatsApp"} description={language === "ar" ? "تحويل رسائل التأكيد والوصول والتقييم إلى روابط واتساب للعميل" : "Converts confirmations, arrivals, and rating messages into WhatsApp links"} value={whatsAppEnabled} onChange={setWhatsAppEnabled} />
           {whatsAppEnabled ? (<>
@@ -182,11 +195,13 @@ export default function SettingsScreen() {
             {sectionTitle(language === "ar" ? "محتويات الرسالة" : "Message contents")}
             {WHATSAPP_OPTIONS.map((option) => <SettingsSwitch key={option.key} icon="info-outline" label={language === "ar" ? option.ar : option.en} value={whatsAppOptions[option.key as keyof WhatsAppMessageOptions] ?? false} onChange={(value) => updateMessageOption(option.key as keyof WhatsAppMessageOptions, value)} />)}
           </>) : null}
-        </Section>
+          </>) : null}
+        </Section> : null}
 
-        <Section title={language === "ar" ? "العملاء وبرنامج الولاء" : "CRM & loyalty rewards"} icon="workspace-premium" colors={colors} align={align} isRTL={isRTL}>
-          <SettingsRow icon="group" title={language === "ar" ? "قاعدة العملاء والقائمة السوداء" : "Customers & blacklist directory"} subtitle={language === "ar" ? "استعراض العملاء والطبقات وحظر/إلغاء حظر العملاء" : "Browse customers, tiers, and manually blacklist/unblacklist"} onPress={() => router.push("/(tabs)/crm" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} />
+        {crmEnabled || loyaltyFlowEnabled ? <Section title={language === "ar" ? "العملاء وبرنامج الولاء" : "CRM & loyalty rewards"} icon="workspace-premium" colors={colors} align={align} isRTL={isRTL}>
+          {crmEnabled ? <SettingsRow icon="group" title={language === "ar" ? "قاعدة العملاء والقائمة السوداء" : "Customers & blacklist directory"} subtitle={language === "ar" ? "استعراض العملاء والطبقات وحظر/إلغاء حظر العملاء" : "Browse customers, tiers, and manually blacklist/unblacklist"} onPress={() => router.push("/(tabs)/crm" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} /> : null}
 
+          {loyaltyFlowEnabled ? (<>
           <View style={styles.divider} />
 
           {sectionTitle(language === "ar" ? "نظام النقاط والكاش باك" : "Loyalty points & cashback")}
@@ -213,27 +228,28 @@ export default function SettingsScreen() {
             <SettingsStepper value={loyaltyConfig.platinumMinStays} min={0} max={150} step={1} disabled={configLocked || !loyaltyConfig.enabled} onChange={(platinumMinStays) => void saveLoyalty({ platinumMinStays })} />
             <SettingsValueBadge label={language === "ar" ? "بلاتيني: إقامات" : "Platinum stays"} />
           </View>
-        </Section>
+          </>) : null}
+        </Section> : null}
 
         <Section title={language === "ar" ? "الأتمتة والطقس والإشعارات" : "Automation, weather & alerts"} icon="bolt" colors={colors} align={align} isRTL={isRTL}>
-          <SettingsSwitch disabled={configLocked} icon="wb-cloudy" label={language === "ar" ? "تنبيهات الطقس الاستباقية" : "Proactive weather alerts"} description={language === "ar" ? "تشغيل/إيقاف مستشار الطقس وتدفئة المسبح بالكامل" : "Turn the weather & pool-heating advisor on/off entirely"} value={weatherConfig.enabled} onChange={(enabled) => void saveWeather({ enabled })} />
+          {weatherFlowEnabled ? <SettingsSwitch disabled={configLocked} icon="wb-cloudy" label={language === "ar" ? "تنبيهات الطقس الاستباقية" : "Proactive weather alerts"} description={language === "ar" ? "تشغيل/إيقاف مستشار الطقس وتدفئة المسبح بالكامل" : "Turn the weather & pool-heating advisor on/off entirely"} value={weatherConfig.enabled} onChange={(enabled) => void saveWeather({ enabled })} /> : null}
           <SettingsRow icon="thermostat" title={language === "ar" ? "درجة الحرارة الحرجة للتدفئة" : "Critical heating temperature"} subtitle={language === "ar" ? "تنبيه تدفئة المسبح عندما تدني الليل عن هذه الدرجة" : "Pool heating alert when overnight lows drop below this"} disabled={configLocked || !weatherConfig.enabled} trailing={<SettingsStepper value={weatherConfig.coldPoolThresholdC} min={0} max={40} step={1} disabled={configLocked || !weatherConfig.enabled} onChange={(coldPoolThresholdC) => void saveWeather({ coldPoolThresholdC })} formatValue={(value) => `< ${value}°C`} />} />
           <SettingsRow icon="notifications-active" title={language === "ar" ? "مستقبلو التنبيهات حسب الدور" : "Alert recipients by role"} disabled={configLocked || !weatherConfig.enabled} trailing={<View style={[styles.choiceWrap, { flexDirection: row }]}>
             {(["owner", "manager", "guard"] as const).map((role) => <Choice key={role} compact label={role === "owner" ? (language === "ar" ? "مالك" : "Owner") : role === "manager" ? (language === "ar" ? "مدير" : "Manager") : (language === "ar" ? "حارس" : "Guard")} selected={weatherConfig.recipients[role]} disabled={configLocked || !weatherConfig.enabled} onPress={() => void saveWeather({ recipients: { ...weatherConfig.recipients, [role]: !weatherConfig.recipients[role] } })} colors={colors} />)}
           </View>} />
           <SettingsRow icon="alarm" title={language === "ar" ? "تذكير الحارس قبل الحدث" : "Guard reminder lead time"} subtitle={language === "ar" ? "كم دقيقة قبل الوصول/المغادرة يُتذكر الحارس (متوسط: ساعتان)" : "Minutes before arrival/checkout a guard reminder fires (avg: 2h)"} trailing={<SettingsStepper value={deviceSettings.guardReminderLeadMinutes} min={30} max={720} step={30} onChange={(guardReminderLeadMinutes) => void updateDeviceSettings({ guardReminderLeadMinutes })} formatValue={(value) => `${Math.round(value / 60 * 10) / 10} ${language === "ar" ? "ساعة" : "h"}`} />} />
-          <View style={[styles.choiceRow, { flexDirection: row, justifyContent: "space-between", alignItems: "center", paddingVertical: 4 }]}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "700", flex: 1, textAlign: align }}>{language === "ar" ? "الإشعارات المحلية" : "Local notifications"}</Text><AppToggle value={deviceSettings.notificationsEnabled} onValueChange={(value) => void changeNotifications(value)} isRTL={isRTL} activeColor={colors.primary} inactiveColor={colors.border} accessibilityLabel={language === "ar" ? "الإشعارات المحلية" : "Local notifications"} /></View>
+          {notificationsFlowEnabled ? <View style={[styles.choiceRow, { flexDirection: row, justifyContent: "space-between", alignItems: "center", paddingVertical: 4 }]}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "700", flex: 1, textAlign: align }}>{language === "ar" ? "الإشعارات المحلية" : "Local notifications"}</Text><AppToggle value={deviceSettings.notificationsEnabled} onValueChange={(value) => void changeNotifications(value)} isRTL={isRTL} activeColor={colors.primary} inactiveColor={colors.border} accessibilityLabel={language === "ar" ? "الإشعارات المحلية" : "Local notifications"} /></View> : null}
 
           <View style={styles.divider} />
 
           {sectionTitle(language === "ar" ? "التحكم التشغيلي" : "Operational controls")}
-          <SettingsSwitch icon="touch-app" label={language === "ar" ? "إظهار تسجيل وصول الضيف" : "Show guest check-in"} description={language === "ar" ? "عند الإيقاف تُتبع الحجوزات زمنيًا وتلقائيًا دون تسجيل وصول/مغادرة يدوي" : "When off, bookings are tracked automatically by time without manual arrival or checkout"} value={deviceSettings.showGuestCheckIn} onChange={(value) => void updateDeviceSettings({ showGuestCheckIn: value })} />
-          <View style={{ marginTop: 10, borderRadius: 18, padding: 11, gap: 7, backgroundColor: colors.surfaceMuted }}>
+          {guestCheckInEnabled ? <SettingsSwitch icon="touch-app" label={language === "ar" ? "إظهار تسجيل وصول الضيف" : "Show guest check-in"} description={language === "ar" ? "عند الإيقاف تُتبع الحجوزات زمنيًا وتلقائيًا دون تسجيل وصول/مغادرة يدوي" : "When off, bookings are tracked automatically by time without manual arrival or checkout"} value={deviceSettings.showGuestCheckIn} onChange={(value) => void updateDeviceSettings({ showGuestCheckIn: value })} /> : null}
+          {guestCheckInEnabled ? <View style={{ marginTop: 10, borderRadius: 18, padding: 11, gap: 7, backgroundColor: colors.surfaceMuted }}>
             <View style={{ flexDirection: row, alignItems: "center", gap: 7 }}><MaterialIcons name="history" size={17} color={colors.primary} /><Text style={[styles.flex, { color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }]}>{language === "ar" ? "سجل وضع الوصول" : "Arrival mode history"}</Text></View>
             <Text style={{ color: colors.muted, fontSize: 10, lineHeight: 16, textAlign: align }}>{language === "ar" ? "يتم تتبع الحجوزات زمنيًا وتلقائيًا كلما كان الوضع اليدوي معطلاً." : "Bookings are tracked automatically by time whenever manual mode is off."}</Text>
             {guestCheckInModeHistory.length ? guestCheckInModeHistory.map((entry) => <View key={`${entry.changedAt}-${entry.enabled}`} style={{ flexDirection: row, alignItems: "center", gap: 7 }}><MaterialIcons name={entry.enabled ? "touch-app" : "schedule"} size={14} color={entry.enabled ? colors.primary : colors.muted} /><Text style={[styles.flex, { color: colors.muted, fontSize: 11, textAlign: align }]}>{entry.enabled ? (language === "ar" ? "تم تفعيل الوضع اليدوي" : "Manual mode enabled") : (language === "ar" ? "تم تفعيل الوضع التلقائي" : "Automatic mode enabled")}</Text><Text style={{ color: colors.muted, fontSize: 10 }}>{formatModeChangeTime(entry.changedAt)}</Text></View>) : <Text style={{ color: colors.muted, fontSize: 11, textAlign: align }}>{language === "ar" ? "لا يوجد تغيير مسجل حتى الآن." : "No mode change recorded yet."}</Text>}
-          </View>
-          <SettingsSwitch icon="cleaning-services" label={language === "ar" ? "إظهار التنظيف والفحص" : "Show cleaning & inspection"} description={language === "ar" ? "يعرض زر ولوحات تنبيهات التنظيف والفحص بين الحجوزات" : "Shows the cleaning board and turnover alerts between stays"} value={deviceSettings.showTurnoverTasks} onChange={(value) => void updateDeviceSettings({ showTurnoverTasks: value })} />
+          </View> : null}
+          {cleaningFlowEnabled ? <SettingsSwitch icon="cleaning-services" label={language === "ar" ? "إظهار التنظيف والفحص" : "Show cleaning & inspection"} description={language === "ar" ? "يعرض زر ولوحات تنبيهات التنظيف والفحص بين الحجوزات" : "Shows the cleaning board and turnover alerts between stays"} value={deviceSettings.showTurnoverTasks} onChange={(value) => void updateDeviceSettings({ showTurnoverTasks: value })} /> : null}
           <SettingsSwitch icon="checklist" label={language === "ar" ? "إظهار مهام اليوم" : "Show daily tasks"} description={language === "ar" ? "يعرض مركز الوصول والمغادرة والدفعات والانتظار في الرئيسية" : "Shows the arrivals, checkouts, payments, and waitlist center on Home"} value={deviceSettings.showDailyTasks} onChange={(value) => void updateDeviceSettings({ showDailyTasks: value })} />
         </Section>
 

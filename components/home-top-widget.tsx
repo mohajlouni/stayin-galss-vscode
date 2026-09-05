@@ -13,6 +13,7 @@ import { useBookings } from "@/lib/booking-store";
 import { useChaletScope } from "@/lib/chalet-scope";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useI18n } from "@/lib/i18n";
+import { useGlobalFeatureFlags } from "@/lib/feature-flags";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -45,8 +46,9 @@ export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotificati
     return () => clearInterval(interval);
   }, []);
 
-  const showWeather = true;
-  const showLunar = deviceSettings.showLunarPhase;
+  const globalFlags = useGlobalFeatureFlags();
+  const showWeather = globalFlags.feat_automation_weather;
+  const showLunar = deviceSettings.showLunarPhase && globalFlags.feat_lunar_calendar;
   const hasTiles = showWeather || showLunar;
   const [collapsed, setCollapsed] = useState(false);
   const [rendered, setRendered] = useState(hasTiles);

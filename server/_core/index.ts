@@ -7,7 +7,7 @@ import { registerOAuthRoutes, registerSupabaseAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { ensureSessionsTable, pruneExpiredSessions, seedDemoData } from "../db";
+import { ensureGlobalFeatureFlagsTable, ensureSessionsTable, ensureUserCodeColumn, ensureUserCodes, ensureWorkspaceCodes, ensureWorkspaceFeatureSettingsTable, pruneExpiredSessions, seedDemoData } from "../db";
 import { isAllowedWebOrigin } from "./security";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -91,6 +91,11 @@ async function startServer() {
   );
 
   await ensureSessionsTable();
+  await ensureGlobalFeatureFlagsTable();
+  await ensureWorkspaceFeatureSettingsTable();
+  await ensureUserCodeColumn();
+  await ensureUserCodes();
+  await ensureWorkspaceCodes();
   await pruneExpiredSessions();
 
   const preferredPort = parseInt(process.env.PORT || "3000");

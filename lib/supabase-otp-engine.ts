@@ -82,8 +82,12 @@ export function classifySignupProbeError(error: unknown): SignupProbeResult {
   if (/network|fetch failed|load failed|connection|timeout|abort|offline|internet/i.test(message)) return "network";
   // A confirmed address refuses a signup resend ("already confirmed").
   if (/already confirmed|already signed up|confirmed|email already registered|account already exists/i.test(message)) return "confirmed";
-  // No pending signup / no such user.
-  if (/user not found|signup not found|not found|does ?not exist|no user/i.test(message) || status === 400) return "not-found";
+  // A truly absent identity must be *confirmed by the response text*. We do NOT
+  // treat a bare status 400 as "not-found": modern Supabase returns 400 for many
+  // reasons (rate limits, ambiguous resend states) that also cover an unverified
+  // account. Down-concluding a real unverified signup to "absent" would make a
+  // login report "الحساب غير مسجل" instead of the recovery/verification path.
+  if (/user not found|signup not found|does ?not exist|doesn'?t exist|no such user|no user|email not found|not registered|account not found/i.test(message)) return "not-found";
   if (/rate|too many|seconds|throttl|limit/i.test(message) || status === 429) return "unknown";
   return "unknown";
 }
@@ -186,17 +190,19 @@ export type AuthError =
   | "invalid-email"
   | "provider-unavailable"
   | "email-not-confirmed"
+  | "deletion-pending"
   | "network"
   | "unknown";
 
 export const AUTH_ERROR_MESSAGES: Record<AuthError, string> = {
   "not-configured": "تسجيل الدخول غير مفعّل بعد على هذا التطبيق.",
-  unregistered: "الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب",
-  "wrong-password": "كلمة المرور غير صحيحة. تحقق منها وأعد المحاولة.",
+  unregistered: "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.",
+  "wrong-password": "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة.",
   "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام.",
   "invalid-email": "أدخل بريدًا إلكترونيًا صحيحًا، مثل name@example.com.",
   "provider-unavailable": "تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم",
   "email-not-confirmed": "حسابك مسجل ولكنه غير موثّق بعد. أرسلنا لك رمز تحقق جديداً إلى بريدك الإلكتروني.",
+  "deletion-pending": "تم تقديم طلب حذف لحسابك وهو فعّال حاليًا.",
   network: "تعذر الاتصال بالشبكة. تحقق من اتصال الإنترنت ثم أعد المحاولة.",
   unknown: "حدث خطأ غير متوقع أثناء الدخول. حاول مرة أخرى.",
 };

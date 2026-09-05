@@ -25,6 +25,8 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState<PaymentMethod | null>(null);
+  const [compensationAmount, setCompensationAmount] = useState("");
+  const [compensationNote, setCompensationNote] = useState("");
   const [note, setNote] = useState("");
   const [meterInput, setMeterInput] = useState<UtilityMeterInput | undefined>();
   const align = isRTL ? "right" : "left";
@@ -38,15 +40,19 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
     setRefundDeposit(depositHeld > 0.005);
     setRefundAmount(depositHeld > 0.005 ? String(depositHeld) : "");
     setRefundMethod(null);
+    setCompensationAmount("");
+    setCompensationNote("");
     setNote("");
     setMeterInput(undefined);
     setAssetResults(Object.fromEntries(chaletAssets.map((asset) => [asset.id, true])));
   }, [visible, booking?.id, depositHeld]);
 
   if (!booking) return null;
+  const compensationTotal = Math.max(0, Number(compensationAmount) || 0);
+  const compExceedsHeld = compensationTotal > depositHeld + 0.005;
   const amount = Number(refundAmount);
-  const refundExceedsHeld = amount > depositHeld + 0.005;
-  const validRefund = !refundDeposit || (Boolean(refundMethod) && Number.isFinite(amount) && amount > 0 && !refundExceedsHeld);
+  const refundExceedsHeld = amount + compensationTotal > depositHeld + 0.005;
+  const validRefund = !compExceedsHeld && (!refundDeposit || (Boolean(refundMethod) && Number.isFinite(amount) && amount > 0 && !refundExceedsHeld));
   const ready = inspectionPassed && validRefund;
   const failedCount = chaletAssets.filter((asset) => assetResults[asset.id] === false).length;
 
@@ -96,6 +102,12 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
                 <Text style={{ color: colors.muted, fontSize: 10, lineHeight: 16, marginTop: 3, textAlign: align }}>{language === "ar" ? "يمكن تعديل مبلغ الاسترداد أو تركه محتجزًا مع كتابة السبب." : "You can adjust the refund amount or hold the deposit and add a reason."}</Text>
               </View>
             </Pressable>
+            <View style={[styles.refundPanel, { backgroundColor: colors.surfaceMuted, marginTop: 9 }]}>
+              <View style={[styles.compHeader, { flexDirection: row }]}><View style={[styles.icon, styles.smallIcon, { backgroundColor: colors.warning + "18" }]}><MaterialIcons name="handshake" size={17} color={colors.warning} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "خصم أضرار / غرامات من التأمين" : "Damage / penalty deduction"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{language === "ar" ? "يُحوَّل تلقائيًا إلى بند «إيرادات تعويضات» ويُسجل في كشف العهدة." : "Automatically posted to “compensation revenue” and logged on the float statement."}</Text></View></View>
+              <TextInput value={compensationAmount} onChangeText={setCompensationAmount} keyboardType="decimal-pad" editable={!saving} textAlign={align} placeholder={language === "ar" ? "مبلغ الخصم (اختياري)" : "Deduction amount (optional)"} placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground, backgroundColor: compExceedsHeld ? colors.error + "14" : colors.surface }]} />
+              <TextInput value={compensationNote} onChangeText={setCompensationNote} editable={!saving} maxLength={120} placeholder={language === "ar" ? "السبب، مثال: تلف المكيف" : "Reason, e.g. AC damage"} placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground, backgroundColor: colors.surface, marginTop: 6 }]} />
+              {compExceedsHeld ? <Text style={{ color: colors.error, fontSize: 10, marginTop: 5, textAlign: align }}>{language === "ar" ? "لا يمكن أن يتجاوز الخصم التأمين المحتجز." : "Deduction cannot exceed the held deposit."}</Text> : null}
+            </View>
             {refundDeposit ? <View style={[styles.refundPanel, { backgroundColor: colors.surfaceMuted }]}>
               <Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "مبلغ الاسترداد" : "Refund amount"}</Text>
               <TextInput value={refundAmount} onChangeText={setRefundAmount} keyboardType="decimal-pad" editable={!saving} textAlign={align} style={[styles.input, { color: colors.foreground, backgroundColor: refundExceedsHeld ? colors.error + "14" : colors.surface }]} />
@@ -112,7 +124,7 @@ export function CheckOutConfirmationSheet({ booking, colors, currency, language,
           {utilityTrackingEnabled ? <UtilityMeterCapture colors={colors} language={language} isRTL={isRTL} saving={saving} value={meterInput} onChange={setMeterInput} title={language === "ar" ? "قراءة العداد النهائية" : "Closing meter reading"} /> : null}
           <View style={[styles.actions, { flexDirection: row }]}>
             <Pressable disabled={saving} onPress={onClose} style={({ pressed }) => [styles.secondary, { backgroundColor: colors.surfaceMuted, opacity: pressed || saving ? 0.58 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "900" }}>{language === "ar" ? "رجوع" : "Back"}</Text></Pressable>
-            <Pressable disabled={!ready || saving} onPress={() => onConfirm({ inspectionPassed: true, inspectionNote: note.trim() || undefined, assetInspections: chaletAssets.length ? chaletAssets.map((asset) => ({ assetId: asset.id, assetName: asset.name, passed: assetResults[asset.id] !== false })) : undefined, depositRefund: refundDeposit && refundMethod ? { amount, paymentMethod: refundMethod, note: note.trim() || undefined } : undefined, utilityReading: meterInput })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !ready || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "logout"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "اعتماد المغادرة" : "Confirm checkout")}</Text></Pressable>
+            <Pressable disabled={!ready || saving} onPress={() => onConfirm({ inspectionPassed: true, inspectionNote: note.trim() || undefined, assetInspections: chaletAssets.length ? chaletAssets.map((asset) => ({ assetId: asset.id, assetName: asset.name, passed: assetResults[asset.id] !== false })) : undefined, depositRefund: refundDeposit && refundMethod ? { amount, paymentMethod: refundMethod, note: note.trim() || undefined } : undefined, depositCompensation: compensationTotal > 0 ? { amount: compensationTotal, note: compensationNote.trim() || undefined } : undefined, utilityReading: meterInput })} style={({ pressed }) => [styles.primary, { backgroundColor: colors.primary, opacity: pressed || !ready || saving ? 0.55 : 1 }]}><MaterialIcons name={saving ? "hourglass-top" : "logout"} size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{saving ? (language === "ar" ? "جارٍ الحفظ" : "Saving") : (language === "ar" ? "اعتماد المغادرة" : "Confirm checkout")}</Text></Pressable>
           </View>
           </ScrollView>
         </GlowGlassCard>
@@ -139,6 +151,7 @@ const styles = StyleSheet.create({
   assetChipPass: { minHeight: 28, borderRadius: 9, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
   assetChipFail: { minHeight: 28, borderRadius: 9, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
   refundPanel: { borderRadius: 18, padding: 11, marginTop: 9 },
+  compHeader: { alignItems: "center", gap: 9, marginBottom: 8 },
   input: { minHeight: 42, borderRadius: 14, paddingHorizontal: 10, marginTop: 7, fontSize: 13 },
   methods: { gap: 6, marginTop: 9, flexWrap: "wrap" },
   method: { minHeight: 36, borderRadius: 13, paddingHorizontal: 7, alignItems: "center", justifyContent: "center", gap: 3, flexDirection: "row" },

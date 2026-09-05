@@ -29,6 +29,7 @@ import { useI18n } from "@/lib/i18n";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { openBookingWhatsApp } from "@/lib/whatsapp-helper";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
+import { useGlobalFeatureFlags } from "@/lib/feature-flags";
 import { startOAuthLogin } from "@/constants/oauth";
 
 export default function HomeScreen() {
@@ -39,6 +40,9 @@ export default function HomeScreen() {
   const { isRTL, language } = useI18n();
   const { formatTime, formatDate, deviceSettings, updateDeviceSettings } = useAppPreferences();
   const { isAuthenticated } = useWorkspaceAccess();
+  const globalFlags = useGlobalFeatureFlags();
+  const cleaningFlowEnabled = globalFlags.feat_cleaning_inspection;
+  const guestCheckInEnabled = globalFlags.feat_guest_checkin;
   const colors = useColors();
   const [clock, setClock] = useState(() => Date.now());
   const [operationalSavingId, setOperationalSavingId] = useState<string | null>(null);
@@ -134,6 +138,7 @@ export default function HomeScreen() {
   };
   const operationalActionFor = (booking: Booking) => {
     if (!deviceSettings.showGuestCheckIn) return undefined;
+    if (!guestCheckInEnabled) return undefined;
     const operationalState = getBookingDisplayOperationalState(booking, clock, true).state;
     const timeline = getBookingStayTimeline(booking, clock);
     if (operationalState === "awaiting-arrival") return { label: operationalSavingId === booking.id ? (language === "ar" ? "جارٍ تسجيل الوصول" : "Recording arrival") : (language === "ar" ? "تسجيل وصول الضيف" : "Record guest arrival"), icon: "login" as const, color: colors.success, onPress: () => runOperationalAction(booking, "check-in"), disabled: operationalSavingId === booking.id || timeline.phase === "upcoming" };
@@ -157,8 +162,8 @@ export default function HomeScreen() {
         <SummaryMetric label={language === "ar" ? "الرصيد المستحق" : "Outstanding balance"} value={remaining > 0 ? `${remaining.toFixed(2)} ${settings.currency}` : language === "ar" ? "لا يوجد" : "None"} icon="account-balance-wallet" colors={colors} accent={colors.warning} align={align} onPress={() => openFilteredBookings("balance")} />
       </BentoGlassCard>
       {restoreHintVisible ? <View accessibilityLiveRegion="polite" style={[styles.restoreDataHint, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}><MaterialIcons name="cloud-download" size={18} color={colors.primary} /><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تسجيل الدخول لاستعادة البيانات" : "Sign in to restore data"} onPress={() => void startOAuthLogin()} style={({ pressed }) => [styles.flex, { opacity: pressed ? 0.68 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{language === "ar" ? "هل لديك بيانات منشأة محفوظة؟" : "Have saved workspace data?"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{language === "ar" ? "اضغط لتسجيل الدخول واستعادتها بأمان." : "Tap to sign in and restore it securely."}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إخفاء الإشعار" : "Dismiss notification"} onPress={() => setRestoreHintVisible(false)} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View> : null}
-      {deviceSettings.showDailyTasks ? <DailyOperationsPanel arrivals={dailyOperations.arrivals.length} checkouts={dailyOperations.checkouts.length} outstanding={dailyOperations.outstanding.length} waitlist={dailyOperations.waitlist.length} expanded={!deviceSettings.dailyOperationsCollapsed} onToggleExpanded={() => void updateDeviceSettings({ dailyOperationsCollapsed: !deviceSettings.dailyOperationsCollapsed })} onArrivalsPress={() => openFilteredBookings("today")} onCheckoutsPress={() => openFilteredBookings("today")} onOutstandingPress={() => openFilteredBookings("balance")} upcomingHolidays={upcomingHolidays} onHolidayPricingPress={(holiday) => appRouter.push({ pathname: "/booking-form", params: { date: holiday.date, holidayPricing: "1" } } as never)} onWaitlistPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} onTurnoverPress={() => appRouter.push("/turnover-tasks" as never)} showTurnoverAction={deviceSettings.showTurnoverTasks} /> : null}
-      <OperationalAlerts turnoverCount={deviceSettings.showTurnoverTasks ? turnoverAttentionCount : 0} checkoutWarningCount={checkoutWarningCount} onTurnoverPress={() => appRouter.push("/turnover-tasks" as never)} onCheckoutsPress={() => openFilteredBookings("today")} />
+      {deviceSettings.showDailyTasks ? <DailyOperationsPanel arrivals={dailyOperations.arrivals.length} checkouts={dailyOperations.checkouts.length} outstanding={dailyOperations.outstanding.length} waitlist={dailyOperations.waitlist.length} expanded={!deviceSettings.dailyOperationsCollapsed} onToggleExpanded={() => void updateDeviceSettings({ dailyOperationsCollapsed: !deviceSettings.dailyOperationsCollapsed })} onArrivalsPress={() => openFilteredBookings("today")} onCheckoutsPress={() => openFilteredBookings("today")} onOutstandingPress={() => openFilteredBookings("balance")} upcomingHolidays={upcomingHolidays} onHolidayPricingPress={(holiday) => appRouter.push({ pathname: "/booking-form", params: { date: holiday.date, holidayPricing: "1" } } as never)} onWaitlistPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} onTurnoverPress={() => { if (cleaningFlowEnabled) appRouter.push("/turnover-tasks" as never); }} showTurnoverAction={deviceSettings.showTurnoverTasks} /> : null}
+      <OperationalAlerts turnoverCount={deviceSettings.showTurnoverTasks && cleaningFlowEnabled ? turnoverAttentionCount : 0} checkoutWarningCount={checkoutWarningCount} onTurnoverPress={() => { if (cleaningFlowEnabled) appRouter.push("/turnover-tasks" as never); }} onCheckoutsPress={() => openFilteredBookings("today")} />
       {pendingWaitlist.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "طلبات الانتظار المعلقة" : "Active waitlist requests"} onPress={() => appRouter.push({ pathname: "/(tabs)/waitlist", params: { tab: "active" } } as never)} style={({ pressed }) => [styles.waitlistIndicator, { backgroundColor: colors.warning + "12", flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="pending-actions" size={16} color={colors.warning} /><Text style={[styles.flex, { color: colors.warning, fontSize: 11, fontWeight: "900", textAlign: align }]}>{language === "ar" ? `${pendingWaitlist.length} طلب انتظار يحتاج متابعة` : `${pendingWaitlist.length} waitlist request${pendingWaitlist.length === 1 ? "" : "s"} need attention`}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.warning} /></Pressable> : null}
 
       <View style={[styles.sectionHeader, { flexDirection: row }]}>

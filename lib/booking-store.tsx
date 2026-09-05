@@ -11,8 +11,8 @@ import { useDemoMode } from "./demo-mode";
 import { persistChaletImage, removeManagedChaletImage } from "./chalet-image";
 import { persistPaymentReceipt } from "./payment-receipt";
 import { syncCheckoutNotifications } from "./checkout-notifications";
-import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, bookingReferenceFor, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, effectiveLoyaltyProgram, effectiveUtilityTracking, EMPTY_DATA, Expense, expireElapsedRecords, getBookingOperationalState, isValidChaletReferenceCode, isValidPaymentMethod, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, SpecialPriceRule, TurnoverTask, WaitlistEntry } from "./booking-model";
-import { type Asset, type AssetInspectionItem, type Customer, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceTask, type NotificationRecipient, type NotificationType, type UtilityReading, type WeatherLog } from "./booking-model";
+import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, effectiveLoyaltyProgram, effectiveUtilityTracking, EMPTY_DATA, Expense, expireElapsedRecords, getBookingOperationalState, getChaletShift, isValidChaletReferenceCode, isValidPaymentMethod, isValidUnitCode, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, shiftCodeForShift, smartBookingReference, SpecialPriceRule, staffFloatAccounts, staffFloatCollectedTotal, staffFloatOutstanding, TurnoverTask, WaitlistEntry } from "./booking-model";
+import { type Asset, type AssetInspectionItem, type Customer, type DepositCompensation, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceTask, type NotificationRecipient, type NotificationType, type StaffFloatSettlement, type UtilityReading, type WeatherLog } from "./booking-model";
 import { findCustomerByPhone, phoneE164, upsertCustomerFromBooking } from "./customers";
 import { deriveLoyaltyTier, pointsEarned } from "./loyalty";
 import { computeUtilityCost, findOpenUtilityReading, UTILITY_RATES, utilityTypeLabel } from "./utility-readings";
@@ -76,6 +76,8 @@ type BookingContextValue = AppData & {
   updatePayment: (bookingId: string, paymentId: string, update: Pick<Payment, "amount" | "note" | "paymentMethod">) => Promise<void>;
   voidPayment: (bookingId: string, paymentId: string, reason?: string) => Promise<void>;
   addDepositRefund: (bookingId: string, refund: DepositRefund) => Promise<void>;
+  settleStaffFloat: (floatId: string, note?: string) => Promise<void>;
+  recordDepositCompensation: (bookingId: string, input: { amount: number; note?: string }) => Promise<void>;
   addWaitlist: (entry: WaitlistEntry) => Promise<void>;
   deleteWaitlist: (id: string) => Promise<void>;
   promoteWaitlist: (id: string, booking: Booking, conflictIds?: string[]) => Promise<void>;
@@ -457,7 +459,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     },
     pendingBackupImport,
     lastDeleted,
-    addBooking: async (booking) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); const createdBooking: Booking = { ...booking, createdByUserId: user?.id, createdByName: user?.name ?? undefined, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined }; const customerUpsert = upsertCustomerFromBooking(data.customers ?? [], createdBooking); const language = data.settings.device?.language ?? "ar"; const bookingNotification = buildInAppNotification({ type: "new_booking", recipients: ["owner", "manager"], dataPayload: { bookingId: createdBooking.id }, ...buildNewBookingNotification(createdBooking, language, data.settings.businessName) }); await persist({ ...data, bookings: [createdBooking, ...data.bookings], customers: customerUpsert.customers, notifications: [bookingNotification, ...(data.notifications ?? [])] }); },
+    addBooking: async (booking) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); const creatorCode = (user as { userCode?: string | null } | null | undefined)?.userCode ?? "U000"; const workspaceCode = typeof data.settings.workspaceCode === "string" && data.settings.workspaceCode.trim() ? data.settings.workspaceCode : "E01"; const referencedChalet = data.chalets.find((chalet) => chalet.id === booking.chaletId); const referencedShift = referencedChalet ? getChaletShift(referencedChalet, booking.shiftId, booking.bookingType) : undefined; const createdBooking: Booking = { ...booking, bookingReference: smartBookingReference({ creatorCode, workspaceCode, unitCode: referencedChalet?.referenceCode, date: booking.startDate, shiftCode: shiftCodeForShift(referencedShift, booking.bookingType) }), createdByUserId: user?.id, createdByName: user?.name ?? undefined, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined }; const customerUpsert = upsertCustomerFromBooking(data.customers ?? [], createdBooking); const language = data.settings.device?.language ?? "ar"; const bookingNotification = buildInAppNotification({ type: "new_booking", recipients: ["owner", "manager"], dataPayload: { bookingId: createdBooking.id }, ...buildNewBookingNotification(createdBooking, language, data.settings.businessName) }); await persist({ ...data, bookings: [createdBooking, ...data.bookings], customers: customerUpsert.customers, notifications: [bookingNotification, ...(data.notifications ?? [])] }); },
     updateBooking: async (booking) => {
       const existing = data.bookings.find((item) => item.id === booking.id);
       if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
@@ -495,17 +497,23 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!confirmation || !confirmation.inspectionPassed) throw new Error("checkout-inspection-required");
       const refundableDeposit = remainingRefundableDeposit(booking);
       const requestedRefund = confirmation?.depositRefund;
-      if (requestedRefund && requestedRefund.amount > 0) {
+      const requestedRefundAmount = requestedRefund && requestedRefund.amount > 0 ? Math.round(Math.max(0, requestedRefund.amount) * 100) / 100 : 0;
+      const requestedCompensation = confirmation?.depositCompensation;
+      const requestedCompensationAmount = requestedCompensation && Number.isFinite(requestedCompensation.amount) && requestedCompensation.amount > 0 ? Math.round(Math.max(0, requestedCompensation.amount) * 100) / 100 : 0;
+      if (requestedRefundAmount > 0 || requestedCompensationAmount > 0) {
         const depositCollected = Boolean(
           (booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0)
           || booking.depositPaymentRecordedAt,
         );
         if (!depositCollected) throw new Error("deposit-not-collected");
-        if (!isValidPaymentMethod(requestedRefund.paymentMethod) || !Number.isFinite(requestedRefund.amount) || requestedRefund.amount <= 0 || requestedRefund.amount - refundableDeposit > 0.005) throw new Error("invalid-deposit-refund");
+        if (requestedRefund && requestedRefundAmount > 0 && (!isValidPaymentMethod(requestedRefund.paymentMethod) || !Number.isFinite(requestedRefund.amount) || requestedRefund.amount <= 0)) throw new Error("invalid-deposit-refund");
+        if (requestedRefundAmount + requestedCompensationAmount - refundableDeposit > 0.005) throw new Error("invalid-deposit-refund");
       }
       const checkedOutAt = new Date().toISOString();
       const actorName = auditActorName ?? "مستخدم التطبيق";
-      const refund: DepositRefund | undefined = requestedRefund ? { id: `deposit-refund-checkout-${Date.now()}`, amount: requestedRefund.amount, date: checkedOutAt.slice(0, 10), recordedAt: checkedOutAt, note: requestedRefund.note?.trim() || "استرداد التأمين عند المغادرة", paymentMethod: requestedRefund.paymentMethod } : undefined;
+      const sourceFloatId = typeof booking.depositCollection?.recipientTargetId === "string" && booking.depositCollection.recipientTargetId.startsWith("float-") ? booking.depositCollection.recipientTargetId.slice("float-".length) : undefined;
+      const refund: DepositRefund | undefined = requestedRefundAmount > 0 ? { id: `deposit-refund-checkout-${Date.now()}`, amount: requestedRefundAmount, date: checkedOutAt.slice(0, 10), recordedAt: checkedOutAt, note: requestedRefund!.note?.trim() || "استرداد التأمين عند المغادرة", paymentMethod: requestedRefund!.paymentMethod, sourceFloatId, returnedByUserId: user?.id, returnedByName: user?.name?.trim() || undefined } : undefined;
+      const depositCompensation = requestedCompensationAmount > 0 ? { amount: requestedCompensationAmount, date: checkedOutAt.slice(0, 10), recordedAt: checkedOutAt, note: requestedCompensation?.note?.trim() || undefined, sourceFloatId, returnedByUserId: user?.id, returnedByName: user?.name?.trim() || undefined } satisfies DepositCompensation : undefined;
       const inspections = confirmation?.assetInspections ?? [];
       const failedAssets = inspections.filter((item) => item.passed === false);
       const nextAssets = (data.assets ?? []).map((asset) => failedAssets.some((item) => item.assetId === asset.id) ? { ...asset, condition: "needs_service" as const, updatedAt: checkedOutAt } : asset);
@@ -532,13 +540,14 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const earnedTransaction: LoyaltyTransaction | undefined = loyaltyAccount && awardedPoints >= 1 ? { id: `loyalty-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, customerId: loyaltyAccount.customerId, type: "earn", points: awardedPoints, amount: 0, bookingId: id, bookingReference: booking.bookingReference, note: "نقاط مكتسبة عند إتمام الإقامة", createdAt: loyaltyNow } : undefined;
       const nextLoyaltyAccount = loyaltyAccount && awardedPoints >= 1 && existingAccount ? { ...loyaltyAccount, pointsBalance: loyaltyAccount.pointsBalance + awardedPoints, lifetimeEarned: (loyaltyAccount.lifetimeEarned ?? 0) + awardedPoints } : loyaltyAccount;
       const finalLoyaltyAccount = nextLoyaltyAccount ?? loyaltyAccount;
-      const detailsParts = [booking.chaletName ?? "", "تم إنهاء الإقامة بعد فحص الشاليه", confirmation?.inspectionNote ? `ملاحظة الفحص: ${confirmation.inspectionNote.trim()}` : "", refund ? `تم استرداد التأمين: ${refund.amount}` : refundableDeposit > 0.005 ? "تم الاحتفاظ بالتأمين دون استرداد" : "", completedMeter ? `${utilityTypeLabel(completedMeter.type, language)}: قراءة ${completedMeter.checkOutReading} · التكلفة ${(completedMeter.totalCost ?? 0).toFixed(2)} د.أ${completedMeter.isExcessive ? " (استهلاك مرتفع)" : ""}` : "", awardedPoints >= 1 ? `أُضيفت ${awardedPoints} نقطة ولاء` : ""].filter(Boolean).join(" · ");
+      const detailsParts = [booking.chaletName ?? "", "تم إنهاء الإقامة بعد فحص الشاليه", confirmation?.inspectionNote ? `ملاحظة الفحص: ${confirmation.inspectionNote.trim()}` : "", refund ? `تم استرداد التأمين: ${refund.amount}` : requestedCompensationAmount > 0 ? "" : refundableDeposit > 0.005 ? "تم الاحتفاظ بالتأمين دون استرداد" : "", depositCompensation ? `خصم أضرار من التأمين: ${depositCompensation.amount}${depositCompensation.note ? ` (${depositCompensation.note})` : ""} · يُحوَّل لإيرادات تعويضات` : "", completedMeter ? `${utilityTypeLabel(completedMeter.type, language)}: قراءة ${completedMeter.checkOutReading} · التكلفة ${(completedMeter.totalCost ?? 0).toFixed(2)} د.أ${completedMeter.isExcessive ? " (استهلاك مرتفع)" : ""}` : "", awardedPoints >= 1 ? `أُضيفت ${awardedPoints} نقطة ولاء` : ""].filter(Boolean).join(" · ");
       const extraAudit = [
+        depositCompensation ? { id: `audit-deposit-comp-${Date.now()}`, action: "deposit-compensation-recorded" as AuditAction, bookingId: id, subjectName: booking.customerName, details: `${booking.chaletName ?? ""} · خصم أضرار ${depositCompensation.amount} من تأمين الحجز${depositCompensation.note ? ` · ${depositCompensation.note}` : ""}`, createdAt: checkedOutAt, actorName } : undefined,
         completedMeter ? { id: `audit-utility-${Date.now()}`, action: "utility-reading-recorded" as AuditAction, bookingId: id, subjectName: booking.customerName, details: `${booking.chaletName ?? ""} · ${utilityTypeLabel(completedMeter.type, language)} · الاستهلاك ${(completedMeter.totalCost ?? 0).toFixed(2)} د.أ`, createdAt: checkedOutAt, actorName } : undefined,
         awardedPoints >= 1 ? { id: `audit-loyalty-${Date.now()}`, action: "loyalty-points-awarded" as AuditAction, bookingId: id, subjectName: loyaltyAccount!.customerId, details: `منح ${awardedPoints} نقطة ولاء (طبقة ${lifetimeTier})`, createdAt: checkedOutAt, actorName } : undefined
       ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
       const utilityReadings = completedMeter ? (data.utilityReadings ?? []).some((item) => item.id === completedMeter.id) ? (data.utilityReadings ?? []).map((item) => item.id === completedMeter.id ? completedMeter : item) : [completedMeter, ...(data.utilityReadings ?? [])] : data.utilityReadings;
-      await persist({ ...data, bookings: data.bookings.map((item) => item.id === id ? { ...item, status: "completed" as const, checkedOutAt, assetInspections: inspections.length ? inspections : item.assetInspections, depositRefunds: refund ? [...(item.depositRefunds ?? []), refund] : item.depositRefunds, updatedByUserId: user?.id, updatedByName: actorName } : item), assets: nextAssets, maintenanceTasks: maintenanceTask.length ? [...maintenanceTask, ...(data.maintenanceTasks ?? [])] : data.maintenanceTasks, notifications: [...checkOutNotifications, ...(data.notifications ?? [])], utilityReadings, loyaltyAccounts: finalLoyaltyAccount ? (data.loyaltyAccounts ?? []).some((item) => item.id === finalLoyaltyAccount.id) ? (data.loyaltyAccounts ?? []).map((item) => item.id === finalLoyaltyAccount.id ? finalLoyaltyAccount : item) : [finalLoyaltyAccount, ...(data.loyaltyAccounts ?? [])] : data.loyaltyAccounts, loyaltyTransactions: earnedTransaction ? [earnedTransaction, ...(data.loyaltyTransactions ?? [])] : data.loyaltyTransactions, auditLog: [{ id: `audit-check-out-${Date.now()}`, action: "booking-checked-out" as AuditAction, bookingId: id, subjectName: booking.customerName, details: detailsParts, createdAt: checkedOutAt, actorName }, ...extraAudit, ...data.auditLog] });
+      await persist({ ...data, bookings: data.bookings.map((item) => item.id === id ? { ...item, status: "completed" as const, checkedOutAt, assetInspections: inspections.length ? inspections : item.assetInspections, depositRefunds: refund ? [...(item.depositRefunds ?? []), refund] : item.depositRefunds, depositCompensation: depositCompensation ?? item.depositCompensation, updatedByUserId: user?.id, updatedByName: actorName } : item), assets: nextAssets, maintenanceTasks: maintenanceTask.length ? [...maintenanceTask, ...(data.maintenanceTasks ?? [])] : data.maintenanceTasks, notifications: [...checkOutNotifications, ...(data.notifications ?? [])], utilityReadings, loyaltyAccounts: finalLoyaltyAccount ? (data.loyaltyAccounts ?? []).some((item) => item.id === finalLoyaltyAccount.id) ? (data.loyaltyAccounts ?? []).map((item) => item.id === finalLoyaltyAccount.id ? finalLoyaltyAccount : item) : [finalLoyaltyAccount, ...(data.loyaltyAccounts ?? [])] : data.loyaltyAccounts, loyaltyTransactions: earnedTransaction ? [earnedTransaction, ...(data.loyaltyTransactions ?? [])] : data.loyaltyTransactions, auditLog: [{ id: `audit-check-out-${Date.now()}`, action: "booking-checked-out" as AuditAction, bookingId: id, subjectName: booking.customerName, details: detailsParts, createdAt: checkedOutAt, actorName }, ...extraAudit, ...data.auditLog] });
     },
     archiveBookingAsNoShow: async (id) => {
       if (!can("cancel_delete_bookings")) throw new Error("no-show-forbidden");
@@ -622,7 +631,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const name = input.name.trim();
       const referenceCode = normalizeChaletReferenceCode(input.referenceCode);
       if (!name) throw new Error("chalet-name-required");
-      if (!isValidChaletReferenceCode(referenceCode)) throw new Error("chalet-reference-code-invalid");
+      if (!isValidChaletReferenceCode(referenceCode) && !isValidUnitCode(referenceCode)) throw new Error("chalet-reference-code-invalid");
       if (data.chalets.some((chalet) => chalet.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("chalet-name-duplicate");
       if (data.chalets.some((chalet) => normalizeChaletReferenceCode(chalet.referenceCode) === referenceCode)) throw new Error("chalet-reference-code-duplicate");
       const id = `chalet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -635,7 +644,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const name = chalet.name.trim();
       const referenceCode = normalizeChaletReferenceCode(chalet.referenceCode);
       if (!name) throw new Error("chalet-name-required");
-      if (!isValidChaletReferenceCode(referenceCode)) throw new Error("chalet-reference-code-invalid");
+      if (!isValidChaletReferenceCode(referenceCode) && !isValidUnitCode(referenceCode)) throw new Error("chalet-reference-code-invalid");
       if (data.chalets.some((item) => item.id !== chalet.id && item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("chalet-name-duplicate");
       if (data.chalets.some((item) => item.id !== chalet.id && normalizeChaletReferenceCode(item.referenceCode) === referenceCode)) throw new Error("chalet-reference-code-duplicate");
       const current = data.chalets.find((item) => item.id === chalet.id);
@@ -801,8 +810,34 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const refundable = Math.max(0, Number(booking.depositAmount || 0) - (booking.depositRefunds ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.amount || 0)), 0));
       if (!Number.isFinite(refund.amount) || refund.amount <= 0 || refund.amount > refundable) throw new Error("invalid-deposit-refund");
       if (!isValidPaymentMethod(refund.paymentMethod)) throw new Error("invalid-deposit-refund-method");
-      const savedRefund: DepositRefund = { ...refund, recordedAt: refund.recordedAt ?? new Date().toISOString(), note: refund.note?.trim() || undefined };
+      const savedRefund: DepositRefund = { ...refund, sourceFloatId: refund.sourceFloatId ?? (typeof booking.depositCollection?.recipientTargetId === "string" && booking.depositCollection.recipientTargetId.startsWith("float-") ? booking.depositCollection.recipientTargetId.slice("float-".length) : undefined), returnedByUserId: refund.returnedByUserId ?? user?.id, returnedByName: refund.returnedByName ?? (user?.name?.trim() || undefined), recordedAt: refund.recordedAt ?? new Date().toISOString(), note: refund.note?.trim() || undefined };
       await persist({ ...data, bookings: data.bookings.map((item) => item.id === bookingId ? { ...item, depositRefunds: [...(item.depositRefunds ?? []), savedRefund] } : item) });
+    },
+    settleStaffFloat: async (floatId, note) => {
+      if (!can("manage_payments")) throw new Error("manage-payments-forbidden");
+      const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
+      if (!account) throw new Error("float-account-not-found");
+      const outstanding = staffFloatOutstanding(data, floatId);
+      if (outstanding <= 0.005) throw new Error("float-nothing-to-settle");
+      const settledAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const settlement: StaffFloatSettlement = { id: `float-settlement-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, floatId, amount: outstanding, settledAt, note: note?.trim() || undefined, settledByUserId: user?.id, settledByName: actorName };
+      await persist({ ...data, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settled" as AuditAction, subjectName: account.label, details: `تسوية وتوريد عهدة "${account.label}" للمالك: ${outstanding} ${data.settings.currency}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: settledAt, actorName }, ...data.auditLog] });
+    },
+    recordDepositCompensation: async (bookingId, input) => {
+      if (!can("refund_security_deposits")) throw new Error("refund-deposit-forbidden");
+      const booking = data.bookings.find((item) => item.id === bookingId);
+      if (!booking) throw new Error("booking-not-found");
+      const refundable = remainingRefundableDeposit(booking);
+      const amount = Number.isFinite(input.amount) && input.amount > 0 ? Math.round(Math.max(0, input.amount) * 100) / 100 : 0;
+      if (amount <= 0) throw new Error("invalid-deposit-refund");
+      if (!(booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0) && !booking.depositPaymentRecordedAt) throw new Error("deposit-not-collected");
+      if (amount - refundable > 0.005) throw new Error("invalid-deposit-refund");
+      const recordedAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const sourceFloatId = typeof booking.depositCollection?.recipientTargetId === "string" && booking.depositCollection.recipientTargetId.startsWith("float-") ? booking.depositCollection.recipientTargetId.slice("float-".length) : undefined;
+      const compensation: DepositCompensation = { amount, date: recordedAt.slice(0, 10), recordedAt, note: input.note?.trim() || undefined, sourceFloatId, returnedByUserId: user?.id, returnedByName: actorName };
+      await persist({ ...data, bookings: data.bookings.map((item) => item.id === bookingId ? { ...item, depositCompensation: compensation } : item), auditLog: [{ id: `audit-${Date.now()}`, action: "deposit-compensation-recorded" as AuditAction, bookingId, subjectName: booking.customerName, details: `${booking.chaletName ?? ""} · خصم أضرار ${amount} من تأمين الحجز${input.note?.trim() ? ` · ${input.note.trim()}` : ""} · إيرادات تعويضات`, createdAt: recordedAt, actorName }, ...data.auditLog] });
     },
     addWaitlist: async (entry) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); await persist({ ...data, waitlist: [...data.waitlist, entry] }); },
     deleteWaitlist: async (id) => { if (!can("cancel_delete_bookings")) throw new Error("waitlist-delete-forbidden"); const entry = data.waitlist.find((item) => item.id === id); if (!entry) throw new Error("waitlist-not-found"); const cancelledAt = new Date().toISOString(); await persist({ ...data, waitlist: data.waitlist.map((item) => item.id === id ? { ...item, status: "cancelled" as const, cancelledAt, cancellationReason: "manual" as const } : item), auditLog: [{ id: `audit-${Date.now()}`, action: "waitlist-cancelled" as AuditAction, subjectName: entry.customerName, details: `${entry.chaletName ?? ""} · أُلغي يدويًا`, createdAt: cancelledAt, actorName: auditActorName ?? "مستخدم التطبيق" }, ...data.auditLog] }); },
@@ -822,7 +857,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const actorName = user?.name ?? "مستخدم التطبيق";
       const savedBooking: Booking = { ...booking, createdByUserId: user?.id, createdByName: actorName, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined };
       const replacedBookings = data.bookings.filter((item) => conflictIds.includes(item.id));
-      const bookingReference = savedBooking.bookingReference ?? bookingReferenceFor(savedBooking, data.chalets);
+      const bookingReference = savedBooking.bookingReference ?? smartBookingReference({ creatorCode: (user as { userCode?: string | null } | null | undefined)?.userCode ?? "U000", workspaceCode: typeof data.settings.workspaceCode === "string" && data.settings.workspaceCode.trim() ? data.settings.workspaceCode : "E01", unitCode: data.chalets.find((chalet) => chalet.id === savedBooking.chaletId)?.referenceCode, date: savedBooking.startDate, shiftCode: shiftCodeForShift(data.chalets.find((chalet) => chalet.id === savedBooking.chaletId) ? getChaletShift(data.chalets.find((chalet) => chalet.id === savedBooking.chaletId)!, savedBooking.shiftId, savedBooking.bookingType) : undefined, savedBooking.bookingType) });
       const replacementNames = replacedBookings.map((item) => item.customerName).join("، ");
       const promotionDetails = [savedBooking.chaletName ?? entry.chaletName ?? "", `تم التحويل إلى الحجز ${bookingReference}`, replacementNames ? `استُبدل حجز العميل: ${replacementNames}` : "", `نفّذ التحويل: ${actorName}`].filter(Boolean).join(" · ");
       const replacementAudits = replacedBookings.map((item, index) => ({ id: `audit-waitlist-replacement-${Date.now()}-${index}`, action: "booking-cancelled" as AuditAction, subjectName: item.customerName, details: `${item.chaletName ?? ""} · استُبدل بحجز العميل: ${entry.customerName} · الحجز الناتج: ${bookingReference} · نفّذ التحويل: ${actorName}`, createdAt: promotedAt }));

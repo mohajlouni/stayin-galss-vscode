@@ -26,6 +26,7 @@ import { useI18n } from "@/lib/i18n";
 import { useInternetAvailability } from "@/lib/network-status";
 import { AuthSessionProvider } from "@/lib/auth-session";
 import { RouteAccessGate } from "@/components/route-access-gate";
+import { FeatureRouteGuard } from "@/components/feature-route-guard";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -126,7 +127,7 @@ function AppNavigator() {
     const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => { active = false; subscription.remove(); };
   }, []);
-  return <><StatusBar style="auto" /><Stack screenOptions={stackScreenOptions} /><DemoBanner /><DemoNotice /><WorkspaceSyncBanner /><UndoDeleteBanner /></>;
+  return <><StatusBar style="auto" /><Stack screenOptions={stackScreenOptions} /><FeatureRouteGuard /><DemoBanner /><DemoNotice /><WorkspaceSyncBanner /><UndoDeleteBanner /></>;
 }
 
 function DemoBanner() {

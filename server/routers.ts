@@ -14,6 +14,7 @@ import { takeSuggestionSubmission } from "./suggestion-rate-limit";
 import { storagePut } from "./storage";
 import { normalizeInternationalPhone } from "../lib/phone-number";
 import { findConflicts, normalizeAppData, type Booking } from "../lib/booking-model";
+import { GLOBAL_FEATURE_FLAG_KEYS, WORKSPACE_FEATURE_PREFERENCE_KEYS } from "../shared/feature-flags";
 
 const workspacePermissionsSchema = z.object({
   view_financial_reports: z.boolean(),
@@ -91,11 +92,51 @@ export const appRouter = router({
       const user = await db.updateUserProfile(ctx.user.id, { name: ctx.user.name ?? "StayIn user", phone: ctx.user.phone ?? null, avatarUrl: url });
       return { avatarUrl: user.avatarUrl, user };
     }),
+    requestEmailChangeOtp: protectedProcedure.input(z.object({ newEmail: z.string().email() })).mutation(async ({ ctx, input }) => {
+      const email = input.newEmail.toLowerCase().trim();
+      if (ctx.user.email && ctx.user.email.toLowerCase() === email) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Same email as the current one" });
+      }
+      const { getSupabaseClient } = await import("./_core/supabase");
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+      if (error) throw new TRPCError({ code: "BAD_REQUEST", message: "Could not send the verification code. Try again later." });
+      return { ok: true as const };
+    }),
+    verifyEmailChangeOtp: protectedProcedure.input(z.object({ newEmail: z.string().email(), token: z.string().min(4).max(8) })).mutation(async ({ ctx, input }) => {
+      const email = input.newEmail.toLowerCase().trim();
+      const { getSupabaseClient } = await import("./_core/supabase");
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.verifyOtp({ email, token: input.token, type: "email" });
+      if (error) throw new TRPCError({ code: "BAD_REQUEST", message: "The verification code is incorrect or has expired. Request a new code." });
+      await db.updateUserEmail(ctx.user.id, email);
+      return { ok: true as const };
+    }),
   }),
   accountDeletion: router({
     status: protectedProcedure.query(({ ctx }) => db.getAccountDeletionRequest(ctx.user.id)),
     request: protectedProcedure.input(z.object({ confirmation: z.literal("DELETE"), reason: z.string().trim().max(800).nullable() })).mutation(({ ctx, input }) => db.requestAccountDeletion(ctx.user.id, input.reason)),
     cancel: protectedProcedure.mutation(({ ctx }) => db.cancelAccountDeletion(ctx.user.id)),
+    requestRecoveryOtp: publicProcedure.input(z.object({ email: z.string().email() })).mutation(async ({ input }) => {
+      const pending = await db.getPendingDeletionByEmail(input.email);
+      if (!pending) return { ok: false, error: "No pending deletion found for this email." };
+      const { getSupabaseClient } = await import("./_core/supabase");
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.signInWithOtp({ email: input.email.toLowerCase().trim(), options: { shouldCreateUser: false } });
+      if (error) return { ok: false, error: "Could not send the verification code. Try again later." };
+      return { ok: true };
+    }),
+    verifyRecoveryOtp: publicProcedure.input(z.object({ email: z.string().email(), token: z.string().min(4).max(8) })).mutation(async ({ input }) => {
+      const pending = await db.getPendingDeletionByEmail(input.email);
+      if (!pending) return { ok: false, error: "No pending deletion found for this email." };
+      const { getSupabaseClient } = await import("./_core/supabase");
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.verifyOtp({ email: input.email.toLowerCase().trim(), token: input.token, type: "email" });
+      if (error) return { ok: false, error: "The verification code is incorrect or has expired. Request a new code." };
+      const result = await db.recoverDeletedAccountByEmail(input.email);
+      if (!result.ok) return result;
+      return { ok: true };
+    }),
   }),
   suggestions: router({
     submit: publicProcedure
@@ -131,8 +172,8 @@ export const appRouter = router({
       const summary = await db.getWorkspaceSummary(ctx.user);
       return { workspace: summary.workspace, member };
     }),
-    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(255) })).mutation(async ({ ctx, input }) => {
-      const member = await db.createWorkspace({ user: ctx.user, name: input.name });
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(255), phone: z.string().trim().max(32).optional().or(z.literal("")), currency: z.string().trim().max(8).optional().or(z.literal("")) })).mutation(async ({ ctx, input }) => {
+      const member = await db.createWorkspace({ user: ctx.user, name: input.name, phone: input.phone ?? "", currency: input.currency ?? "" });
       const summary = await db.getWorkspaceSummary(ctx.user);
       return { workspace: summary.workspace, member };
     }),
@@ -210,10 +251,21 @@ export const appRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Invitation is invalid or expired" });
       }
     }),
+    acceptInvitationCode: protectedProcedure.input(z.object({ code: z.string().regex(/^\d{6}$/, "Invite code must contain 6 digits") })).mutation(async ({ ctx, input }) => {
+      try {
+        const invitation = await db.findWorkspaceInvitationByPin(input.code);
+        if (!invitation) throw new Error("Invitation is invalid or expired");
+        const member = await db.acceptWorkspaceInvitation({ userId: ctx.user.id, phone: invitation.phone, pin: input.code });
+        return { member };
+      } catch {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invitation is invalid or expired" });
+      }
+    }),
     data: protectedProcedure.query(async ({ ctx }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.member) throw new TRPCError({ code: "FORBIDDEN", message: "Workspace membership required" });
       if (summary.member.role === "guest") throw new TRPCError({ code: "FORBIDDEN", message: "Operational workspace access required" });
+      await db.ensureWorkspaceCodes();
       const data = await db.getWorkspaceData(summary.member.workspaceId);
       return data ? { payload: data.payload, version: data.version, updatedAt: data.updatedAt } : { payload: null, version: 0, updatedAt: null };
     }),
@@ -254,10 +306,47 @@ export const appRouter = router({
       return { ...result, payload, removed };
     }),
   }),
+  featureControl: router({
+    global: router({
+      list: protectedProcedure.query(() => db.listGlobalFeatureFlags()),
+      update: adminProcedure.input(z.object({ flag: z.enum(GLOBAL_FEATURE_FLAG_KEYS), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+        await db.updateGlobalFeatureFlag({ flag: input.flag, enabled: input.enabled, actorUserId: ctx.user.id });
+        await db.createSuperAdminAudit({ actorUserId: ctx.user.id, action: "feature-flag-updated", targetWorkspaceId: null, targetMemberId: null, details: JSON.stringify({ flag: input.flag, enabled: input.enabled }) });
+        return { success: true as const };
+      }),
+    }),
+    workspace: router({
+      get: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ input }) => db.getWorkspaceFeatureSettings(input.workspaceId)),
+      update: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), flag: z.enum(WORKSPACE_FEATURE_PREFERENCE_KEYS), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+        const workspace = await db.getWorkspaceById(input.workspaceId);
+        if (!workspace) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+        const isSuperAdmin = isSuperAdminActor(ctx.user, ENV.ownerOpenId);
+        if (!isSuperAdmin) {
+          try {
+            await db.requireWorkspaceOwner(input.workspaceId, ctx.user.id);
+          } catch {
+            throw new TRPCError({ code: "FORBIDDEN", message: "Owner access required" });
+          }
+        }
+        await db.setWorkspaceFeatureSetting({ workspaceId: input.workspaceId, flag: input.flag, enabled: input.enabled, actorUserId: ctx.user.id });
+        return { success: true as const };
+      }),
+    }),
+    effective: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ input }) => db.getEffectiveFeatureFlags(input.workspaceId)),
+  }),
   masterControl: router({
     overview: adminProcedure.query(async () => {
-      const [workspaces, audit] = await Promise.all([db.listMasterWorkspaces(), db.listSuperAdminAudit()]);
-      return { workspaces, audit };
+      const [workspaces, audit, pendingDeletionCount] = await Promise.all([db.listMasterWorkspaces(), db.listSuperAdminAudit(), db.getPendingDeletionCount()]);
+      return { workspaces, audit, pendingDeletionCount };
+    }),
+    pendingDeletions: adminProcedure.query(async () => db.listPendingDeletionAccounts()),
+    pendingDeletionCount: adminProcedure.query(async () => db.getPendingDeletionCount()),
+    removedAccounts: adminProcedure.input(z.object({ limit: z.number().int().positive().max(250).default(100) })).query(async ({ input }) => db.listRemovedAccounts(input.limit)),
+    previewPurge: adminProcedure.input(z.object({ contact: z.string().trim().min(1) })).query(async ({ input }) => {
+      return db.previewPurgeByContact(input.contact);
+    }),
+    purgeUserByContact: adminProcedure.input(z.object({ contact: z.string().trim().min(1), typedConfirmation: z.string().trim().min(1) })).mutation(async ({ ctx, input }) => {
+      return db.purgeUserByContact(ctx.user.id, input.contact, input.typedConfirmation);
     }),
     featureFlags: router({
       get: adminProcedure.input(z.object({ workspaceId: z.number().int().positive() })).query(async ({ input }) => {

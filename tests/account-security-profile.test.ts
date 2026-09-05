@@ -61,17 +61,35 @@ const unifiedAuth = source("components/unified-auth-screen.tsx");
     expect(more).toContain("currentUser.email ??");
   });
 
-  it("shows verified email read-only and routes edits to the secure identity portal", () => {
+  it("shows a verified email read-only and changes it inside the app via a 6-digit OTP, without an external identity portal", () => {
     const profile = source("app/profile.tsx");
     const header = source("components/compact-screen-header.tsx");
     expect(profile).toContain('plain showDateTime={false}');
     expect(header).toContain("showDateTime?: boolean");
     expect(header).toContain("{showDateTime ? <LiveDateTime");
     expect(profile).toContain("البريد الإلكتروني الموثق");
-    expect(profile).toContain("VerifiedEmailField");
     expect(profile).toContain("verifiedEmail");
-    expect(profile).toContain("startOAuthLogin");
-    expect(profile).toContain("تعديل عبر بوابة الهوية");
-    expect(profile).not.toContain("setEmail(");
+    expect(profile).toContain("requestEmailChangeOtp");
+    expect(profile).toContain("verifyEmailChangeOtp");
+    expect(profile).toContain("تغيير البريد الإلكتروني");
+    expect(profile).toContain("رمز التحقق");
+    expect(profile).not.toContain("startOAuthLogin");
+    expect(profile).not.toContain("بوابة الهوية");
+  });
+
+  it("shows all password fields (current, new, confirm) with eye toggles and a biometric / OTP recovery for forgotten passwords", () => {
+    const security = source("app/account-security.tsx");
+    expect(security).toContain("كلمة المرور الحالية");
+    expect(security).toContain("كلمة المرور الجديدة");
+    expect(security).toContain("تأكيد كلمة المرور الجديدة");
+    expect(security).toContain("نسيت كلمة المرور الحالية؟ التحقق بواسطة البصمة / Face ID");
+    expect(security).toContain("التحقق ببصمة الإصبع / الوجه");
+    expect(security).toContain("إرسال رمز تحقق OTP إلى البريد");
+    expect(security).toContain("setPwShowCurrent");
+    expect(security).toContain("setPwShowNew");
+    expect(security).toContain("setPwShowConfirm");
+    expect(security).toContain("تحديث كلمة المرور");
+    expect(security).toContain("تم تحديث كلمة المرور بنجاح.");
+    expect(security).toContain("Password updated successfully.");
   });
 });

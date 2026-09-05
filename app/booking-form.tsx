@@ -11,7 +11,7 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
+import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, activeStaffFloatAccounts, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
 import { hasBookingConflict } from "@/services/availabilityService";
 import { configuredBookingPrice } from "@/services/pricingService";
 import { useBookings } from "@/lib/booking-store";
@@ -34,7 +34,7 @@ function parseTime(value: string, fallback: string) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-type RecipientChoice = { id: string; type: PaymentRecipientType; userId?: number; name: string; cliqAlias?: string | null; bankDetails?: string | null; commissionRate?: string | null; commissionType?: CommissionType | null };
+type RecipientChoice = { id: string; type: PaymentRecipientType; userId?: number; name: string; cliqAlias?: string | null; bankDetails?: string | null; commissionRate?: string | null; commissionType?: CommissionType | null; floatId?: string };
 const COUNTRY_FLAGS: Record<CountryDialingCode["iso"], string> = { JO: "🇯🇴", SA: "🇸🇦", AE: "🇦🇪", KW: "🇰🇼", QA: "🇶🇦", OM: "🇴🇲", BH: "🇧🇭", EG: "🇪🇬", PS: "🇵🇸", IQ: "🇮🇶", TR: "🇹🇷", US: "🇺🇸", GB: "🇬🇧" };
 function localPhoneDigits(value: string, country: CountryDialingCode) { return value.startsWith(country.code) ? value.slice(country.code.length) : value.replace(/^\+/, ""); }
 
@@ -101,8 +101,10 @@ export default function BookingForm() {
   const collectionRecipients = trpc.workspace.collectionRecipients.useQuery(undefined, { retry: false });
   const recipientChoices = useMemo<RecipientChoice[]>(() => {
     const owner = collectionRecipients.data?.find((member) => member.role === "owner");
-    return [{ id: "owner", type: "owner", userId: owner?.userId, name: language === "ar" ? "حساب المالك الرئيسي" : "Master account" }, ...(collectionRecipients.data ?? []).filter((member) => member.role !== "owner").map((member) => ({ id: `member-${member.userId}`, type: member.role === "guest" ? "guard" as const : "staff" as const, userId: member.userId, name: member.displayName, cliqAlias: member.cliqAlias, bankDetails: member.bankDetails, commissionRate: member.commissionRate, commissionType: member.commissionType }))];
-  }, [collectionRecipients.data, language]);
+    const managerPaidReceivers = (collectionRecipients.data ?? []).filter((member) => member.role !== "owner").map((member) => ({ id: `member-${member.userId}`, type: member.role === "guest" ? "guard" as const : "staff" as const, userId: member.userId, name: member.displayName, cliqAlias: member.cliqAlias, bankDetails: member.bankDetails, commissionRate: member.commissionRate, commissionType: member.commissionType }));
+    const floats = activeStaffFloatAccounts(settings).map((account) => ({ id: `float-${account.id}`, type: "staff" as const, userId: account.memberUserId, name: account.memberName ?? account.label, cliqAlias: account.cliqAlias ?? null, bankDetails: account.bankDetails ?? null, floatId: account.id }));
+    return [{ id: "owner", type: "owner", userId: owner?.userId, name: language === "ar" ? "حساب المالك الرئيسي" : "Master account" }, ...managerPaidReceivers, ...floats];
+  }, [collectionRecipients.data, language, settings]);
   const recipientIdForMethod = (method: PaymentMethod | null) => {
     const preferred = paymentMethodOptions.find((option) => option.id === method)?.defaultRecipientType ?? "owner";
     return recipientChoices.find((recipient) => recipient.type === preferred)?.id ?? "owner";
@@ -113,6 +115,11 @@ export default function BookingForm() {
       if (method === "bank-transfer") return settings.paymentRouting?.masterAccounts?.bankDetails || (language === "ar" ? "الحساب البنكي للمالك" : "Owner bank account");
       return settings.paymentRouting?.masterAccounts?.cashHandlerLabel || recipient.name;
     }
+    if (recipient.floatId) {
+      if (method === "click") return recipient.cliqAlias || (language === "ar" ? "بيانات CliQ غير مكتملة" : "CliQ details missing");
+      if (method === "bank-transfer") return recipient.bankDetails || (language === "ar" ? "بيانات بنكية غير مكتملة" : "Bank details missing");
+      return language === "ar" ? `كاش على ذمة ${recipient.name} (عهدة)` : `Cash as float held by ${recipient.name}`;
+    }
     if (method === "click") return recipient.cliqAlias || (language === "ar" ? "بيانات CliQ غير مكتملة" : "CliQ details missing");
     if (method === "bank-transfer") return recipient.bankDetails || (language === "ar" ? "بيانات بنكية غير مكتملة" : "Bank details missing");
     return language === "ar" ? `نقدًا بيد ${recipient.name}` : `Cash held by ${recipient.name}`;
@@ -121,7 +128,7 @@ export default function BookingForm() {
     const recipient = recipientChoices.find((item) => item.id === recipientId) ?? recipientChoices[0];
     const rate = recipient?.commissionRate === null || recipient?.commissionRate === undefined || recipient?.commissionRate === "" ? undefined : Number(recipient.commissionRate);
     const commissionType = recipient?.commissionType === "fixed" ? "fixed" : "percent";
-    return { id, amount, date: localDateISO(), recordedAt: new Date().toISOString(), note, paymentMethod: method, recipientType: recipient?.type ?? "owner", handlerUserId: recipient?.userId, handlerName: recipient?.name, recipientAccountLabel: recipient ? paymentAccountLabel(method, recipient) : undefined, calculatedCommission: calculateCollectionCommission(amount, rate, commissionType) || undefined, commissionType: rate === undefined ? undefined : commissionType };
+    return { id, amount, date: localDateISO(), recordedAt: new Date().toISOString(), note, paymentMethod: method, recipientType: recipient?.type ?? "owner", recipientTargetId: recipient?.id ?? "owner", handlerUserId: recipient?.userId, handlerName: recipient?.name, recipientAccountLabel: recipient ? paymentAccountLabel(method, recipient) : undefined, calculatedCommission: calculateCollectionCommission(amount, rate, commissionType) || undefined, commissionType: rate === undefined ? undefined : commissionType };
   };
   const selectedChalet = useMemo(() => chalets.find((chalet) => chalet.id === chaletId), [chalets, chaletId]);
   const chaletShifts = useMemo(() => getChaletShifts(selectedChalet, settings), [selectedChalet, settings]);

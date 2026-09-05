@@ -31,10 +31,12 @@ type MenuRoute =
   | "/admin/master-control"
   | "/settings/advanced-tools"
   | "/payment-methods"
+  | "/float-settlements"
   | "/maintenance-dashboard"
   | "/notifications"
   | "/(tabs)/crm"
-  | "/loyalty";
+  | "/loyalty"
+  | "/feature-control";
 type MenuIcon =
   | "settings"
   | "format-list-bulleted"
@@ -50,9 +52,11 @@ type MenuIcon =
   | "admin-panel-settings"
   | "health-and-safety"
   | "payments"
+  | "account-balance-wallet"
   | "build"
   | "notifications"
-  | "workspace-premium";
+  | "workspace-premium"
+  | "tune";
 type MenuEntry = { title: string; description: string; icon: MenuIcon; route: MenuRoute };
 const MORE_TAB_ROUTES = new Set<MenuRoute>(["/(tabs)/settings", "/(tabs)/waitlist"]);
 
@@ -116,11 +120,12 @@ export default function MoreScreen() {
     ...(isManager ? [{ title: language === "ar" ? "إدارة الوحدات / العقارات" : "Property management", description: language === "ar" ? "ملف كل وحدة وأسعارها وحارسها وأوقاتها" : "Each property profile, pricing, guardian, and hours", icon: "home-work" as const, route: "/chalet-management" as const }] : []),
     { title: t("waitlist"), description: language === "ar" ? "طلبات العملاء بانتظار توفر الموعد" : "Customer requests waiting for availability", icon: "format-list-bulleted", route: "/(tabs)/waitlist" },
     ...(isManager && flags.maintenance ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),
-    { title: language === "ar" ? "مركز الإشعارات" : "Notifications center", description: language === "ar" ? "الإشعارات الداخلية والفلاتر وحالة القراءة" : "In-app notifications, filters, and read status", icon: "notifications", route: "/notifications" },
-  ], [isManager, language, flags.maintenance]);
+    ...(flags.notifications ? [{ title: language === "ar" ? "مركز الإشعارات" : "Notifications center", description: language === "ar" ? "الإشعارات الداخلية والفلاتر وحالة القراءة" : "In-app notifications, filters, and read status", icon: "notifications" as const, route: "/notifications" as const }] : []),
+  ], [isManager, language, flags.maintenance, flags.notifications]);
 
   const financeItems: MenuEntry[] = useMemo(() => [
     ...(isManager && flags.payment_methods ? [{ title: language === "ar" ? "طرق الدفع والحسابات المالية" : "Payment methods & financial accounts", description: language === "ar" ? "طرق التحصيل وحسابات CliQ وIBAN للإيجار والتأمين" : "Collection methods and CliQ/IBAN accounts for rent and deposits", icon: "payments" as const, route: "/payment-methods" as const }] : []),
+    ...(can("manage_payments") && flags.payment_methods ? [{ title: language === "ar" ? "تسوية العُهد النقدية" : "Float settlements", description: language === "ar" ? "توريد عُهد الموظفين للمالك وتصفير الذمم المعلقة" : "Hand over staff floats to the owner and clear pending liabilities", icon: "account-balance-wallet" as const, route: "/float-settlements" as const }] : []),
     ...(can("view_financial_reports") && flags.loyalty ? [{ title: language === "ar" ? "برنامج الولاء والنقاط" : "Loyalty program & points", description: language === "ar" ? "أرصدة العملاء والطبقات والاسترداد على الحجوزات" : "Customer balances, tiers, and booking redemptions", icon: "workspace-premium" as const, route: "/loyalty" as const }] : []),
   ], [isManager, language, can, flags.payment_methods, flags.loyalty]);
 
@@ -128,6 +133,7 @@ export default function MoreScreen() {
     ...(isManager ? [{ title: language === "ar" ? "إدارة المستخدمين والصلاحيات" : "User management & permissions", description: language === "ar" ? "فريق العمل والموظفون والدعوات والصلاحيات" : "Staff, employees, invitations, and permissions", icon: "group" as const, route: "/user-management" as const }] : []),
     ...(can("view_audit_logs") && flags.audit_logs ? [{ title: language === "ar" ? "سجل إجراءات النظام" : "System activity log", description: language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions", icon: "history" as const, route: "/audit-log" as const }] : []),
     ...((isOwner || isSuperAdmin) && flags.advanced_tools ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجز وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
+    ...((isOwner || isSuperAdmin) && flags.master_control ? [{ title: language === "ar" ? "مركز التحكم في الميزات" : "Feature control center", description: language === "ar" ? "تفعيل وتعطيل الشاشات والأدوات في النظام بضغطة زر واحدة" : "Toggle screens and tools with one press", icon: "tune" as const, route: "/feature-control" as const }] : []),
     ...(masterControl.data && flags.master_control ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
   ], [isManager, isOwner, isSuperAdmin, language, can, masterControl.data, flags.audit_logs, flags.advanced_tools, flags.master_control]);
 

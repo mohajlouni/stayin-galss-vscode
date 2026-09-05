@@ -277,16 +277,17 @@ describe("booking list references, search, and filters", () => {
     expect(formatBookingReference("N12608211")).toBe("#N12608211");
   });
 
-  it("normalizes missing or duplicate chalet codes to unique two-character values", () => {
+  it("normalizes unit codes to unique U01..U99 values, reassigning legacy codes", () => {
     const codes = normalizeChaletReferenceCodes([
-      { id: "one", name: "الأول", referenceCode: "n1", color: "#000000", createdAt: "2026-01-01T00:00:00.000Z" },
-      { id: "two", name: "الثاني", referenceCode: "N1", color: "#000000", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "one", name: "الأول", referenceCode: "ن1", color: "#000000", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "two", name: "الثاني", referenceCode: "U01", color: "#000000", createdAt: "2026-01-01T00:00:00.000Z" },
       { id: "three", name: "الثالث", color: "#000000", createdAt: "2026-01-01T00:00:00.000Z" },
     ]);
-    expect(codes.map((chalet) => chalet.referenceCode)).toEqual(["N1", "01", "02"]);
+    expect(codes.map((chalet) => chalet.referenceCode)).toEqual(["U01", "U02", "U03"]);
     expect(isValidChaletReferenceCode("N1")).toBe(true);
     expect(isValidChaletReferenceCode("N123")).toBe(false);
-    expect(suggestChaletReferenceCode(["01", "02"])).toBe("03");
+    expect(suggestChaletReferenceCode(["U01", "U02"])).toBe("U03");
+    expect(suggestChaletReferenceCode(["01", "02"])).toBe("U01");
   });
 
   it("searches guest, phone, chalet, and reference fields case-insensitively", () => {

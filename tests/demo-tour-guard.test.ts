@@ -9,6 +9,7 @@ const demoData = read("lib/demo-data.ts");
 const bookingStore = read("lib/booking-store.tsx");
 const routeAccessGate = read("components/route-access-gate.tsx");
 const workspaceGate = read("app/workspace-gate.tsx");
+const onboarding = read("app/onboarding.tsx");
 const rootLayout = read("app/_layout.tsx");
 
 describe("in-memory demo tour and zero-workspace guard", () => {
@@ -40,13 +41,13 @@ describe("in-memory demo tour and zero-workspace guard", () => {
     expect(bookingStore).toContain("showDemoNotice");
   });
 
-  it("locks zero-workspace users to the workspace gate while allowing demo access to protected routes", () => {
+  it("locks zero-workspace users to the onboarding gateway while allowing demo access to protected routes", () => {
     expect(routeAccessGate).toContain("useDemoMode");
     expect(routeAccessGate).toContain('destination === "onboarding"');
-    expect(routeAccessGate).toContain('<Redirect href="/workspace-gate" />');
-    expect(workspaceGate).toContain("استكشف التطبيق");
-    expect(workspaceGate).toContain("جولة تجريبية");
-    expect(workspaceGate).toContain("enterDemo");
+    expect(routeAccessGate).toContain('<Redirect href="/onboarding" />');
+    expect(onboarding).toContain("استكشاف بجولة تجريبية");
+    expect(onboarding).toContain("enterDemo");
+    expect(onboarding).toContain('router.replace("/(tabs)")');
   });
 
   it("wires the demo provider at the root and renders a persistent exit banner", () => {

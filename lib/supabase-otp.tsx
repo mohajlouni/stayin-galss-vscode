@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { exchangeSupabaseOtp } from "@/lib/_core/api";
+import { checkIdentityStatus, checkPendingDeletion, exchangeSupabaseOtp, type PendingDeletionInfo } from "@/lib/_core/api";
 import { useAuthSession } from "@/lib/auth-session";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
@@ -44,6 +44,20 @@ function emailRedirectToForPlatform(): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Passwords chosen at sign-up are bound to the Supabase account only once the
+ * emailed OTP is verified (the user is not authenticated before that, so we
+ * cannot set a password in `requestEmailSignupOtp`). We keep the pending value
+ * in memory, keyed by the normalized email, and apply it right after
+ * `activateEmailSignup` verifies the code. Keeping it out of the navigation
+ * params avoids leaking the secret into URLs/history. Cleared after use.
+ */
+const pendingSignupPasswordByEmail = new Map<string, string>();
+
+let lastPendingDeletion: PendingDeletionInfo | null = null;
+export function consumePendingDeletion(): PendingDeletionInfo | null { const v = lastPendingDeletion; lastPendingDeletion = null; return v; }
+export type { PendingDeletionInfo } from "@/lib/_core/api";
 
 /** Requests a passwordless email login code. Creates the user automatically when missing. */
 export async function requestPasswordlessEmail(email: string): Promise<{ error: SupabaseOtpError | null }> {
@@ -133,7 +147,8 @@ export async function verifyEmailOtp(input: { email: string; token: string; refr
   if (!accessToken) return { ok: false, error: "unknown" };
 
   try {
-    await exchangeSupabaseOtp({ supabaseAccessToken: accessToken, name: email, mode: "signin", provider: "email" });
+    const otpResult = await exchangeSupabaseOtp({ supabaseAccessToken: accessToken, name: email, mode: "signin", provider: "email" });
+    lastPendingDeletion = otpResult.pendingDeletion ?? null;
   } catch {
     return { ok: false, error: "unknown" };
   }
@@ -144,7 +159,7 @@ export async function verifyEmailOtp(input: { email: string; token: string; refr
 
 export type SignInWithPasswordResult =
   | { ok: true; email: string }
-  | { ok: false; error: AuthError };
+  | { ok: false; error: AuthError; pendingDeletion?: PendingDeletionInfo | null };
 
 /**
  * Direct Super Admin login bypass. When the identifier is the Super Admin email
@@ -180,7 +195,7 @@ export async function signInSuperAdmin(input: { identifier: string; password: st
  * Email + password sign-in. After Supabase verifies the credentials we bridge the
  * resulting session. The server independently enforces the registration gate:
  * an identity that was never created through sign-up returns
- * "الحساب غير مسجل، يرجى إنشاء حساب جديد".
+ * "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.".
  */
 export async function signInWithPasswordFlow(input: { email: string; password: string; refresh: ReturnType<typeof useAuthSession>["refresh"] }): Promise<SignInWithPasswordResult> {
   // Defensive: if a Super Admin phone-shaped identifier (e.g. "0797402940") ever
@@ -200,11 +215,27 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
   const { data, error } = await supabase.auth.signInWithPassword({ email, password: input.password });
   if (error || !data.session) {
     console.error("[Login Error] Supabase email/password sign-in failed", error ?? "no session");
-    return { ok: false, error: await classifyLoginFailure(email, error ?? new Error("sign-in-failed")) };
+    const code = await classifyLoginFailure(email, error ?? new Error("sign-in-failed"));
+    // A pending-deletion account may no longer accept the stored password (or was
+    // passwordless), so the generic "wrong password" would be misleading. Query the
+    // server: if the email has an active deletion request, surface a dedicated
+    // recovery message that reminds the user of the remaining grace period instead.
+    if (code === "wrong-password" || code === "unregistered" || code === "email-not-confirmed") {
+      try {
+        const pendingCheck = await checkPendingDeletion(email);
+        if (pendingCheck.pending && pendingCheck.scheduledFor) {
+          return { ok: false, error: "deletion-pending", pendingDeletion: { scheduledFor: pendingCheck.scheduledFor, requestedAt: "" } };
+        }
+      } catch {
+        // If the pending-deletion check fails, fall through to the normal message.
+      }
+    }
+    return { ok: false, error: code };
   }
 
   try {
-    await exchangeSupabaseOtp({ supabaseAccessToken: data.session.access_token, name: email, mode: "signin", provider: "password" });
+    const otpResult = await exchangeSupabaseOtp({ supabaseAccessToken: data.session.access_token, name: email, mode: "signin", provider: "password" });
+    lastPendingDeletion = otpResult.pendingDeletion ?? null;
   } catch (err) {
     console.error("[Login Error] Session bridge failed", err);
     const code = classifyAuthError(err);
@@ -241,27 +272,40 @@ async function probeUserExistence(email: string): Promise<"exists" | "absent" | 
 /**
  * Turns a raw password-login failure into a precise user-facing code.
  *
- * - "Email not confirmed"      -> the account exists but is unverified: the
- *   caller should resend the sign-up OTP and route to the OTP screen. This is
- *   reported distinctly from "unregistered".
- * - "Invalid login credentials"-> we cannot tell from the message alone whether
- *   the email exists, so we probe: only a genuinely absent identity is
- *   reported as "unregistered"; an existing user with a wrong password is a
- *   password error.
+ * The backend is the AUTHORITY for the two honest login messages:
+ * - the email is genuinely absent from the system -> "unregistered"
+ * - the email is registered but the password failed -> "wrong-password"
+ *
+ * Flow:
+ * - "Email not confirmed" is a distinct Supabase signal (the account exists
+ *   but is unverified) and is reported as "email-not-confirmed", never as
+ *   either of the two messages above.
+ * - "Invalid login credentials" is ambiguous (Supabase says the same for an
+ *   unknown email and for a wrong password), so we ask the backend
+ *   `/api/auth/identity-status` whether the identity exists. Only a confirmed
+ *   absence is "unregistered"; existing identities are a password error.
+ * - If the backend is unreachable we keep the Supabase resend probe as a
+ *   secondary authority. If that is also inconclusive, the failure is a
+ *   password matter ("wrong-password") — never the unrelated "not verified"
+ *   recovery flow and never a generic "please try again" message.
  */
 async function classifyLoginFailure(email: string, error: unknown): Promise<AuthError> {
   const code = classifyAuthError(error);
   if (code === "email-not-confirmed") return "email-not-confirmed";
 
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  if (code === "unregistered" || /invalid login credentials|invalid_credentials|user not found/i.test(message)) {
+  if (code === "unregistered" || code === "wrong-password" || /invalid login credentials|invalid_credentials|user not found/i.test(message)) {
+    const identity = await checkIdentityStatus(email);
+    if (identity.checked) return identity.registered ? "wrong-password" : "unregistered";
+
+    // Backend unavailable — the resend probe is a secondary authority.
     const existence = await probeUserExistence(email);
     if (existence === "absent") return "unregistered";
     if (existence === "exists") return "wrong-password";
-    // When the probe is inconclusive, fold back to "unregistered" (the original
-    // behaviour) so a genuine absent-identity login is never misreported as a
-    // password mismatch.
-    return "unregistered";
+    // Ambiguous and no authority to decide: a failed password entry is still a
+    // password matter, so we never misreport it as "not verified" nor as a
+    // shockingly generic error.
+    return "wrong-password";
   }
   return code;
 }
@@ -303,6 +347,9 @@ export async function requestEmailSignupOtp(input: { email: string; password: st
     },
   });
   if (error) return { error: classifyOtpError(error) };
+  // Remember the chosen password so the verified sign-up can bind it (see the
+  // module map above). Only meaningful for a brand-new signup, not a recovery.
+  pendingSignupPasswordByEmail.set(email, input.password);
   return { error: null };
 }
 
@@ -332,6 +379,20 @@ export async function activateEmailSignup(input: { email: string; token: string;
   if (error) {
     console.error("[SignUp OTP verify] exact Supabase error:", error);
     return { ok: false, error: classifyOtpError(error) };
+  }
+
+  // The OTP is now verified, so this email is a freshly authenticated sign-up.
+  // Bind the password the user chose at registration (kept in memory during
+  // the sign-up dispatch; never stored or placed in navigation params). Without
+  // this, the account would be passwordless and the chosen password could never
+  // be used to log in ("كلمة السر خطأ"). Clearing it also prevents reuse.
+  const pendingPassword = pendingSignupPasswordByEmail.get(email);
+  pendingSignupPasswordByEmail.delete(email);
+  if (pendingPassword && isSupabaseConfigured && supabase) {
+    const setResult = await supabase.auth.updateUser({ password: pendingPassword });
+    if (setResult.error) {
+      console.error("[SignUp password bind] exact Supabase error:", setResult.error);
+    }
   }
 
   const session = supabase.auth.getSession();
@@ -390,7 +451,8 @@ export async function socialSignIn(input: { provider: "google" | "apple"; refres
   if (!captured || !captured.accessToken || !captured.email) return { ok: false, error: "unknown" };
 
   try {
-    await exchangeSupabaseOtp({ supabaseAccessToken: captured.accessToken, name: captured.email, mode: "signin", provider: input.provider });
+    const otpResult = await exchangeSupabaseOtp({ supabaseAccessToken: captured.accessToken, name: captured.email, mode: "signin", provider: input.provider });
+    lastPendingDeletion = otpResult.pendingDeletion ?? null;
   } catch (err) {
     console.error("[Login Error] Social session bridge failed", err);
     const code = classifyAuthError(err);

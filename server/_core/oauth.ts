@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { COOKIE_NAME, SESSION_TTL_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
-import { bootstrapOwnerWorkspace, ensureLocalDevAccess, getDb, getUserByEmail, getUserByOpenId, linkOwnerWorkspace, upsertUser } from "../db";
+import { ensureLocalDevAccess, getDb, getUserByEmail, getUserByOpenId, linkOwnerWorkspace, upsertUser } from "../db";
 import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { isSuperAdminEmail, isSuperAdminPhone, matchesSuperAdminIdentity, SUPER_ADMIN_EMAIL } from "./identity";
@@ -236,7 +236,12 @@ export function registerOAuthRoutes(app: Express) {
   app.get("/api/auth/me", async (req: Request, res: Response) => {
     try {
       const user = await sdk.authenticateRequest(req);
-      res.json({ user: buildUserResponse(user) });
+      const email = (user?.email ?? "").trim().toLowerCase();
+      const pendingDeletion = email ? await (await import("../db")).getPendingDeletionByEmail(email).catch(() => null) : null;
+      res.json({
+        user: buildUserResponse(user),
+        pendingDeletion: pendingDeletion ? { scheduledFor: pendingDeletion.scheduledFor.toISOString(), requestedAt: pendingDeletion.requestedAt.toISOString() } : null,
+      });
     } catch (error) {
       console.error("[Auth] /api/auth/me failed:", error);
       res.status(401).json({ error: "Not authenticated", user: null });
@@ -371,14 +376,58 @@ export function registerOAuthRoutes(app: Express) {
  * - The Super Admin (`moh.ajlouni.90@gmail.com`) is ALWAYS merged to the single
  *   canonical owner `openId` (`OWNER_OPEN_ID`) so we never create a parallel row.
  * - Sign-in (`mode: "signin"`) refuses identities that are not yet registered:
- *   `الحساب غير مسجل، يرجى إنشاء حساب جديد`. Account creation is exclusively the
+ *   `هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.`. Account creation is exclusively the
  *   sign-up path (`mode: "signup"`), which runs after successful Email OTP
- *   activation and provisions the first default workspace (`bootstrapOwnerWorkspace`)
- *   only for genuinely new accounts — never for the Super Admin or on re-login.
+ *   activation and creates the account WITH ZERO workspaces — the routing guard
+ *   then forces the brand-new user (or a re-registering purged account) through
+ *   the /onboarding gateway where they pick a role. Never provisions for the
+ *   Super Admin or on re-login, and never for the Super Admin.
  */
 export function registerSupabaseAuthRoutes(app: Express) {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
   const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+  app.post("/api/auth/check-pending-deletion", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ error: "email is required" });
+      return;
+    }
+    try {
+      const { getPendingDeletionByEmail } = await import("../db");
+      const pending = await getPendingDeletionByEmail(email).catch(() => null);
+      res.json({ pending: Boolean(pending), scheduledFor: pending ? pending.scheduledFor.toISOString() : null });
+    } catch (error) {
+      console.error("[Auth] /api/auth/check-pending-deletion failed:", error);
+      res.status(500).json({ pending: false, scheduledFor: null });
+    }
+  });
+
+  // Authoritative identity-existence check used by the login screen to separate
+  // "this email is not registered in the system" from "this account exists but
+  // the password is wrong". Backed by the same store as the registration gate
+  // below (users table + the canonical Super Admin identity), so the two never
+  // drift apart. Never leaks the password state: only a boolean is returned.
+  app.post("/api/auth/identity-status", async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { email?: unknown };
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ error: "email is required" });
+      return;
+    }
+    try {
+      if (isSuperAdminEmail(email)) {
+        res.json({ registered: true });
+        return;
+      }
+      const user = (await getUserByEmail(email).catch(() => undefined)) ?? (await getUserByOpenId(`supabase:${email}`).catch(() => undefined));
+      res.json({ registered: Boolean(user) });
+    } catch (error) {
+      console.error("[Auth] /api/auth/identity-status failed:", error);
+      res.status(500).json({ registered: false, error: "identity-status-unavailable" });
+    }
+  });
 
   app.post("/api/auth/supabase-otp", async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as { supabaseAccessToken?: unknown; name?: unknown; mode?: unknown; provider?: unknown };
@@ -433,17 +482,18 @@ export function registerSupabaseAuthRoutes(app: Express) {
         // 3) First-time / unregistered identities.
         if (!resolvedOpenId) {
           if (mode !== "signup") {
-            res.status(403).json({ error: "الحساب غير مسجل، يرجى إنشاء حساب جديد" });
+            res.status(403).json({ error: "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد." });
             return;
           }
           // Genuine new account: create after successful Email OTP activation.
+          // It is intentionally created with ZERO workspaces so the routing
+          // guard forces it through the /onboarding gateway (role choice:
+          // create first workspace as owner, activate an invite code, or demo).
+          // A purged account re-registering with the same email follows the
+          // same brand-new path and lands on onboarding too.
           resolvedOpenId = `supabase:${email}`;
           await upsertUser({ openId: resolvedOpenId, name: displayName || null, email, loginMethod: "supabase", lastSignedIn });
-          const created = await getUserByOpenId(resolvedOpenId);
-          if (created?.id) {
-            await bootstrapOwnerWorkspace({ id: created.id, name: created.name ?? null });
-          }
-          existing = created;
+          existing = await getUserByOpenId(resolvedOpenId);
         } else {
           // Existing user logging in again: keep lastSignedIn fresh, never re-provision.
           await upsertUser({ openId: resolvedOpenId, name: (existing?.name ?? displayName) || null, email, loginMethod: "supabase", lastSignedIn });
@@ -455,9 +505,12 @@ export function registerSupabaseAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: SESSION_TTL_MS });
 
+      const pendingDeletion = await (await import("../db")).getPendingDeletionByEmail(email).catch(() => null);
+
       res.json({
         app_session_id: sessionToken,
         user: buildUserResponse(existing ?? { openId: resolvedOpenId, name: displayName, email, loginMethod: "supabase", lastSignedIn }),
+        pendingDeletion: pendingDeletion ? { scheduledFor: pendingDeletion.scheduledFor.toISOString(), requestedAt: pendingDeletion.requestedAt.toISOString() } : null,
       });
     } catch (error) {
       console.error("[SupabaseOTP] Bridge exchange failed", error);
@@ -478,7 +531,7 @@ export function registerSupabaseAuthRoutes(app: Express) {
     const isEmail = isSuperAdminEmail(identifier);
     const isPhone = isSuperAdminPhone(identifier);
     if (password !== SUPER_ADMIN_MASTER_PASSWORD || (!isEmail && !isPhone)) {
-      res.status(403).json({ error: "كلمة المرور غير صحيحة. تحقق منها وأعد المحاولة." });
+      res.status(403).json({ error: "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة." });
       return;
     }
 

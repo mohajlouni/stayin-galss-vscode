@@ -8,6 +8,7 @@ import {
   classifyAuthError,
   classifyIdentifier,
   classifyOtpError,
+  classifySignupProbeError,
   formatCountdown,
   isSuperAdminCredential,
   isSuperAdminEmail,
@@ -101,8 +102,12 @@ describe("Password policy and real-time match", () => {
 });
 
 describe("Auth error classification and messages", () => {
-  it("maps unregistered identities to the Arabic registration gate message", () => {
-    expect(AUTH_ERROR_MESSAGES.unregistered).toBe("الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب");
+  it("maps unregistered identities to the honest Arabic registration message", () => {
+    expect(AUTH_ERROR_MESSAGES.unregistered).toBe("هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
+  });
+
+  it("maps a wrong password to the dedicated Arabic password message", () => {
+    expect(AUTH_ERROR_MESSAGES["wrong-password"]).toBe("كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة.");
   });
 
   it("classifies login errors into typed codes", () => {
@@ -126,6 +131,7 @@ describe("Auth error classification and messages", () => {
   });
 
   it("classifies the server Arabic wrong-password message", () => {
+    expect(classifyAuthError(new Error("كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة."))).toBe("wrong-password");
     expect(classifyAuthError(new Error("كلمة المرور غير صحيحة. تحقق منها وأعد المحاولة."))).toBe("wrong-password");
     expect(classifyAuthError(new Error("كلمة المرور خاطئة"))).toBe("wrong-password");
   });
@@ -155,6 +161,14 @@ describe("Super Admin credential bypass", () => {
     expect(isSuperAdminCredential("0797402940", "wrongpass1")).toBe(false);
     expect(isSuperAdminCredential("someone@example.com", "Ajlouni911")).toBe(false);
     expect(isSuperAdminCredential("0790000001", "Ajlouni911")).toBe(false);
+  });
+
+  it("does not conclude an account is absent from a bare 400 status, so an unverified user is never reported as unregistered", () => {
+    expect(classifySignupProbeError({ message: "Request failed", status: 400 })).not.toBe("not-found");
+    expect(classifySignupProbeError({ message: "Something went wrong", status: 400 })).toBe("unknown");
+    expect(classifySignupProbeError(new Error("User not found"))).toBe("not-found");
+    expect(classifySignupProbeError(new Error("New user not found"))).toBe("not-found");
+    expect(classifySignupProbeError(new Error("Email not found"))).toBe("not-found");
   });
 });
 

@@ -12,7 +12,7 @@ import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 
-const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed"];
+const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved"];
 const TIME_RANGES = ["all", "today", "two-days", "week", "month"] as const;
 type TimeRange = (typeof TIME_RANGES)[number];
 
@@ -56,6 +56,9 @@ function actionPresentation(entry: AuditLogEntry | AuditAction, language: "ar" |
     "utility-reading-recorded": { label: language === "ar" ? "قراءة عدّاد" : "Meter reading", color: colors.warning, icon: "speed" as const },
     "loyalty-points-awarded": { label: language === "ar" ? "إضافة نقاط ولاء" : "Loyalty points earned", color: colors.success, icon: "stars" as const },
     "loyalty-points-redeemed": { label: language === "ar" ? "استرداد نقاط ولاء" : "Loyalty points redeemed", color: colors.primary, icon: "redeem" as const },
+    "float-settled": { label: language === "ar" ? "تسوية وتوريد عهدة" : "Float settled", color: colors.success, icon: "account-balance-wallet" as const },
+    "deposit-compensation-recorded": { label: language === "ar" ? "خصم أضرار من التأمين" : "Deposit compensation", color: colors.warning, icon: "handshake" as const },
+    "staff-float-account-saved": { label: language === "ar" ? "نقطة تحصيل موظف" : "Staff float account", color: colors.sky, icon: "add-card" as const },
   } as const;
   return common[action];
 }

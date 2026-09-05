@@ -1,12 +1,14 @@
-import { and, desc, eq, gt, isNull, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { accountDeletionRequests, activeWorkspaces, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
+import { accountDeletionRequests, activeWorkspaces, globalFeatureFlags, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceFeatureSettings, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { matchesSuperAdminIdentity } from "./_core/identity";
+import { nextCodeForRole, resolveIdentityRole } from "../lib/user-code";
 import { getSupabaseClient } from "./_core/supabase";
 import { MANAGER_PERMISSIONS, normalizeWorkspacePermissions, permissionsForWorkspaceRole, type WorkspacePermissions } from "../shared/workspace-permissions";
-import { DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, normalizeAppData } from "../lib/booking-model";
+import { DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, isValidWorkspaceCode, normalizeAppData, normalizeWorkspaceCode, suggestWorkspaceCode } from "../lib/booking-model";
+import { DEFAULT_GLOBAL_FEATURE_FLAGS, DEFAULT_WORKSPACE_FEATURE_PREFERENCES, mergeGlobalOverPreference, type GlobalFeatureFlagKey, type WorkspaceFeaturePreferenceKey } from "../shared/feature-flags";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -159,10 +161,77 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     await db.insert(users).values(values).onDuplicateKeyUpdate({
       set: updateSet,
     });
+
+    await ensureUserCodes();
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
   }
+}
+
+/** إضافة عمود userCode للجدول في قواعد البيانات القائمة بلا ترحيلات (idempotent). */
+export async function ensureUserCodeColumn(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.execute(sql`ALTER TABLE stayInUsers ADD COLUMN userCode varchar(16) NULL`);
+    console.log("[Database] Added userCode column");
+  } catch (error) {
+    if (error instanceof Error && /Duplicate column|already exists/i.test(error.message)) {
+      return;
+    }
+    console.warn("[Database] Could not add userCode column:", error);
+  }
+}
+
+/** منح معرّف ذكي حسب الدور لكل مستخدم ناقصه: السوبر أدمن #U1000، والملاك #U1011+،
+ *  والموظفون #S2001+، والحراس #G5001+، مع تجاهل النطاق المحجوز U1001–U1010.
+ *  مدعوم بالتكرار (idempotent). */
+export async function ensureUserCodes(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const missing = await db.select({
+      id: users.id,
+      openId: users.openId,
+      email: users.email,
+      phone: users.phone,
+      role: users.role,
+      userCode: users.userCode,
+    }).from(users).where(isNull(users.userCode));
+
+    if (missing.length === 0) return;
+
+    const assignedCodes = (await db.select({ userCode: users.userCode }).from(users))
+      .map((row) => row.userCode)
+      .filter((value): value is string => Boolean(value));
+
+    const memberships = await db.select({ userId: workspaceMembers.userId, role: workspaceMembers.role }).from(workspaceMembers);
+    const rolesByUser = new Map<number, Set<string>>();
+    for (const membership of memberships) {
+      const roles = rolesByUser.get(membership.userId) ?? new Set<string>();
+      roles.add(membership.role);
+      rolesByUser.set(membership.userId, roles);
+    }
+
+    for (const row of missing) {
+      const isSuperAdmin = matchesSuperAdminIdentity({ openId: row.openId, email: row.email, phone: row.phone }, ENV.ownerOpenId);
+      const identityRole = resolveIdentityRole({ isSuperAdmin, memberRoles: [...(rolesByUser.get(row.id) ?? [])] });
+      if (identityRole === "internal") continue;
+      const code = nextCodeForRole(identityRole, assignedCodes);
+      await db.update(users).set({ userCode: code }).where(eq(users.id, row.id));
+      assignedCodes.push(code);
+    }
+  } catch (error) {
+    console.warn("[Database] Failed to assign user codes:", error);
+  }
+}
+
+/** تحديث بريد المستخدم بعد التحقق من رمز OTP المرسَل إليه (تغيير داخلي ليست عبر بوابة خارجية). */
+export async function updateUserEmail(userId: number, email: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(users).set({ email }).where(eq(users.id, userId));
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -208,7 +277,7 @@ export async function requestAccountDeletion(userId: number, reason: string | nu
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
   const requestedAt = new Date();
-  const scheduledFor = new Date(requestedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const scheduledFor = new Date(requestedAt.getTime() + 14 * 24 * 60 * 60 * 1000);
   await db.insert(accountDeletionRequests).values({ userId, reason, status: "pending", requestedAt, scheduledFor, confirmedAt: requestedAt }).onDuplicateKeyUpdate({ set: { reason, status: "pending", requestedAt, scheduledFor, confirmedAt: requestedAt } });
   return getAccountDeletionRequest(userId);
 }
@@ -219,6 +288,234 @@ export async function cancelAccountDeletion(userId: number) {
   await db.update(accountDeletionRequests).set({ status: "cancelled" }).where(eq(accountDeletionRequests.userId, userId));
   return getAccountDeletionRequest(userId);
 }
+
+export async function getPendingDeletionByEmail(email: string): Promise<{ userId: number; scheduledFor: Date; requestedAt: Date } | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const userResult = await db.select({ id: users.id }).from(users).where(eq(users.email, email.toLowerCase().trim())).limit(1);
+  if (!userResult[0]) return null;
+  const deletionResult = await db.select().from(accountDeletionRequests).where(eq(accountDeletionRequests.userId, userResult[0].id)).limit(1);
+  const req = deletionResult[0];
+  if (!req || req.status !== "pending") return null;
+  if (req.scheduledFor <= new Date()) return null;
+  return { userId: req.userId, scheduledFor: req.scheduledFor, requestedAt: req.requestedAt };
+}
+
+export async function recoverDeletedAccountByEmail(email: string): Promise<{ ok: boolean; error?: string }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const userResult = await db.select({ id: users.id }).from(users).where(eq(users.email, email.toLowerCase().trim())).limit(1);
+  if (!userResult[0]) return { ok: false, error: "User not found" };
+  const deletionResult = await db.select().from(accountDeletionRequests).where(eq(accountDeletionRequests.userId, userResult[0].id)).limit(1);
+  const req = deletionResult[0];
+  if (!req || req.status !== "pending") return { ok: false, error: "No pending deletion found" };
+  if (req.scheduledFor <= new Date()) return { ok: false, error: "Deletion deadline has passed" };
+  await db.update(accountDeletionRequests).set({ status: "cancelled" }).where(eq(accountDeletionRequests.userId, userResult[0].id));
+  return { ok: true };
+}
+
+type ContactUser = {
+  id: number;
+  openId: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  loginMethod: string | null;
+  role: "user" | "admin";
+  createdAt: Date;
+};
+
+/** Resolve a user by email, phone, or numeric id (in that preference order). */
+async function resolveUsersByContact(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, contact: string): Promise<ContactUser[]> {
+  const term = contact.trim();
+  if (!term) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (term.includes("@")) conditions.push(eq(users.email, term.toLowerCase()));
+  if (term.startsWith("+") || /[^\d]/.test(term) && term.includes("-")) conditions.push(eq(users.phone, term));
+  if (/^\d{6,}$/.test(term)) {
+    conditions.push(eq(users.phone, term));
+    conditions.push(eq(users.id, Number(term)));
+  }
+  if (!conditions.length) return [];
+  const rows = await db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, phone: users.phone, loginMethod: users.loginMethod, role: users.role, createdAt: users.createdAt }).from(users).where(or(...conditions)).limit(20);
+  return rows.map((row) => ({ ...row, name: row.name, email: row.email, phone: row.phone, loginMethod: row.loginMethod }));
+}
+
+export type PreviewPurgeResult =
+  | { ok: true; matchedBy: string; user: ContactUser; counts: Record<string, number>; ownedWorkspaces: string[]; memberWorkspaces: string[] }
+  | { ok: false; error: string; suggestions?: string[] };
+
+/**
+ * Read-only preview of everything a permanent purge would remove, resolved by
+ * email, phone, or numeric id. Never mutates data; used by the Super Admin UI
+ * (المعاينة قبل الحذف) to show the user's data and all related record counts
+ * before asking for the typed confirmation.
+ */
+export async function previewPurgeByContact(contact: string): Promise<PreviewPurgeResult> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const matches = await resolveUsersByContact(db, contact);
+  if (!matches.length) return { ok: false, error: "لم يتم العثور على مستخدم بهذا البريد أو الهاتف أو المعرّف." };
+  if (matches.length > 1) return { ok: false, error: `تطابقت ${matches.length} حسابات. حدّد بمعرّف رقمي دقيق.`, suggestions: matches.map((m) => `#${m.id} — ${m.email ?? ""} ${m.phone ?? ""} ${m.name ?? ""}`.trim()) };
+  const user = matches[0];
+  const counts: Record<string, number> = {};
+  await Promise.all([
+    db.select({ c: sql`count(*)` }).from(accountDeletionRequests).where(eq(accountDeletionRequests.userId, user.id)).then((r) => { counts.deletionRequests = Number(r[0]?.c ?? 0); }),
+    db.select({ c: sql`count(*)` }).from(workspaceMembers).where(eq(workspaceMembers.userId, user.id)).then((r) => { counts.memberships = Number(r[0]?.c ?? 0); }),
+    db.select({ c: sql`count(*)` }).from(activeWorkspaces).where(eq(activeWorkspaces.userId, user.id)).then((r) => { counts.activeWorkspaces = Number(r[0]?.c ?? 0); }),
+    db.select({ c: sql`count(*)` }).from(workspaceInvitations).where(eq(workspaceInvitations.createdByUserId, user.id)).then((r) => { counts.invitations = Number(r[0]?.c ?? 0); }),
+    db.select({ c: sql`count(*)` }).from(workspaceOwnerPins).where(eq(workspaceOwnerPins.updatedByUserId, user.id)).then((r) => { counts.ownerPins = Number(r[0]?.c ?? 0); }),
+    db.select({ c: sql`count(*)` }).from(sessions).where(eq(sessions.openId, user.openId)).then((r) => { counts.sessions = Number(r[0]?.c ?? 0); }),
+  ]);
+  const [ownedRows, memberRows] = await Promise.all([
+    db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.ownerUserId, user.id)),
+    db.select({ name: workspaces.name }).from(workspaceMembers).innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id)).where(eq(workspaceMembers.userId, user.id)),
+  ]);
+  return { ok: true, matchedBy: termKind(contact), user, counts, ownedWorkspaces: ownedRows.map((r) => r.name), memberWorkspaces: memberRows.map((r) => r.name) };
+}
+
+function termKind(contact: string) {
+  const t = contact.trim();
+  if (t.includes("@")) return "email";
+  if (/^\d{6,}$/.test(t)) return "id";
+  return "phone";
+}
+
+export type PurgeResult =
+  | { ok: false; error: string }
+  | { ok: true; user: ContactUser; removed: Record<string, number>; supabaseAuthRemoved: boolean; supabaseAuthConfigured: boolean };
+
+/**
+ * Permanent, destructive purge of a user and all related records, resolved by
+ * email, phone, or numeric id. Gated behind the Super Admin `adminProcedure`
+ * and requires the operator to type "حذف" or "DELETE" (typed confirmation).
+ * ONLY intended for removing test/dev accounts; logs an audit trail entry.
+ *
+ * Note: StayIn is normally built around a reversible 14-day deletion request, so
+ * this is an explicit privileged escape hatch. The Supabase Auth record (email
+ * OTP identity) is also best-effort removed when a SUPABASE_SERVICE_ROLE_KEY is
+ * configured; without it the Auth record must be removed manually from the
+ * Supabase dashboard (its absence does not fail the purge of StayIn data).
+ */
+export async function purgeUserByContact(actorUserId: number, contact: string, typedConfirmation: string) {
+  const typed = typedConfirmation.trim();
+  if (typed !== "حذف" && typed !== "DELETE") return { ok: false as const, error: "تأكيد الحذف غير صالح. اكتب «حذف» أو «DELETE» للمتابعة." };
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const matches = await resolveUsersByContact(db, contact);
+  if (!matches.length) return { ok: false as const, error: "لم يتم العثور على مستخدم بهذا البريد أو الهاتف أو المعرّف." };
+  if (matches.length > 1) return { ok: false as const, error: `تطابقت ${matches.length} حسابات. حدّد بمعرّف رقمي دقيق.` };
+  const user = matches[0];
+
+  const removed: Record<string, number> = {};
+  await Promise.all([
+    db.delete(accountDeletionRequests).where(eq(accountDeletionRequests.userId, user.id)).then((r) => { removed.deletionRequests = r[0].affectedRows; }).catch(() => { removed.deletionRequests = -1; }),
+    db.delete(workspaceMembers).where(eq(workspaceMembers.userId, user.id)).then((r) => { removed.memberships = r[0].affectedRows; }).catch(() => { removed.memberships = -1; }),
+    db.delete(activeWorkspaces).where(eq(activeWorkspaces.userId, user.id)).then((r) => { removed.activeWorkspaces = r[0].affectedRows; }).catch(() => { removed.activeWorkspaces = -1; }),
+    db.delete(workspaceInvitations).where(eq(workspaceInvitations.createdByUserId, user.id)).then((r) => { removed.invitations = r[0].affectedRows; }).catch(() => { removed.invitations = -1; }),
+    db.delete(workspaceOwnerPins).where(eq(workspaceOwnerPins.updatedByUserId, user.id)).then((r) => { removed.ownerPins = r[0].affectedRows; }).catch(() => { removed.ownerPins = -1; }),
+    db.delete(sessions).where(eq(sessions.openId, user.openId)).then((r) => { removed.sessions = r[0].affectedRows; }).catch(() => { removed.sessions = -1; }),
+  ]);
+
+  let authRemoved = false;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (serviceRoleKey && user.email) {
+    try {
+      const { createClient } = await import("@supabase/supabase-js");
+      const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+      const adminClient = createClient(url, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      const { error } = await adminClient.auth.admin.deleteUser(user.email);
+      authRemoved = !error;
+    } catch { authRemoved = false; }
+  }
+
+  await db.delete(users).where(eq(users.id, user.id)).then((r) => { removed.users = r[0].affectedRows; }).catch(() => { removed.users = -1; });
+
+  await createSuperAdminAudit({
+    actorUserId,
+    action: "user-purged",
+    details: JSON.stringify({ id: user.id, email: user.email ?? "", name: user.name ?? "", phone: user.phone ?? "", removed, authRemoved, authRoleConfigured: Boolean(serviceRoleKey), permanent: true }),
+  }).catch(() => undefined);
+
+  return { ok: true as const, user, removed, supabaseAuthRemoved: authRemoved, supabaseAuthConfigured: Boolean(serviceRoleKey) };
+}
+
+export type PendingDeletionAccount = {
+  userId: number;
+  email: string | null;
+  name: string | null;
+  phone: string | null;
+  requestedAt: Date;
+  scheduledFor: Date;
+  remainingMs: number;
+};
+
+/** Effects accounts currently within their 14-day deletion grace period (sorted soonest-expiring first). */
+export async function listPendingDeletionAccounts(): Promise<PendingDeletionAccount[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const now = new Date();
+  const rows = await db.select({ request: accountDeletionRequests, user: users }).from(accountDeletionRequests)
+    .innerJoin(users, eq(accountDeletionRequests.userId, users.id))
+    .where(eq(accountDeletionRequests.status, "pending"))
+    .orderBy(asc(accountDeletionRequests.scheduledFor));
+  return rows
+    .filter((row) => row.request.scheduledFor > now)
+    .map((row) => ({
+      userId: row.request.userId,
+      email: row.user.email,
+      name: row.user.name,
+      phone: row.user.phone,
+      requestedAt: row.request.requestedAt,
+      scheduledFor: row.request.scheduledFor,
+      remainingMs: row.request.scheduledFor.getTime() - now.getTime(),
+    }));
+}
+
+/** Count of accounts still waiting out their deletion grace period (for the dashboard metric). */
+export async function getPendingDeletionCount(): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const rows = await db.select({ c: sql`count(*)` }).from(accountDeletionRequests).where(eq(accountDeletionRequests.status, "pending"));
+  return Number(rows[0]?.c ?? 0);
+}
+
+export type RemovedAccountRecord = {
+  id: number;
+  email: string | null;
+  name: string | null;
+  phone: string | null;
+  removedAt: Date;
+  actorName: string;
+  removed: Record<string, number>;
+};
+
+/** Archive of accounts permanently removed (بل رجعة) by the Super Admin, from the server audit trail. */
+export async function listRemovedAccounts(limit = 100): Promise<RemovedAccountRecord[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const rows = await db.select({ audit: superAdminAudit, actorName: users.name, actorEmail: users.email })
+    .from(superAdminAudit)
+    .leftJoin(users, eq(superAdminAudit.actorUserId, users.id))
+    .where(eq(superAdminAudit.action, "user-purged"))
+    .orderBy(desc(superAdminAudit.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 250));
+  return rows.map(({ audit, actorName, actorEmail }) => {
+    let parsed: Partial<Record<string, number>> & { email?: string; name?: string; phone?: string } = {};
+    try { parsed = audit.details ? JSON.parse(audit.details) : {}; } catch { parsed = {}; }
+    delete parsed.removed;
+    return {
+      id: audit.id,
+      email: parsed.email ?? null,
+      name: parsed.name ?? null,
+      phone: parsed.phone ?? null,
+      removedAt: audit.createdAt,
+      actorName: actorName ?? actorEmail ?? `مستخدم #${audit.actorUserId}`,
+      removed: (() => { try { return audit.details ? (JSON.parse(audit.details).removed ?? {}) : {}; } catch { return {}; } })(),
+    };
+  });
+}
+
 
 export async function createSuggestion(input: Pick<InsertSuggestion, "content" | "language">) {
   const db = await getDb();
@@ -311,7 +608,7 @@ function qaSandboxPayload(facility: typeof QA_SANDBOX_FACILITIES[number]) {
       { id: `qa-${facility.key}-expense`, chaletId: primary.id, chaletName: primary.name, amount: isPalm ? 18 : 14, date: today, category: "cleaning-supplies", note: "مواد تنظيف تجريبية", paymentMethod: "cash", createdAt: now, createdByName: "موظف الحجوزات التجريبي" },
       { id: `qa-${facility.key}-expense-maintenance`, chaletId: secondary.id, chaletName: secondary.name, amount: isPalm ? 25 : 20, date: afterTomorrow, category: "maintenance", note: "صيانة دورية تجريبية", paymentMethod: "click", createdAt: now, createdByName: "موظف الحجوزات التجريبي" },
     ],
-    settings: { ...DEFAULT_SETTINGS, businessName: facility.name, businessPhone: "+962790000100", whatsAppEnabled: true, device: { ...DEFAULT_DEVICE_SETTINGS, whatsAppBaseHeaderTemplate: `رسالة اختبار مستقلة لمنشأة ${facility.name}: {العميل} — {الشاليه}`, receiptMessageTemplate: `إيصال اختبار ${facility.name}: {العميل} — {الإجمالي}`, readyMessageTemplate: `تأكيد اختبار ${facility.name}: {العميل} — {الفترة}` } },
+    settings: { ...DEFAULT_SETTINGS, businessName: facility.name, businessPhone: "+962790000100", workspaceCode: isPalm ? "E01" : "E02", whatsAppEnabled: true, device: { ...DEFAULT_DEVICE_SETTINGS, whatsAppBaseHeaderTemplate: `رسالة اختبار مستقلة لمنشأة ${facility.name}: {العميل} — {الشاليه}`, receiptMessageTemplate: `إيصال اختبار ${facility.name}: {العميل} — {الإجمالي}`, readyMessageTemplate: `تأكيد اختبار ${facility.name}: {العميل} — {الفترة}` } },
     specialPriceRules: [],
     auditLog: [{ id: `qa-${facility.key}-seed-audit`, action: "booking-checked-in", subjectName: "بيانات الاختبار", details: `أُنشئت البيانات التجريبية المعزولة لمنشأة ${facility.name}`, createdAt: now, actorName: "مدير النظام" }],
   });
@@ -602,16 +899,22 @@ export async function linkOwnerWorkspace(user: { id: number; name: string | null
   return { workspaceId: preferred.workspace.id };
 }
 
-export async function createWorkspace(input: { user: { id: number; name: string | null }; name: string }) {
+export async function createWorkspace(input: { user: { id: number; name: string | null }; name: string; phone?: string | null; currency?: string | null }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const workspaceName = input.name.trim();
   if (!workspaceName) throw new Error("workspace-name-required");
   if (workspaceName.length > 255) throw new Error("workspace-name-too-long");
-  const workspaceResult = await database.insert(workspaces).values({ name: workspaceName, ownerUserId: input.user.id });
+  const currency = input.currency?.trim().slice(0, 8) || null;
+  const workspaceResult = await database.insert(workspaces).values({ name: workspaceName, ownerUserId: input.user.id, currency });
   const workspaceId = Number(workspaceResult[0].insertId);
-  await database.insert(workspaceMembers).values({ workspaceId, userId: input.user.id, displayName: input.user.name?.trim() || "المالك", phone: "—", role: "owner", permissions: JSON.stringify(MANAGER_PERMISSIONS), status: "active" });
+  await database.insert(workspaceMembers).values({ workspaceId, userId: input.user.id, displayName: input.user.name?.trim() || "المالك", phone: input.phone?.trim() || "—", role: "owner", permissions: JSON.stringify(MANAGER_PERMISSIONS), status: "active" });
   await database.insert(workspaceActivity).values({ workspaceId, actorUserId: input.user.id, action: "workspace-created", subject: workspaceName, details: "تم إنشاء مجموعة المنشآت" });
+  // Seed a real initial payload so the freshly-created workspace renders a
+  // healthy dashboard immediately (settings/business identity included) instead
+  // of relying on a later empty-hydration path.
+  const seeded = normalizeAppData({ settings: { ...DEFAULT_SETTINGS, businessName: workspaceName, businessPhone: input.phone?.trim() || "", currency: currency ?? DEFAULT_SETTINGS.currency } });
+  await database.insert(workspaceData).values({ workspaceId, payload: JSON.stringify(seeded), version: 0, updatedByUserId: input.user.id }).onDuplicateKeyUpdate({ set: {} });
   await setActiveWorkspace(input.user.id, workspaceId);
   return (await getActiveWorkspaceMember(input.user.id))!;
 }
@@ -626,17 +929,23 @@ export async function getWorkspaceSummary(user: { id: number; name: string | nul
 }
 
 export async function getWorkspaceRouting(user: { id: number; name: string | null }) {
+  // An account inside its 14-day deletion grace period is locked to the restore
+  // gateway: every internal route must bounce the user back until they cancel
+  // the deletion request (or it expires and the account is purged).
+  const deletion = await getAccountDeletionRequest(user.id);
+  const pendingDeletion = deletion && deletion.status === "pending" && deletion.scheduledFor && deletion.scheduledFor > new Date() ? { scheduledFor: deletion.scheduledFor.toISOString() } : null;
+  if (pendingDeletion) return { destination: "restore" as const, activeWorkspace: null, memberships: [], deletion: pendingDeletion };
   const memberships = await listWorkspaceMemberships(user.id);
-  if (!memberships.length) return { destination: "onboarding" as const, activeWorkspace: null, memberships };
+  if (!memberships.length) return { destination: "onboarding" as const, activeWorkspace: null, memberships, deletion: pendingDeletion };
   const activeId = await getActiveWorkspaceId(user.id);
   const active = memberships.find((entry) => entry.workspace.id === activeId);
-  if (active) return { destination: "dashboard" as const, activeWorkspace: active, memberships };
+  if (active) return { destination: "dashboard" as const, activeWorkspace: active, memberships, deletion: pendingDeletion };
   if (memberships.length === 1) {
     const single = memberships[0];
     await setActiveWorkspace(user.id, single.workspace.id);
-    return { destination: "dashboard" as const, activeWorkspace: single, memberships };
+    return { destination: "dashboard" as const, activeWorkspace: single, memberships, deletion: pendingDeletion };
   }
-  return { destination: "selector" as const, activeWorkspace: null, memberships };
+  return { destination: "selector" as const, activeWorkspace: null, memberships, deletion: pendingDeletion };
 }
 
 /**
@@ -687,7 +996,8 @@ export async function listWorkspaceMembers(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const members = await database.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
-  return members.map(withPermissions);
+  const userCodes = new Map((await database.select({ id: users.id, userCode: users.userCode }).from(users).where(inArray(users.id, members.map((m) => m.userId)))).map((u) => [u.id, u.userCode ?? null]));
+  return members.map((m) => ({ ...withPermissions(m), userCode: userCodes.get(m.userId) ?? null }));
 }
 
 export async function listWorkspaceCollectionRecipients(workspaceId: number) {
@@ -733,6 +1043,17 @@ export async function acceptWorkspaceInvitation(input: { userId: number; phone: 
   await database.insert(workspaceActivity).values({ workspaceId: invitation.workspaceId, actorUserId: input.userId, action: "employee-joined", subject: invitation.employeeName, details: invitation.phone });
   await setActiveWorkspace(input.userId, invitation.workspaceId);
   return getActiveWorkspaceMember(input.userId);
+}
+
+/**
+ * Resolves a single invite code (the 6-digit PIN) sent by the owner, without
+ * requiring the phone number. Used by the onboarding gateway's "لدي رمز دعوة"
+ * card so a staff/guard user is assigned to the workspace by code alone.
+ */
+export async function findWorkspaceInvitationByPin(pin: string) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  return (await database.select().from(workspaceInvitations).where(and(eq(workspaceInvitations.pinHash, pinHash(pin)), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt), gt(workspaceInvitations.expiresAt, new Date()))).orderBy(desc(workspaceInvitations.createdAt)).limit(1))[0] ?? null;
 }
 
 export async function updateWorkspaceMemberPermissions(input: { workspaceId: number; memberId: number; permissions: WorkspacePermissions; actorUserId: number }) {
@@ -784,6 +1105,73 @@ export async function getWorkspaceData(workspaceId: number) {
   return (await database.select().from(workspaceData).where(eq(workspaceData.workspaceId, workspaceId)).limit(1))[0];
 }
 
+async function collectUsedWorkspaceCodes(database: NonNullable<Awaited<ReturnType<typeof getDb>>>, excludeWorkspaceId?: number) {
+  const rows = await database.select({ workspaceId: workspaceData.workspaceId, payload: workspaceData.payload }).from(workspaceData);
+  const used = new Set<string>();
+  for (const row of rows) {
+    if (row.workspaceId === excludeWorkspaceId) continue;
+    try {
+      const code = JSON.parse(row.payload)?.settings?.workspaceCode;
+      if (isValidWorkspaceCode(code ?? null)) used.add(normalizeWorkspaceCode(code));
+    } catch {
+      // Sea skip: payloads غير قابلة للقراءة لا تحجز رمزًا.
+    }
+  }
+  return used;
+}
+
+function applyWorkspaceCode(payload: string, code: string) {
+  const parsed = JSON.parse(payload);
+  parsed.settings = { ...(parsed.settings ?? {}), workspaceCode: code };
+  return JSON.stringify(parsed);
+}
+
+/**
+ * يضمن لكل منشأة تمتلك حمولة بيانات رمزًا معياريًا مستقرًا E01..E999 في
+ * settings.workspaceCode (يُستخدم في رقم الحجز الذكي وشارات الوحدات). يعيّن
+ * الرمز بترتيب workspace id ويحتفظ بالأكواد الصالحة الموجودة.
+ */
+export async function ensureWorkspaceCodes(): Promise<void> {
+  const database = await getDb();
+  if (!database) return;
+  const rows = await database.select({ workspaceId: workspaceData.workspaceId, payload: workspaceData.payload, version: workspaceData.version }).from(workspaceData);
+  const used = new Set<string>();
+  for (const row of rows) {
+    let code = "";
+    try {
+      const candidate = JSON.parse(row.payload)?.settings?.workspaceCode;
+      if (isValidWorkspaceCode(candidate ?? null)) code = normalizeWorkspaceCode(candidate);
+    } catch {
+      // Sea skip.
+    }
+    if (code) {
+      used.add(code);
+      continue;
+    }
+    const next = suggestWorkspaceCode([...used]);
+    used.add(next);
+    try {
+      await database.update(workspaceData).set({ payload: applyWorkspaceCode(row.payload, next), version: row.version + 1 }).where(eq(workspaceData.workspaceId, row.workspaceId));
+    } catch {
+      // Sea skip: حمولة غير قابلة للتحليل لا تُعدَّل.
+    }
+  }
+}
+
+async function payloadWithAssignedWorkspaceCode(database: NonNullable<Awaited<ReturnType<typeof getDb>>>, payload: string, workspaceId: number): Promise<string> {
+  if (!payload) return payload;
+  try {
+    const parsed = JSON.parse(payload);
+    const code = parsed?.settings?.workspaceCode;
+    if (isValidWorkspaceCode(code ?? null)) return payload;
+    const used = await collectUsedWorkspaceCodes(database, workspaceId);
+    const next = suggestWorkspaceCode([...used]);
+    return applyWorkspaceCode(payload, next);
+  } catch {
+    return payload;
+  }
+}
+
 export async function getWorkspaceById(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
@@ -796,18 +1184,102 @@ export async function updateWorkspaceFeatureFlags(workspaceId: number, flags: Re
   await database.update(workspaces).set({ featureFlags: JSON.stringify(flags), updatedAt: new Date() }).where(eq(workspaces.id, workspaceId));
 }
 
+/** إنشاء جدول مفاتيح الحجب المركزي للإدارة العليا (idempotent) بلا ترحيلات. */
+export async function ensureGlobalFeatureFlagsTable(): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot ensure global feature flags table: database not available");
+    return;
+  }
+  try {
+    await database.execute(sql`
+      CREATE TABLE IF NOT EXISTS stayInGlobalFeatureFlags (
+        flag varchar(64) NOT NULL PRIMARY KEY,
+        enabled tinyint(1) NOT NULL DEFAULT 1,
+        updatedByUserId int NULL,
+        updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (error) {
+    console.error("[Database] Failed to ensure global feature flags table:", error);
+  }
+}
+
+/** إنشاء جدول تفضيلات ميزات مساحة العمل (idempotent) بلا ترحيلات. */
+export async function ensureWorkspaceFeatureSettingsTable(): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot ensure workspace feature settings table: database not available");
+    return;
+  }
+  try {
+    await database.execute(sql`
+      CREATE TABLE IF NOT EXISTS stayInWorkspaceFeatureSettings (
+        workspaceId int NOT NULL,
+        flag varchar(64) NOT NULL,
+        enabled tinyint(1) NOT NULL DEFAULT 1,
+        updatedByUserId int NULL,
+        updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (workspaceId, flag),
+        INDEX stayInWorkspaceFeatureSettings_workspaceId_idx (workspaceId)
+      )
+    `);
+  } catch (error) {
+    console.error("[Database] Failed to ensure workspace feature settings table:", error);
+  }
+}
+
+export async function listGlobalFeatureFlags(): Promise<Record<string, boolean>> {
+  const database = await getDb();
+  if (!database) return { ...DEFAULT_GLOBAL_FEATURE_FLAGS };
+  const rows = await database.select().from(globalFeatureFlags);
+  const merged: Record<string, boolean> = { ...DEFAULT_GLOBAL_FEATURE_FLAGS };
+  for (const row of rows) merged[row.flag] = row.enabled;
+  return merged;
+}
+
+export async function updateGlobalFeatureFlag(input: { flag: GlobalFeatureFlagKey; enabled: boolean; actorUserId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  await database.insert(globalFeatureFlags).values({ flag: input.flag, enabled: input.enabled, updatedByUserId: input.actorUserId }).onDuplicateKeyUpdate({ set: { enabled: input.enabled, updatedByUserId: input.actorUserId } });
+}
+
+export async function getWorkspaceFeatureSettings(workspaceId: number): Promise<Record<string, boolean>> {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const rows = await database.select().from(workspaceFeatureSettings).where(eq(workspaceFeatureSettings.workspaceId, workspaceId));
+  return Object.fromEntries(rows.map((row) => [row.flag, row.enabled]));
+}
+
+export async function setWorkspaceFeatureSetting(input: { workspaceId: number; flag: WorkspaceFeaturePreferenceKey; enabled: boolean; actorUserId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  await database.insert(workspaceFeatureSettings).values({ workspaceId: input.workspaceId, flag: input.flag, enabled: input.enabled, updatedByUserId: input.actorUserId }).onDuplicateKeyUpdate({ set: { enabled: input.enabled, updatedByUserId: input.actorUserId } });
+}
+
+/** دمج الحجب المركزي فوق تفضيلات المالك؛ الحجب يعلو دائمًا. */
+export async function getEffectiveFeatureFlags(workspaceId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const global = await listGlobalFeatureFlags();
+  const settings = await getWorkspaceFeatureSettings(workspaceId);
+  const serverPreferences: Record<string, boolean> = { ...DEFAULT_WORKSPACE_FEATURE_PREFERENCES, ...settings };
+  return { global, workspace: serverPreferences, effective: mergeGlobalOverPreference(global, serverPreferences) };
+}
+
 export async function saveWorkspaceData(input: { workspaceId: number; payload: string; expectedVersion: number; updatedByUserId: number }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
+  const payload = await payloadWithAssignedWorkspaceCode(database, input.payload, input.workspaceId);
   const current = await getWorkspaceData(input.workspaceId);
   if (!current) {
     if (input.expectedVersion !== 0) throw new Error("workspace-data-conflict");
-    await database.insert(workspaceData).values({ workspaceId: input.workspaceId, payload: input.payload, version: 1, updatedByUserId: input.updatedByUserId });
+    await database.insert(workspaceData).values({ workspaceId: input.workspaceId, payload, version: 1, updatedByUserId: input.updatedByUserId });
     return { version: 1 };
   }
   if (current.version !== input.expectedVersion) throw new Error("workspace-data-conflict");
   const version = current.version + 1;
-  await database.update(workspaceData).set({ payload: input.payload, version, updatedByUserId: input.updatedByUserId }).where(eq(workspaceData.workspaceId, input.workspaceId));
+  await database.update(workspaceData).set({ payload, version, updatedByUserId: input.updatedByUserId }).where(eq(workspaceData.workspaceId, input.workspaceId));
   return { version };
 }
 

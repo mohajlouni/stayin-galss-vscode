@@ -2,7 +2,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, TextInput, View, type ViewStyle, type TextStyle } from "react-native";
+import { ActivityIndicator, Alert, Animated, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ViewStyle, type TextStyle } from "react-native";
 
 import { AppToggle } from "@/components/app-toggle";
 import { PrivacyModal, TermsModal } from "@/components/legal-modals";
@@ -11,9 +11,10 @@ import { ThemedText } from "@/components/themed-text";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useAuthSession } from "@/lib/auth-session";
 import { LEGAL_VERSIONS, savePendingRegistration } from "@/lib/legal-consent";
-import { AUTH_ERROR_MESSAGES, isSuperAdminCredential, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
+import { AUTH_ERROR_MESSAGES, classifyAuthError, consumePendingDeletion, isSuperAdminCredential, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
+import * as Auth from "@/lib/_core/auth";
 
 type Tab = "login" | "register";
 type Busy = "login" | "register" | "biometric" | "google" | "apple" | null;
@@ -163,12 +164,6 @@ function SocialButton(props: { colors: AuthColors; styles: AuthStyles; provider:
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function rawErrorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === "string" && err) return err;
-  try { return JSON.stringify(err); } catch { return String(err); }
-}
-
 export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = false }: { initialTab?: Tab; standaloneRegister?: boolean }) {
   const colors = useColors();
   const { isRTL, language } = useI18n();
@@ -194,6 +189,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
   const [busy, setBusy] = useState<Busy>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deletionNotice, setDeletionNotice] = useState<Auth.DeletionNotice | null>(null);
   const [pendingUnverified, setPendingUnverified] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const [touched, setTouched] = useState<Record<ValidatedField, boolean>>({ name: false, loginIdentifier: false, loginPassword: false, email: false, phone: false, password: false, confirm: false });
@@ -208,7 +204,43 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     return () => animation.stop();
   }, [pulse]);
 
+  useEffect(() => {
+    let active = true;
+    void Auth.peekPostLogoutNotice().then((notice) => {
+      if (active && notice) setDeletionNotice(notice);
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
+
+  const dismissDeletionNotice = () => {
+    setDeletionNotice(null);
+    void Auth.consumePostLogoutNotice();
+  };
+  const openDeletionRecovery = () => {
+    if (!deletionNotice) return;
+    router.push({ pathname: "/account-recovery", params: { scheduledFor: deletionNotice.scheduledFor ?? "" } });
+  };
+  const deletionRemaining = (() => {
+    const scheduledFor = deletionNotice?.scheduledFor;
+    if (!scheduledFor) return null;
+    const diff = new Date(scheduledFor).getTime() - Date.now();
+    if (diff <= 0) return language === "ar" ? "انتهت المهلة" : "Grace period over";
+    const totalMinutes = Math.max(1, Math.floor(diff / 60000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) return language === "ar" ? `${days} يوم و ${hours} ساعة` : `${days} day(s) ${hours} hr(s)`;
+    if (hours > 0) return language === "ar" ? `${hours} ساعة و ${minutes} دقيقة` : `${hours} hr ${minutes} min`;
+    return language === "ar" ? `${minutes} دقيقة` : `${minutes} min`;
+  })();
+
   const resetFeedback = () => { setError(null); setMessage(null); setPendingUnverified(null); };
+  const goAfterAuth = () => {
+    const pendingDeletion = consumePendingDeletion();
+    if (pendingDeletion) { router.replace({ pathname: "/account-recovery", params: { scheduledFor: pendingDeletion.scheduledFor } }); return; }
+    router.replace("/workspace-gate");
+  };
   const toggleLanguage = () => {
     const next: "ar" | "en" = language === "ar" ? "en" : "ar";
     void updateDeviceSettings({ language: next, useDeviceLanguage: false });
@@ -258,11 +290,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     setBusy("login"); setError(null); setMessage(null);
     try {
       const result = await signInSuperAdmin({ identifier, password, refresh });
-      if (result.ok) { router.replace("/workspace-gate"); return; }
+      if (result.ok) { goAfterAuth(); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
-      setError(rawErrorMessage(err));
+      setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
 
@@ -279,7 +311,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       if (isSuperAdminCredential(loginIdentifier, loginPassword)) {
         await runSuperAdminLogin(loginIdentifier.trim(), loginPassword, "login");
       } else {
-        setError(AUTH_ERROR_MESSAGES.unregistered ?? "الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب");
+        setError(AUTH_ERROR_MESSAGES.unregistered ?? "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
       }
       return;
     }
@@ -307,7 +339,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     setBusy("login"); setError(null); setMessage(null);
     try {
     const result = await signInWithPasswordFlow({ email, password: loginPassword, refresh });
-    if (result.ok) { router.replace("/workspace-gate"); return; }
+    if (result.ok) { goAfterAuth(); return; }
     if (result.error === "email-not-confirmed") {
       // The account exists but is not verified yet. Do not show "الحساب غير
       // مسجل"; instead resend the sign-up code, inform the user, and route them
@@ -320,10 +352,34 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       router.push({ pathname: "/auth/otp", params: { email, mode: "signup" } });
       return;
     }
+    if (result.error === "wrong-password") {
+      // The password entry failed. The backend already separated this case from
+      // "unregistered" (identity-status), so the single honest answer is the
+      // exact password message; the «نسيت كلمة المرور؟» link above carries the
+      // recovery path instead of a confusing multi-case explanation.
+      setError(AUTH_ERROR_MESSAGES["wrong-password"]);
+      return;
+    }
+    if (result.error === "deletion-pending" && result.pendingDeletion) {
+      // The account has an ACTIVE deletion request. This is not a password
+      // problem: a deletion request was submitted for this account. Remind the
+      // user of the remaining grace period and send them to the recovery screen
+      // (which asks whether to cancel and performs OTP activation) — all while
+      // the request is still within its 14-day window.
+      const daysLeft = Math.max(0, Math.ceil((new Date(result.pendingDeletion.scheduledFor).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+      Alert.alert(
+        language === "ar" ? "طلب حذف الحساب فعّال" : "Account deletion in progress",
+        language === "ar"
+          ? `تم تقديم طلب حذف لحسابك وهو فعّال، وسيتم حذف الحساب نهائيًا خلال ${daysLeft} يومًا في حال عدم الاسترجاع. لا يزال بإمكانك استرجاعه: اضغط «استرجاع الحساب» لإرسال رمز تحقق OTP وإلغاء طلب الحذف ضمن المهلة.`
+          : `A deletion request for your account is active, and the account will be permanently deleted in ${daysLeft} day(s) if not recovered. You can still recover it: press “Recover account” to send an OTP code and cancel the deletion within the grace period.`,
+        [{ text: language === "ar" ? "حسنًا" : "OK", style: "cancel" }, { text: language === "ar" ? "استرجاع الحساب" : "Recover account", onPress: () => router.push({ pathname: "/account-recovery", params: { scheduledFor: result.pendingDeletion!.scheduledFor } }) }]
+      );
+      return;
+    }
     setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
-      setError(rawErrorMessage(err));
+      setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
 
@@ -409,11 +465,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     resetFeedback(); setBusy(provider);
     try {
       const result = await socialSignIn({ provider, refresh });
-      if (result.ok) { router.replace("/workspace-gate"); return; }
+      if (result.ok) { goAfterAuth(); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
-      setError(rawErrorMessage(err));
+      setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
 
@@ -439,6 +495,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
   const touch = (field: ValidatedField) => setTouched((current) => current[field] ? current : { ...current, [field]: true });
 
   const styles = makeStyles(colors, isRTL);
+  const align = isRTL ? "right" : "left";
 
   const submitPrimaryText = busy === "login"
     ? (language === "ar" ? "جارٍ تسجيل الدخول…" : "Signing in…")
@@ -467,6 +524,23 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
             <TabButton colors={colors} styles={styles} label="تسجيل الدخول" selected={tab === "login"} onPress={() => changeTab("login")} />
             <TabButton colors={colors} styles={styles} label="إنشاء حساب" selected={tab === "register"} onPress={() => changeTab("register")} />
           </View>
+          {deletionNotice ? <View accessibilityLiveRegion="polite" style={[styles.deletionNote, { borderColor: colors.error + "88", backgroundColor: colors.error + "0F", flexDirection: "row-reverse" }]}>
+            <View style={styles.deletionNoteIcon}><MaterialIcons name="delete-forever" size={21} color={colors.error} /></View>
+            <View style={styles.flex}>
+              <Text style={[styles.deletionNoteTitle, { color: colors.error, textAlign: align }]}>{language === "ar" ? "طلب حذف الحساب فعّال" : "Account deletion in progress"}</Text>
+              <Text style={[styles.deletionNoteBody, { color: colors.muted, textAlign: align }]}>{deletionNotice.message}</Text>
+              {deletionRemaining ? <Text style={[styles.deletionNoteRemaining, { color: colors.error, textAlign: align }]}>{language === "ar" ? "المدة المتبقية قبل الحذف النهائي: " : "Time before permanent deletion: "}<Text style={{ fontWeight: "900" }}>{deletionRemaining}</Text></Text> : null}
+              <View style={[styles.deletionNoteActions, { flexDirection: "row-reverse" }]}>
+                <Pressable accessibilityRole="button" onPress={openDeletionRecovery} style={[styles.deletionRecoverButton, { backgroundColor: colors.error }]}>
+                  <MaterialIcons name="restore" size={15} color="#FFFFFF" />
+                  <Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "استرجاع الحساب" : "Recover account"}</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إخفاء الإشعار" : "Hide notice"} onPress={dismissDeletionNotice} style={[styles.deletionDismissButton, { borderColor: colors.border }]}>
+                  <Text style={{ color: colors.muted, fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "حسنًا" : "OK"}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View> : null}
           <Animated.View style={{ opacity: formOpacity }}>
             {tab === "login" ? (
               <>
@@ -714,6 +788,14 @@ function makeStyles(colors: AuthColors, isRTL: boolean) {
     verifyActions: { flexDirection: "row-reverse", gap: 9, marginTop: 11 },
     verifyButton: { height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 14 },
     verifyButtonText: { fontSize: 13, fontWeight: "900" },
+    deletionNote: { minHeight: 40, borderRadius: 14, borderWidth: 1, padding: 12, flexDirection: "row-reverse", alignItems: "flex-start", gap: 9, marginTop: 12 },
+    deletionNoteIcon: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.08)" },
+    deletionNoteTitle: { fontSize: 13, fontWeight: "900", lineHeight: 19 },
+    deletionNoteBody: { fontSize: 11, lineHeight: 17, marginTop: 3 },
+    deletionNoteRemaining: { fontSize: 11, lineHeight: 16, marginTop: 5 },
+    deletionNoteActions: { gap: 8, marginTop: 10 },
+    deletionRecoverButton: { minHeight: 38, borderRadius: 11, paddingHorizontal: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+    deletionDismissButton: { minHeight: 38, borderRadius: 11, borderWidth: 1, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" },
     primaryWrap: { marginTop: 24, borderRadius: 30, overflow: "hidden", shadowColor: colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: colors.appTheme.shadow.opacity, shadowRadius: colors.appTheme.shadow.radius, elevation: colors.appTheme.shadow.elevation },
     primary: { minHeight: 58, borderRadius: 30, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 10 },
     primaryText: { color: colors.foreground, fontSize: 16, fontWeight: "900" },

@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { trpc } from "@/lib/trpc";
 import { clearPendingRegistration, getPendingRegistration } from "@/lib/legal-consent";
 
-export type SessionUser = { id: number; fullName: string; phone: string | null; email: string | null; avatarUrl: string | null; createdAt: string };
+export type SessionUser = { id: number; fullName: string; phone: string | null; email: string | null; avatarUrl: string | null; userCode: string | null; createdAt: string };
 export type SessionMembership = { userId: number; propertyGroupId: number; role: "owner" | "manager" | "staff" | "caretaker" | "guest"; permissions: string[] };
 export type PropertyGroup = { id: number; name: string; logo: string | null; chaletsCount: number | null; currency: string | null; timeZone: string | null };
 export type ActiveSession = { currentUser: SessionUser | null; activePropertyGroupId: number | null; isAuthenticated: boolean; rememberMe: boolean; biometricsEnabled: boolean };
@@ -63,7 +63,7 @@ function useAuthSessionState() {
     return result.success;
   }, [auth.isAuthenticated, biometricAvailable, preferences.biometricsEnabled]);
 
-  const currentUser = useMemo<SessionUser | null>(() => auth.user ? { id: auth.user.id, fullName: auth.user.name?.trim() || "مستخدم StayIn", phone: auth.user.phone ?? null, email: auth.user.email ?? null, avatarUrl: auth.user.avatarUrl ?? null, createdAt: auth.user.lastSignedIn ? new Date(auth.user.lastSignedIn).toISOString() : new Date().toISOString() } : null, [auth.user]);
+  const currentUser = useMemo<SessionUser | null>(() => auth.user ? { id: auth.user.id, fullName: auth.user.name?.trim() || "مستخدم StayIn", phone: auth.user.phone ?? null, email: auth.user.email ?? null, avatarUrl: auth.user.avatarUrl ?? null, userCode: auth.user.userCode ?? null, createdAt: auth.user.lastSignedIn ? new Date(auth.user.lastSignedIn).toISOString() : new Date().toISOString() } : null, [auth.user]);
   const active = routing.data?.activeWorkspace;
   const activePropertyGroup = useMemo<PropertyGroup | null>(() => active ? { id: active.workspace.id, name: active.workspace.name, logo: active.workspace.logoUrl ?? null, chaletsCount: null, currency: active.workspace.currency ?? null, timeZone: active.workspace.timeZone ?? null } : null, [active]);
   const membership = useMemo<SessionMembership | null>(() => active && currentUser ? { userId: currentUser.id, propertyGroupId: active.workspace.id, role: active.member.role === "admin" ? "manager" : active.member.role, permissions: Object.entries(active.member.permissions ?? {}).filter(([, allowed]) => allowed).map(([permission]) => permission) } : null, [active, currentUser]);

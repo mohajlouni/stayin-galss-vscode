@@ -10,7 +10,7 @@ describe("auth UI test flow", () => {
     expect(auth).toContain("validateIdentifier");
     expect(auth).toContain(`"البريد الإلكتروني أو رقم الهاتف"`);
     expect(auth).toContain("signInWithPasswordFlow");
-    expect(auth).toContain("الحساب غير مسجل، يرجى إنشاء حساب جديد من تبويب إنشاء حساب");
+    expect(auth).toContain("هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
     expect(auth).not.toContain("startOAuthLogin(");
     expect(auth).toContain('pathname: "/auth/forgot-password"');
     expect(auth).toContain("LinearGradient");
@@ -129,5 +129,76 @@ describe("auth UI test flow", () => {
     expect(engine).toContain("provider-unavailable");
     expect(engine).toContain("تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم");
     expect(engine).toContain("Unsupported provider");
+  });
+
+  it("never reports an unverified account as either unregistered or wrong-password; the backend decides existence", () => {
+    const screen = source("components/unified-auth-screen.tsx");
+    const engine = source("lib/supabase-otp.tsx");
+    const classification = source("lib/supabase-otp-engine.ts");
+    expect(screen).toContain('result.error === "email-not-confirmed"');
+    expect(screen).toContain("resendSignupCode(email)");
+    expect(screen).toContain('{ email, mode: "signup" }');
+    expect(engine).toContain('if (code === "email-not-confirmed") return "email-not-confirmed"');
+    expect(engine).toContain("checkIdentityStatus(email)");
+    expect(engine).toContain("identity.checked");
+    expect(engine).toContain('if (existence === "absent") return "unregistered"');
+    expect(engine).toContain('if (existence === "exists") return "wrong-password"');
+    expect(classification).toContain("email not confirmed");
+    expect(classification).toContain("email-not-confirmed");
+  });
+
+  it("binds the password chosen at sign-up to the verified Supabase account instead of leaving it passwordless", () => {
+    const engine = source("lib/supabase-otp.tsx");
+    expect(engine).toContain("pendingSignupPasswordByEmail");
+    expect(engine).toContain("pendingSignupPasswordByEmail.set(email, input.password)");
+    expect(engine).toContain("pendingSignupPasswordByEmail.get(email)");
+    expect(engine).toContain("updateUser({ password: pendingPassword })");
+    expect(engine).toContain("pendingSignupPasswordByEmail.delete(email)");
+  });
+
+  it("shows the single honest wrong-password message backed by the backend identity check, with the recovery link nearby", () => {
+    const screen = source("components/unified-auth-screen.tsx");
+    const engine = source("lib/supabase-otp.tsx");
+    const classification = source("lib/supabase-otp-engine.ts");
+    expect(screen).toContain('result.error === "wrong-password"');
+    expect(screen).toContain('AUTH_ERROR_MESSAGES["wrong-password"]');
+    expect(screen).toContain("«نسيت كلمة المرور؟»");
+    expect(engine).toContain("checkIdentityStatus(email)");
+    expect(engine).toContain('identity.registered ? "wrong-password" : "unregistered"');
+    expect(classification).toContain("invalid login credentials");
+  });
+
+  it("pins the persisted deletion notice on login with a recovery action and a dismiss", () => {
+    const screen = source("components/unified-auth-screen.tsx");
+    const storage = source("lib/_core/auth.ts");
+    expect(screen).toContain("Auth.peekPostLogoutNotice()");
+    expect(screen).toContain("Auth.consumePostLogoutNotice()");
+    expect(screen).toContain("طلب حذف الحساب فعّال");
+    expect(screen).toContain("استرجاع الحساب");
+    expect(screen).toContain('pathname: "/account-recovery"');
+    expect(storage).toContain("peekPostLogoutNotice");
+    expect(storage).toContain("scheduledFor");
+  });
+
+  it("separates the two login messages on the backend too: an identity-status endpoint with the exact Arabic texts", () => {
+    const oauth = source("server/_core/oauth.ts");
+    const api = source("lib/_core/api.ts");
+    expect(oauth).toContain('"/api/auth/identity-status"');
+    expect(oauth).toContain("هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
+    expect(oauth).toContain("كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة.");
+    expect(oauth).toContain("isSuperAdminEmail(email)");
+    expect(api).toContain("checkIdentityStatus");
+  });
+
+  it("detects a pending-deletion account at password login and routes to OTP recovery with remaining days instead of a wrong-password dead-end", () => {
+    const engine = source("lib/supabase-otp.tsx");
+    const screen = source("components/unified-auth-screen.tsx");
+    expect(engine).toContain("checkPendingDeletion(email)");
+    expect(engine).toContain('error: "deletion-pending"');
+    expect(engine).toContain("pendingDeletion: { scheduledFor");
+    expect(screen).toContain('result.error === "deletion-pending" && result.pendingDeletion');
+    expect(screen).toContain("تم تقديم طلب حذف لحسابك وهو فعّال، وسيتم حذف الحساب نهائيًا");
+    expect(screen).toContain("استرجاع الحساب");
+    expect(screen).toContain('pathname: "/account-recovery"');
   });
 });

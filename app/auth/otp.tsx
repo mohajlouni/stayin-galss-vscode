@@ -9,7 +9,7 @@ import { ThemedText, ThemedNumber } from "@/components/themed-text";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import { useAuthSession } from "@/lib/auth-session";
-import { formatCountdown, resendPasswordlessEmail, useOtpCountdown, useResendCooldown, verifyEmailOtp, activateEmailSignup, type SupabaseOtpError, type AuthError, AUTH_ERROR_MESSAGES } from "@/lib/supabase-otp";
+import { formatCountdown, resendPasswordlessEmail, useOtpCountdown, useResendCooldown, verifyEmailOtp, activateEmailSignup, consumePendingDeletion, type SupabaseOtpError, type AuthError, AUTH_ERROR_MESSAGES } from "@/lib/supabase-otp";
 
 // Expected standard OTP length (6). The provider may deliver longer numeric
 // tokens (e.g. 8-digit codes). We render 6 boxes by default but dynamically grow
@@ -104,7 +104,12 @@ export default function OtpVerificationScreen() {
         ? await activateEmailSignup({ email, token: currentCode, name, refresh })
         : await verifyEmailOtp({ email, token: currentCode, refresh });
       if (result.ok) {
-        router.replace("/workspace-gate");
+        const pendingDeletion = consumePendingDeletion();
+        if (pendingDeletion) {
+          router.replace({ pathname: "/account-recovery", params: { scheduledFor: pendingDeletion.scheduledFor } });
+          return;
+        }
+        router.replace("/onboarding");
         return;
       }
       const code = result.error as SupabaseOtpError | AuthError;

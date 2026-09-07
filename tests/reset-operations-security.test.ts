@@ -20,7 +20,7 @@ describe("reset operational records", () => {
     expect(reset.settings.businessName).toBe(data.settings.businessName);
   });
 
-  it("uses a primary-owner server mutation with a recovery-point write and a sensitive-area confirmation", () => {
+  it("uses a primary-owner server mutation with a recovery-point write, while the old UI row was removed in favor of the granular purge modal", () => {
     const router = readFileSync("server/routers.ts", "utf8");
     const store = readFileSync("lib/booking-store.tsx", "utf8");
     const screen = readFileSync("app/account-security.tsx", "utf8");
@@ -28,9 +28,9 @@ describe("reset operational records", () => {
     expect(router).toContain('confirmation: z.literal("RESET-OPERATIONS")');
     expect(router).toContain("summary.member?.role !== \"owner\"");
     expect(router).toContain("saveOwnerEmergencySnapshot");
-    expect(router).toContain("bookings: [], expenses: []");
     expect(store).toContain("resetOperationalRecords");
-    expect(screen).toContain("تصفير الحجوزات والعمليات المالية");
-    expect(screen).toContain("نعم، تصفير السجلات");
+    expect(screen).toContain("إدارة تصفير بيانات المنشأة");
+    expect(screen).not.toContain("تصفير الحجوزات والعمليات المالية");
+    expect(screen).not.toContain("نعم، تصفير السجلات");
   });
 });

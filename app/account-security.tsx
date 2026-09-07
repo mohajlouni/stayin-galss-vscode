@@ -9,14 +9,16 @@ import { CompactScreenHeader } from "@/components/compact-screen-header";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useAuthSession } from "@/lib/auth-session";
-import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { normalizeOtpToken } from "@/lib/supabase-otp-engine";
+import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
+import { WorkspacePurgeModal } from "@/components/workspace-purge-modal";
 
-type ConfirmationAction = "signout" | "reset-operations";
-type SecurityIcon = "key" | "delete-forever" | "logout" | "cleaning-services";
+type ConfirmationAction = "signout";
+type SecurityIcon = "key" | "delete-forever" | "logout" | "delete";
+
 type PickMode = "current" | "recovery";
 type RecoveryStep = "pick" | "biometric" | "otp";
 
@@ -24,11 +26,12 @@ export default function AccountSecurityScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
   const { logout, activeSession, biometricAvailable, setBiometricsEnabled, setRememberMe, currentUser } = useAuthSession();
-  const { resetOperationalRecords } = useBookings();
-  const { isOwner } = useWorkspaceAccess();
+  const { isOwner, isSuperAdmin } = useWorkspaceAccess();
+  const utils = trpc.useUtils();
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const [confirmation, setConfirmation] = useState<ConfirmationAction | null>(null);
+  const [purgeVisible, setPurgeVisible] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -220,27 +223,19 @@ export default function AccountSecurityScreen() {
     }
   };
 
-  const resetOperations = async () => {
-    setActionBusy(true);
-    setActionError(null);
-    try {
-      const removed = await resetOperationalRecords();
-      setConfirmation(null);
-      const message = language === "ar"
-        ? `تم تصفير سجل العمليات بنجاح · ${removed.bookings} حجز و${removed.expenses} مصروف`
-        : `Operations reset successfully · ${removed.bookings} bookings and ${removed.expenses} expenses`;
-      setActionNotice(message);
-      setTimeout(() => setActionNotice(null), 3500);
-    } catch {
-      setActionError(language === "ar" ? "تعذر تصفير السجلات. تأكد من أنك المالك الأساسي ومن اتصال المزامنة ثم حاول مرة أخرى." : "Could not reset records. Verify primary-owner access and sync, then try again.");
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
   const toggleBiometrics = async (enabled: boolean) => {
     const saved = await setBiometricsEnabled(enabled);
     if (!saved && enabled) Alert.alert(language === "ar" ? "التحقق الحيوي غير متاح" : "Biometric verification unavailable", language === "ar" ? "فعّل بصمة الإصبع أو Face ID من إعدادات الجهاز أولًا، ثم أعد المحاولة." : "Enable fingerprint or Face ID in device settings, then try again.");
+  };
+
+  const handlePurgeExecuted = (summary: string, deleted: boolean) => {
+    setPurgeVisible(false);
+    if (deleted) {
+      router.replace("/properties-hub");
+    } else {
+      setActionNotice(summary);
+      setTimeout(() => setActionNotice(null), 4000);
+    }
   };
 
   const Row = ({ icon, title, description, onPress, danger = false, caution = false }: { icon: SecurityIcon; title: string; description: string; onPress: () => void; danger?: boolean; caution?: boolean }) => {
@@ -252,18 +247,11 @@ export default function AccountSecurityScreen() {
     </Pressable>;
   };
 
-  const confirmationTitle = confirmation === "reset-operations"
-    ? (language === "ar" ? "تأكيد تصفير السجلات المالية والحجوزات" : "Confirm reset of bookings and financial records")
-    : (language === "ar" ? "تسجيل الخروج من هذا الجهاز" : "Sign out of this device");
-  const confirmationText = confirmation === "reset-operations"
-    ? (language === "ar" ? "سيتم مسح كافة الحجوزات والدفعات والمصروفات المسجلة من هذه المنشأة. تبقى الوحدات والحساب محفوظة، وتُنشأ نقطة استرداد قبل التنفيذ. هل تريد المتابعة؟" : "All bookings, payments, and expenses in this property will be cleared. Units and your account remain saved, and a recovery point is created first. Continue?")
-    : (language === "ar" ? "سيتم إنهاء الجلسة على هذا الجهاز فقط. تبقى بيانات المنشأة المتزامنة محفوظة." : "Only this device session will end. Your synced property data remains saved.");
-  const confirmLabel = confirmation === "reset-operations"
-    ? (language === "ar" ? "نعم، تصفير السجلات" : "Yes, reset records")
-    : (language === "ar" ? "تسجيل الخروج" : "Sign out");
+  const confirmationTitle = language === "ar" ? "تسجيل الخروج من هذا الجهاز" : "Sign out of this device";
+  const confirmationText = language === "ar" ? "سيتم إنهاء الجلسة على هذا الجهاز فقط. تبقى بيانات المنشأة المتزامنة محفوظة." : "Only this device session will end. Your synced property data remains saved.";
+  const confirmLabel = language === "ar" ? "تسجيل الخروج" : "Sign out";
   const confirmAction = async () => {
-    if (confirmation === "reset-operations") await resetOperations();
-    else if (confirmation === "signout") signOut();
+    if (confirmation === "signout") signOut();
   };
 
   const recoveryAuthorized = pickMode === "recovery" && recoveryOtpVerified;
@@ -327,11 +315,11 @@ export default function AccountSecurityScreen() {
         <View style={[styles.toggle, { flexDirection: row, borderColor: biometricAvailable ? colors.success + "66" : colors.border, opacity: biometricAvailable ? 1 : 0.72 }]}><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "900", textAlign: align }}>{language === "ar" ? "الدخول ببصمة الإصبع / الوجه" : "Fingerprint / Face ID sign-in"}</Text><Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{biometricAvailable ? (language === "ar" ? "يتطلب بصمة الإصبع أو Face ID لفتح الجلسة المحفوظة." : "Requires fingerprint or Face ID to unlock the saved session.") : (language === "ar" ? "فعّل بصمة أو Face ID على الجهاز لإتاحة هذا الخيار." : "Enable fingerprint or Face ID on the device to use this option.")}</Text></View><AppToggle disabled={!biometricAvailable} value={biometricAvailable && activeSession.biometricsEnabled} onValueChange={(value) => void toggleBiometrics(value)} isRTL={isRTL} activeColor={colors.success} inactiveColor={colors.border} accessibilityLabel={language === "ar" ? "تبديل الدخول ببصمة الإصبع أو الوجه" : "Toggle biometric sign-in"} /></View>
       </View>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إدارة الوصول" : "Access management"}</Text><Row icon="key" title={language === "ar" ? "تغيير كلمة المرور" : "Change password"} description={language === "ar" ? "تغيير كلمة المرور المرتبطة بحساب البريد الإلكتروني." : "Change the password linked to your email account."} onPress={openPassword} /><Row icon="logout" title={language === "ar" ? "تسجيل الخروج من هذا الجهاز" : "Sign out of this device"} description={language === "ar" ? "لا يحذف حسابك أو بيانات منشأتك المتزامنة." : "Does not delete your account or synced property data."} onPress={() => setConfirmation("signout")} /></View>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.error + "55" }]}><Text style={{ color: colors.error, fontSize: 15, fontWeight: "900", textAlign: align }}>{language === "ar" ? "منطقة حساسة" : "Sensitive area"}</Text>{isOwner ? <Row icon="cleaning-services" caution title={language === "ar" ? "تصفير الحجوزات والعمليات المالية" : "Reset bookings & financial records"} description={language === "ar" ? "حذف الحجوزات والمصروفات والدفعات فقط مع بقاء الوحدات والحساب." : "Clears bookings, expenses, and payments only; units and account stay intact."} onPress={() => setConfirmation("reset-operations")} /> : null}<Row icon="delete-forever" danger title={language === "ar" ? "حذف الحساب والبيانات" : "Delete account & data"} description={language === "ar" ? "طلب قابل للإلغاء خلال 30 يومًا قبل المراجعة." : "A request you can cancel during the 30-day review window."} onPress={() => router.push("/account-deletion")} /></View>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.error + "55" }]}><Text style={{ color: colors.error, fontSize: 15, fontWeight: "900", textAlign: align }}>{language === "ar" ? "منطقة حساسة" : "Sensitive area"}</Text>{(isOwner || isSuperAdmin) ? <Row icon="delete" caution title={language === "ar" ? "إدارة تصفير بيانات المنشأة" : "Workspace purge manager"} description={language === "ar" ? "مسح انتقائي للحجوزات والصيانة والعملاء والولاء والإشعارات والماليات والوحدات مع تحقق صارم." : "Selective erasure of bookings, maintenance, CRM, loyalty, notifications, financials, and units with strict verification."} onPress={() => setPurgeVisible(true)} /> : null}<Row icon="delete-forever" danger title={language === "ar" ? "حذف الحساب والبيانات" : "Delete account & data"} description={language === "ar" ? "طلب قابل للإلغاء خلال 30 يومًا قبل المراجعة." : "A request you can cancel during the 30-day review window."} onPress={() => router.push("/account-deletion")} /></View>
       {actionError ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.error + "12", borderColor: colors.error + "55", flexDirection: row }]}><MaterialIcons name="error-outline" size={18} color={colors.error} /><Text style={[styles.flex, { color: colors.error, fontWeight: "800", fontSize: 11, textAlign: align }]}>{actionError}</Text></View> : null}
       {actionNotice ? <View accessibilityLiveRegion="polite" style={[styles.feedback, { backgroundColor: colors.success + "12", borderColor: colors.success + "55", flexDirection: row }]}><MaterialIcons name="check-circle" size={18} color={colors.success} /><Text style={[styles.flex, { color: colors.success, fontWeight: "800", fontSize: 11, textAlign: align }]}>{actionNotice}</Text></View> : null}
     </ScrollView>
-    <Modal transparent visible={confirmation !== null} animationType="fade" onRequestClose={() => !actionBusy && setConfirmation(null)}><View style={styles.modalOverlay}><View style={[styles.confirmationSheet, { borderColor: confirmation === "reset-operations" ? colors.error + "80" : "#334155" }]}><Text style={{ color: confirmation === "reset-operations" ? colors.error : "#F1F5F9", fontSize: 18, fontWeight: "900", textAlign: align }}>{confirmationTitle}</Text><Text style={{ color: "#94A3B8", marginTop: 8, fontSize: 12, lineHeight: 19, textAlign: align }}>{confirmationText}</Text><View style={[styles.confirmationActions, { flexDirection: row }]}><Pressable disabled={actionBusy} onPress={() => setConfirmation(null)} style={({ pressed }) => [styles.confirmSecondary, { borderColor: "#334155", opacity: pressed || actionBusy ? 0.62 : 1 }]}><Text style={{ color: "#F1F5F9", fontWeight: "900" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable><Pressable disabled={actionBusy} onPress={() => void confirmAction()} style={({ pressed }) => [styles.confirmPrimary, { backgroundColor: confirmation === "reset-operations" ? colors.error : colors.primary, opacity: pressed || actionBusy ? 0.62 : 1 }]}><Text style={{ color: "#FFFFFF", fontWeight: "900", textAlign: "center" }}>{actionBusy ? (language === "ar" ? "جارٍ التنفيذ" : "Working") : confirmLabel}</Text></Pressable></View></View></View></Modal>
+    <Modal transparent visible={confirmation !== null} animationType="fade" onRequestClose={() => !actionBusy && setConfirmation(null)}><View style={styles.modalOverlay}><View style={[styles.confirmationSheet, { borderColor: "#334155" }]}><Text style={{ color: "#F1F5F9", fontSize: 18, fontWeight: "900", textAlign: align }}>{confirmationTitle}</Text><Text style={{ color: "#94A3B8", marginTop: 8, fontSize: 12, lineHeight: 19, textAlign: align }}>{confirmationText}</Text><View style={[styles.confirmationActions, { flexDirection: row }]}><Pressable disabled={actionBusy} onPress={() => setConfirmation(null)} style={({ pressed }) => [styles.confirmSecondary, { borderColor: "#334155", opacity: pressed || actionBusy ? 0.62 : 1 }]}><Text style={{ color: "#F1F5F9", fontWeight: "900" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable><Pressable disabled={actionBusy} onPress={() => void confirmAction()} style={({ pressed }) => [styles.confirmPrimary, { backgroundColor: colors.primary, opacity: pressed || actionBusy ? 0.62 : 1 }]}><Text style={{ color: "#FFFFFF", fontWeight: "900", textAlign: "center" }}>{actionBusy ? (language === "ar" ? "جارٍ التنفيذ" : "Working") : confirmLabel}</Text></Pressable></View></View></View></Modal>
     <Modal transparent visible={pwVisible} animationType="fade" onRequestClose={closePassword}><View style={styles.modalOverlay}><View style={[styles.passwordSheet]}>
       <View style={[styles.sheetHeader, { flexDirection: row }]}>
         <Pressable accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={closePassword} disabled={pwBusy || recoveryBusy} style={({ pressed }) => [styles.sheetClose, { backgroundColor: "#1E293B", opacity: pressed || pwBusy ? 0.7 : 1 }]}><MaterialIcons name="close" size={19} color="#CBD5E1" /></Pressable>
@@ -347,6 +335,7 @@ export default function AccountSecurityScreen() {
         <Pressable disabled={pwBusy || recoveryBusy} onPress={() => { if (pickMode === "recovery") { const email = gatherNewPassword(); if (email && isSupabaseConfigured && supabase) void applyNewPassword(email); } else { void changePassword(); } }} style={({ pressed }) => [styles.confirmPrimary, { backgroundColor: colors.primary, opacity: pressed || pwBusy ? 0.62 : 1 }]}><Text style={{ color: "#FFFFFF", fontWeight: "900", textAlign: "center" }}>{pwBusy ? <ActivityIndicator size="small" color="#FFF" /> : (language === "ar" ? "تحديث كلمة المرور" : "Update password")}</Text></Pressable>
       </View>
     </View></View></Modal>
+    <WorkspacePurgeModal visible={purgeVisible} onClose={() => setPurgeVisible(false)} onExecuted={handlePurgeExecuted} />
   </ScreenContainer>;
 }
 

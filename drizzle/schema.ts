@@ -24,6 +24,7 @@ export const stayInUsers = mysqlTable("stayInUsers", {
   role: mysqlEnum("role", ["user", "admin"]).notNull().default("user"),
   avatarUrl: text("avatarUrl"),
   userCode: varchar("userCode", { length: 16 }),
+  alwaysPromptWorkspaceSelection: boolean("alwaysPromptWorkspaceSelection").notNull().default(false),
   termsVersion: varchar("termsVersion", { length: 32 }),
   privacyVersion: varchar("privacyVersion", { length: 32 }),
   conditionsVersion: varchar("conditionsVersion", { length: 32 }),
@@ -201,6 +202,22 @@ export const stayInSuperAdminAudit = mysqlTable("stayInSuperAdminAudit", {
   workspaceIdx: index("stayInSuperAdminAudit_targetWorkspaceId_idx").on(table.targetWorkspaceId),
 }));
 
+export const stayInSystemErrorLogs = mysqlTable("stayInSystemErrorLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  endpoint: varchar("endpoint", { length: 255 }).notNull(),
+  userId: int("userId"),
+  statusCode: int("statusCode").notNull(),
+  errorMessage: text("errorMessage").notNull(),
+  stackTrace: text("stackTrace"),
+  occurrenceCount: int("occurrenceCount").notNull().default(1),
+  firstSeenAt: timestamp("firstSeenAt").defaultNow().notNull(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  status: mysqlEnum("status", ["unresolved", "resolved"]).notNull().default("unresolved"),
+}, (table) => ({
+  statusIdx: index("stayInSystemErrorLogs_status_idx").on(table.status),
+  lastSeenIdx: index("stayInSystemErrorLogs_lastSeenAt_idx").on(table.lastSeenAt),
+}));
+
 export const stayInGlobalFeatureFlags = mysqlTable("stayInGlobalFeatureFlags", {
   flag: varchar("flag", { length: 64 }).primaryKey(),
   enabled: boolean("enabled").notNull().default(true),
@@ -234,6 +251,7 @@ export const sessions = stayInSessions;
 export const superAdminAudit = stayInSuperAdminAudit;
 export const globalFeatureFlags = stayInGlobalFeatureFlags;
 export const workspaceFeatureSettings = stayInWorkspaceFeatureSettings;
+export const systemErrorLogs = stayInSystemErrorLogs;
 
 export type User = typeof stayInUsers.$inferSelect;
 export type InsertUser = typeof stayInUsers.$inferInsert;
@@ -263,3 +281,5 @@ export type AccountDeletionRequest = typeof stayInAccountDeletionRequests.$infer
 export type InsertAccountDeletionRequest = typeof stayInAccountDeletionRequests.$inferInsert;
 export type GlobalFeatureFlagRow = typeof stayInGlobalFeatureFlags.$inferSelect;
 export type WorkspaceFeatureSettingRow = typeof stayInWorkspaceFeatureSettings.$inferSelect;
+export type SystemErrorLogRow = typeof stayInSystemErrorLogs.$inferSelect;
+export type InsertSystemErrorLog = typeof stayInSystemErrorLogs.$inferInsert;

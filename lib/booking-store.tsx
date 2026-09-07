@@ -6,18 +6,19 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { Alert, Platform } from "react-native";
 
 import { parseBackupData, parseStoredAppData, serializeBackup } from "./backup-import";
-import { buildDemoAppData } from "./demo-data";
-import { useDemoMode } from "./demo-mode";
 import { persistChaletImage, removeManagedChaletImage } from "./chalet-image";
 import { persistPaymentReceipt } from "./payment-receipt";
 import { syncCheckoutNotifications } from "./checkout-notifications";
 import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, effectiveLoyaltyProgram, effectiveUtilityTracking, EMPTY_DATA, Expense, expireElapsedRecords, getBookingOperationalState, getChaletShift, isValidChaletReferenceCode, isValidPaymentMethod, isValidUnitCode, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, shiftCodeForShift, smartBookingReference, SpecialPriceRule, staffFloatAccounts, staffFloatCollectedTotal, staffFloatOutstanding, TurnoverTask, WaitlistEntry } from "./booking-model";
-import { type Asset, type AssetInspectionItem, type Customer, type DepositCompensation, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceTask, type NotificationRecipient, type NotificationType, type StaffFloatSettlement, type UtilityReading, type WeatherLog } from "./booking-model";
+import { type Asset, type AssetInspectionItem, type AuditLogEntry, type Customer, type DepositCompensation, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenancePaymentSource, type MaintenancePerformerRole, type MaintenanceTask, type NotificationRecipient, type NotificationType, type StaffFloatSettlement, type UtilityReading, type WeatherLog } from "./booking-model";
 import { findCustomerByPhone, phoneE164, upsertCustomerFromBooking } from "./customers";
 import { deriveLoyaltyTier, pointsEarned } from "./loyalty";
 import { computeUtilityCost, findOpenUtilityReading, UTILITY_RATES, utilityTypeLabel } from "./utility-readings";
 import type { WeatherAdvisory } from "./weather";
-import { isMaintenanceOverdue, isMaintenanceUpcoming, nextMaintenanceDueDate } from "./maintenance";
+import { advanceMaintenanceDueDate, isMaintenanceOverdue, isMaintenanceUpcoming, maintenanceIntervalDays, nextMaintenanceDueDate } from "./maintenance";
+import { hasMaintenanceCollision } from "./maintenance-blocks";
+import { buildMaintenanceExpense } from "./maintenance-expense";
+import { expenseSourceForPaymentSource } from "./booking-model";
 import { buildCheckInAlertNotification, buildContractSignedNotification, buildMaintenanceDueNotification, buildNewBookingNotification, buildPaymentReceivedNotification } from "./notification-center";
 import { findBookingConflicts } from "../services/availabilityService";
 import { trpc } from "./trpc";
@@ -25,7 +26,7 @@ import { syncWaitlistPriorityNotifications } from "./waitlist-priority-notificat
 import { useWorkspaceAccess } from "./workspace-access";
 import { isWorkspaceSessionError, isWorkspaceVersionConflict, mergeWorkspaceAppData } from "./workspace-sync";
 import * as Auth from "./_core/auth";
-import { getMyWorkspaceId, getWorkspaceState, isSupabaseConfigured, saveWorkspaceState, subscribeToTable } from "./supabase-data";
+import { getMyWorkspaceId, getWorkspaceState, isSupabaseConfigured, isSupabaseRpcMissing, saveWorkspaceState, subscribeToTable } from "./supabase-data";
 
 const STORAGE_KEY = "arabic-booking-manager-data-v1";
 const RESCUE_BACKUP_KEY = "arabic-booking-manager-rescue-backup-v1";
@@ -42,6 +43,7 @@ type BookingContextValue = AppData & {
   lastSyncedAt: string | null;
   refreshWorkspaceData: () => Promise<boolean>;
   resetOperationalRecords: () => Promise<{ bookings: number; expenses: number }>;
+  purgeWorkspaceRecords: (categories: string[], challenge: string) => Promise<{ version: number; payload: string | null; removed: Record<string, number>; deleted: boolean; deletedWorkspaceId: number | null; deletedWorkspaceName: string | null; nextActiveWorkspaceId: number | null }>;
   pendingBackupImport: PendingBackupImport | null;
   addBooking: (booking: Booking) => Promise<void>;
   updateBooking: (booking: Booking) => Promise<void>;
@@ -65,7 +67,9 @@ type BookingContextValue = AppData & {
   saveAsset: (asset: Omit<Asset, "id" | "createdAt"> & { id?: string }) => Promise<Asset>;
   deleteAsset: (id: string) => Promise<void>;
   saveMaintenanceTask: (task: Omit<MaintenanceTask, "id" | "createdAt"> & { id?: string }) => Promise<void>;
-  completeMaintenanceTask: (id: string, completedByName?: string) => Promise<void>;
+  startMaintenanceTask: (id: string) => Promise<void>;
+  completeMaintenanceTaskWithExpense: (id: string, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; paymentSource?: MaintenancePaymentSource; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean }) => Promise<void>;
+  cancelMaintenanceTask: (id: string, mode?: "instance" | "series") => Promise<void>;
   deleteMaintenanceTask: (id: string) => Promise<void>;
   signContract: (input: { bookingId: string; guestSignatureBase64?: string; termsSnapshot: string; signedByName?: string }) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
@@ -91,6 +95,8 @@ type BookingContextValue = AppData & {
   clearLastDeleted: () => void;
 };
 
+type PurgeCategoryKey = "bookings" | "waitlist" | "maintenance" | "notifications" | "customers" | "loyalty" | "financials" | "analytics" | "units" | "workspace";
+
 const BookingContext = createContext<BookingContextValue | null>(null);
 
 let notificationSequence = 0;
@@ -108,7 +114,7 @@ function buildInAppNotification(input: { type: NotificationType; recipients: Not
 function maintenanceDueNotificationsFor(tasks: MaintenanceTask[], notifications: InAppNotification[], language: "ar" | "en", now = Date.now()) {
   const extra: InAppNotification[] = [];
   tasks.forEach((task) => {
-    if (task.status === "completed") return;
+    if (task.status === "completed" || task.status === "cancelled") return;
     const dueSoon = isMaintenanceOverdue(task, now) || isMaintenanceUpcoming(task, now, 3);
     if (!dueSoon) return;
     const alreadyTracked = notifications.some((notification) => notification.type === "maintenance_due" && notification.dataPayload?.taskId === task.id);
@@ -118,9 +124,19 @@ function maintenanceDueNotificationsFor(tasks: MaintenanceTask[], notifications:
   return extra;
 }
 
+/** يُضيف حدثًا ثابتًا إلى سجل تدقيق الصيانة لمهمة معيّنة (سجل غير قابل للتعديل بعد الحفظ). */
+function maintenanceAuditEntry(taskId: string, action: MaintenanceAuditAction, input: { userName: string; userRole: MaintenancePerformerRole; userId?: number; details?: string; timestamp?: string }): MaintenanceAuditEntry {
+  return { id: `maint-audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, taskId, userId: input.userId, userName: input.userName, userRole: input.userRole, action, timestamp: input.timestamp ?? new Date().toISOString(), details: input.details };
+}
+
+/** اسم نطاق المهمة داخل سجلات التدقيق: «كافة الوحدات» للمهام العامة أو اسم الوحدة/«عام». */
+function maintenanceTaskUnitLabel(task: Pick<MaintenanceTask, "targetScope" | "chaletName">) {
+  return task.targetScope === "all_units" ? "كافة الوحدات" : task.chaletName ?? "عام";
+}
+
 export function BookingProvider({ children }: { children: React.ReactNode }) {
-  const { user, isAuthenticated, isEmployee, isManager, isGuest, activeWorkspaceId, can } = useWorkspaceAccess();
-  const { isDemo, showDemoNotice } = useDemoMode();
+  const { user, role, isAuthenticated, isEmployee, isManager, isCaretaker, isGuest, activeWorkspaceId, can } = useWorkspaceAccess();
+  const actorRole: MaintenancePerformerRole = role === "owner" || role === "admin" ? "owner" : role === "caretaker" ? "guard" : "staff";
   const scopedStorageKey = activeWorkspaceId ? `${STORAGE_KEY}:workspace-${activeWorkspaceId}` : STORAGE_KEY;
   const scopedSyncKey = activeWorkspaceId ? `${LAST_SYNC_KEY}:workspace-${activeWorkspaceId}` : LAST_SYNC_KEY;
   const paymentMethodsStorageScope = activeWorkspaceId ? `workspace-${activeWorkspaceId}` : "local";
@@ -129,6 +145,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const remoteData = trpc.workspace.data.useQuery(undefined, { enabled: canSyncWorkspace, retry: false });
   const saveRemoteData = trpc.workspace.saveData.useMutation();
   const resetOperationsRemote = trpc.workspace.resetOperations.useMutation();
+  const purgeRecordsRemote = trpc.workspace.purgeRecords.useMutation();
   const [data, setData] = useState<AppData>(EMPTY_DATA);
   // Latest committed snapshot for conflict-free persistence. Handlers build
   // `next` from the `data` closure of their render; merging those partial
@@ -142,6 +159,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   const [pendingBackupImport, setPendingBackupImport] = useState<PendingBackupImport | null>(null);
   const [lastDeleted, setLastDeleted] = useState<LastDeleted | null>(null);
   const remoteSyncStarted = useRef(false);
+  // Once a permanently-missing Supabase RPC is seen (PGRST202 / 404), the
+  // mirror is dead for this session: stop pulling so the app serves the real
+  // local + tRPC workspace state (EMPTY_DATA when nothing is stored) without
+  // mock fixtures and without spamming the dead endpoint every poll tick.
+  const supabaseEndpointDown = useRef(false);
   const auditActorName = user?.name?.trim() || undefined;
   // Custom session token forwarded to Supabase as X-StayIn-Token. Supabase writes
   // are strictly additive and non-blocking: if Supabase is unavailable or no token
@@ -167,8 +189,12 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(merged));
         return merged;
       });
-    } catch {
-      // Swallow: the Supabase mirror is optional. Local + tRPC remain authoritative.
+    } catch (error) {
+      // Swallow: the Supabase mirror is optional. Local + tRPC remain
+      // authoritative and the workspace lists stay exactly as loaded —
+      // EMPTY_DATA when nothing is stored, never mock fixtures. A permanently
+      // missing RPC stops the poll loop so it is not retried every 15s.
+      if (isSupabaseRpcMissing(error)) supabaseEndpointDown.current = true;
     }
   }, [scopedStorageKey]);
 
@@ -188,7 +214,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     if (!supabaseReady || !supabaseToken) return;
     let disposed = false;
     const token = supabaseToken;
-    const refresh = () => { if (!disposed) void applySupabaseSnapshot(token); };
+    const refresh = () => { if (!disposed && !supabaseEndpointDown.current) void applySupabaseSnapshot(token); };
     // Initial pull once the token is ready.
     refresh();
     // Realtime listener (fires on Supabase writes from any device) plus a
@@ -197,10 +223,12 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const wsId = await getMyWorkspaceId(token);
-        if (disposed || !wsId) return;
+        if (disposed || !wsId || supabaseEndpointDown.current) return;
         channel = subscribeToTable("workspace_state", wsId, refresh);
-      } catch {
+      } catch (error) {
         // Realtime unavailable (custom-token auth) — the poll below covers sync.
+        // A missing RPC shuts the mirror down instead of retrying on every tick.
+        if (isSupabaseRpcMissing(error)) supabaseEndpointDown.current = true;
       }
     })();
     const poll = setInterval(refresh, 15_000);
@@ -231,12 +259,6 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   };
 
   const persist = async (next: AppData) => {
-    if (isDemo) {
-      // The demo tour is fully in-memory: intercept every write with a notice
-      // and never touch AsyncStorage, tRPC, or Supabase.
-      showDemoNotice();
-      return;
-    }
     const normalized = expireElapsedRecords(normalizeAppData(next));
     // Treat `next` as a partial writer: only adopt its top-level keys that
     // actually changed, layering them over the latest committed snapshot. This
@@ -273,8 +295,10 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     if (supabaseReady && supabaseToken) {
       try {
         await saveWorkspaceState(supabaseToken, JSON.stringify(merged));
-      } catch {
-        // Snapshot write failed — not fatal. Next successful sync will retry.
+      } catch (error) {
+        // Snapshot write failed — not fatal. Next successful sync will retry,
+        // unless the RPC itself is missing, in which case the mirror is dead.
+        if (isSupabaseRpcMissing(error)) supabaseEndpointDown.current = true;
       }
     }
   };
@@ -288,15 +312,6 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       remoteSyncStarted.current = false;
       setLastSyncedAt(null);
       try {
-        if (isDemo) {
-          const demoData = buildDemoAppData(user?.name);
-          if (mounted) {
-            setData(demoData);
-            dataRef.current = demoData;
-            setHydrated(true);
-          }
-          return;
-        }
         const raw = await AsyncStorage.getItem(scopedStorageKey);
         const paymentMethodsRaw = await AsyncStorage.getItem(PAYMENT_METHODS_STORAGE_KEY);
         const migratedWorkspaceId = activeWorkspaceId ? await AsyncStorage.getItem(LEGACY_MIGRATION_WORKSPACE_KEY) : null;
@@ -331,7 +346,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     };
     void load();
     return () => { mounted = false; };
-  }, [activeWorkspaceId, isDemo, scopedStorageKey, scopedSyncKey]);
+  }, [activeWorkspaceId, scopedStorageKey, scopedSyncKey]);
 
   useEffect(() => {
     if (!canSyncWorkspace) {
@@ -402,7 +417,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (!hydrated || isDemo) return;
+    if (!hydrated) return;
     const interval = setInterval(() => {
       const next = expireElapsedRecords(data);
       if (next === data) return;
@@ -411,24 +426,24 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
     }, 60_000);
     return () => clearInterval(interval);
-  }, [data, hydrated, isDemo, scopedStorageKey]);
+  }, [data, hydrated, scopedStorageKey]);
 
   useEffect(() => {
-    if (!hydrated || isDemo) return;
+    if (!hydrated) return;
     const device = data.settings.device;
     void syncCheckoutNotifications(data.bookings, data.chalets, device?.notificationsEnabled ?? false, device?.language ?? "ar");
     void syncWaitlistPriorityNotifications(data.bookings, data.waitlist, device?.notificationsEnabled ?? false, device?.language ?? "ar");
-  }, [data.bookings, data.chalets, data.settings.device?.language, data.settings.device?.notificationsEnabled, data.waitlist, hydrated, isDemo]);
+  }, [data.bookings, data.chalets, data.settings.device?.language, data.settings.device?.notificationsEnabled, data.waitlist, hydrated]);
 
   useEffect(() => {
-    if (!hydrated || isDemo) return;
+    if (!hydrated) return;
     const extra = maintenanceDueNotificationsFor(data.maintenanceTasks ?? [], data.notifications ?? [], data.settings.device?.language ?? "ar");
     if (!extra.length) return;
     const next = { ...data, notifications: [...extra, ...(data.notifications ?? [])] };
     setData(next);
     dataRef.current = next;
     void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
-  }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, isDemo, scopedStorageKey]);
+  }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, scopedStorageKey]);
 
   const value = useMemo<BookingContextValue>(() => ({
     ...data,
@@ -437,10 +452,6 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     lastSyncedAt,
     refreshWorkspaceData,
     resetOperationalRecords: async () => {
-      if (isDemo) {
-        showDemoNotice();
-        return { bookings: 0, expenses: 0 };
-      }
       const result = await resetOperationsRemote.mutateAsync({ confirmation: "RESET-OPERATIONS" });
       if (!result.payload) {
         // Remote wipe produced no payload to commit. Preserve a scoped rescue of
@@ -456,6 +467,27 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       setSyncConflict(false);
       await recordSuccessfulSync();
       return result.removed;
+    },
+    purgeWorkspaceRecords: async (categories, challenge) => {
+      if (activeWorkspaceId === null) throw new Error("no-active-workspace");
+      const isWorkspaceDelete = categories.includes("workspace");
+      const result = await purgeRecordsRemote.mutateAsync({ workspaceId: activeWorkspaceId, categories: categories as PurgeCategoryKey[], challenge: challenge.trim() });
+      if (isWorkspaceDelete && "ok" in result) {
+        await AsyncStorage.removeItem(scopedStorageKey);
+        return { version: 0, payload: null, removed: {}, deleted: true, deletedWorkspaceId: result.deletedWorkspaceId, deletedWorkspaceName: result.deletedWorkspaceName, nextActiveWorkspaceId: result.nextActiveWorkspaceId ?? null };
+      }
+      if (!isWorkspaceDelete && "payload" in result && result.payload) {
+        await AsyncStorage.setItem(`${RESCUE_BACKUP_KEY}:${activeWorkspaceId}`, JSON.stringify(data));
+        const next = expireElapsedRecords(parseStoredAppData(result.payload));
+        await AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
+        setData(next);
+        dataRef.current = next;
+        setRemoteVersion(result.version);
+        setSyncConflict(false);
+        await recordSuccessfulSync();
+        return { version: result.version, payload: result.payload, removed: result.removed, deleted: false, deletedWorkspaceId: null, deletedWorkspaceName: null, nextActiveWorkspaceId: null };
+      }
+      return { version: 0, payload: null, removed: {}, deleted: false, deletedWorkspaceId: null, deletedWorkspaceName: null, nextActiveWorkspaceId: null };
     },
     pendingBackupImport,
     lastDeleted,
@@ -517,7 +549,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const inspections = confirmation?.assetInspections ?? [];
       const failedAssets = inspections.filter((item) => item.passed === false);
       const nextAssets = (data.assets ?? []).map((asset) => failedAssets.some((item) => item.assetId === asset.id) ? { ...asset, condition: "needs_service" as const, updatedAt: checkedOutAt } : asset);
-      const maintenanceTask = failedAssets.map((item) => ({ id: `maintenance-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, chaletId: booking.chaletId ?? "", chaletName: booking.chaletName, assetId: item.assetId, assetName: item.assetName, title: `إصلاح: ${item.assetName} (فحص المغادرة)`, frequency: "monthly" as const, nextDueDate: new Date(new Date(checkedOutAt).getTime() + 86_400_000).toISOString().slice(0, 10), status: "pending" as const, note: item.note?.trim() || undefined, createdAt: checkedOutAt }));
+      const maintenanceTask = failedAssets.map((item) => ({ id: `maintenance-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, chaletId: booking.chaletId ?? "", chaletName: booking.chaletName, assetId: item.assetId, assetName: item.assetName, title: `إصلاح: ${item.assetName} (فحص المغادرة)`, frequency: "monthly" as const, nextDueDate: new Date(new Date(checkedOutAt).getTime() + 86_400_000).toISOString().slice(0, 10), status: "scheduled" as const, note: item.note?.trim() || undefined, createdAt: checkedOutAt }));
       const checkOutNotifications: InAppNotification[] = [];
       const language = data.settings.device?.language ?? "ar";
       const completedMeterInput = confirmation?.utilityReading;
@@ -702,22 +734,75 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     },
     saveMaintenanceTask: async (task) => {
       if (!can("edit_bookings")) throw new Error("maintenance-management-forbidden");
+      if (task.blockBooking === true && hasMaintenanceCollision(task, data.bookings, data.settings)) {
+        throw new Error("maintenance-block-collision");
+      }
       const actorName = auditActorName ?? "مستخدم التطبيق";
       const createdAtNow = new Date().toISOString();
       const existing = (data.maintenanceTasks ?? []).find((item) => item.id === task.id);
       const taskId = task.id || `maintenance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const savedTask: MaintenanceTask = { ...task, id: taskId, title: task.title.trim().slice(0, 120), chaletId: task.chaletId?.trim() || "", nextDueDate: task.nextDueDate.slice(0, 10), createdAt: existing?.createdAt ?? createdAtNow };
-      await persist({ ...data, maintenanceTasks: existing ? (data.maintenanceTasks ?? []).map((item) => item.id === taskId ? savedTask : item) : [...(data.maintenanceTasks ?? []), savedTask], auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-updated" as AuditAction, subjectName: savedTask.title, details: `${savedTask.chaletName ?? "عام"} · استحقاق ${savedTask.nextDueDate} · ${savedTask.frequency}${savedTask.assetName ? ` · ${savedTask.assetName}` : ""}`, createdAt: createdAtNow, actorName }, ...data.auditLog] });
+      const savedTask: MaintenanceTask = { ...task, id: taskId, title: task.title.trim().slice(0, 120), chaletId: task.chaletId?.trim() || undefined, nextDueDate: task.nextDueDate.slice(0, 10), status: task.status === "in_progress" || task.status === "completed" || task.status === "cancelled" ? task.status : "scheduled", createdAt: existing?.createdAt ?? createdAtNow };
+      const createdAudit: MaintenanceAuditEntry[] = existing ? [] : [maintenanceAuditEntry(savedTask.id, "created", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: createdAtNow, details: `${maintenanceTaskUnitLabel(savedTask)} · ${savedTask.title}` })];
+      await persist({ ...data, maintenanceTasks: existing ? (data.maintenanceTasks ?? []).map((item) => item.id === taskId ? savedTask : item) : [...(data.maintenanceTasks ?? []), savedTask], maintenanceAuditLog: [...createdAudit, ...(data.maintenanceAuditLog ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-updated" as AuditAction, subjectName: savedTask.title, details: `${maintenanceTaskUnitLabel(savedTask)} · استحقاق ${savedTask.nextDueDate} · ${savedTask.frequency}${savedTask.assetName ? ` · ${savedTask.assetName}` : ""}`, createdAt: createdAtNow, actorName }, ...data.auditLog] });
     },
-    completeMaintenanceTask: async (id, completedByName) => {
-      if (!can("edit_bookings")) throw new Error("maintenance-management-forbidden");
+    startMaintenanceTask: async (id) => {
+      if (!can("edit_bookings") && !isCaretaker) throw new Error("maintenance-management-forbidden");
       const task = (data.maintenanceTasks ?? []).find((item) => item.id === id);
       if (!task) throw new Error("maintenance-task-not-found");
-      const actorName = completedByName?.trim() || auditActorName || "مستخدم التطبيق";
+      if (task.status !== "scheduled") throw new Error("maintenance-already-started");
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const startedAt = new Date().toISOString();
+      await persist({ ...data, maintenanceTasks: (data.maintenanceTasks ?? []).map((item) => item.id === id ? { ...item, status: "in_progress" as const } : item), maintenanceAuditLog: [maintenanceAuditEntry(id, "started", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: startedAt, details: `${maintenanceTaskUnitLabel(task)} · بدء العمل على المهمة` }), ...(data.maintenanceAuditLog ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-updated" as AuditAction, subjectName: task.title, details: `${maintenanceTaskUnitLabel(task)} · بدء تنفيذ المهمة`, createdAt: startedAt, actorName }, ...data.auditLog] });
+    },
+    completeMaintenanceTaskWithExpense: async (id, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; paymentSource?: MaintenancePaymentSource; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean }) => {
+      if (!can("edit_bookings") && !isCaretaker) throw new Error("maintenance-management-forbidden");
+      const task = (data.maintenanceTasks ?? []).find((item) => item.id === id);
+      if (!task) throw new Error("maintenance-task-not-found");
+      const actorName = (auditActorName ?? "مستخدم التطبيق").trim();
       const completedAt = new Date().toISOString();
-      const completedTask: MaintenanceTask = { ...task, status: "completed", lastCompletedDate: completedAt.slice(0, 10), nextDueDate: nextMaintenanceDueDate({ ...task, lastCompletedDate: completedAt.slice(0, 10) }), completedAt, completedByName: actorName };
+      const actualCost = Number.isFinite(Number(input.actualCost)) && Number(input.actualCost) >= 0 ? Math.round(Number(input.actualCost) * 100) / 100 : undefined;
+      const cost = actualCost ?? task.actualCost ?? task.cost ?? 0;
+      const shouldPost = input.postExpense && cost > 0 && !task.expenseId;
+      const completedTask: MaintenanceTask = { ...task, status: "completed", lastCompletedDate: completedAt.slice(0, 10), nextDueDate: nextMaintenanceDueDate({ ...task, lastCompletedDate: completedAt.slice(0, 10) }), completedAt, completedByName: actorName, performedById: user?.id, performedByName: input.performedByName.trim(), performedByRole: input.performedByRole, actualCost: cost, paymentSource: input.paymentSource, completionNotes: input.completionNotes?.trim() || undefined, expenseId: !shouldPost ? task.expenseId : undefined };
+      let postedExpense: Expense | undefined;
+      let auditTrail: MaintenanceAuditEntry[] = [maintenanceAuditEntry(id, "completed", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: shouldPost ? "" : `أتم ${actorName} (${actorRole === "owner" ? "المالك" : actorRole === "staff" ? "موظف المنشأة" : "الحارس"}) المهمة بتكلفة ${cost} ${data.settings.currency} (دون ترحيل للمصروفات)` })];
+      let auditEntries: AuditLogEntry[] = [{ id: `audit-${Date.now()}`, action: "maintenance-task-completed" as AuditAction, subjectName: task.title, details: `${maintenanceTaskUnitLabel(task)} · اكتملت المهمة، الاستحقاق القادم ${completedTask.nextDueDate}`, createdAt: completedAt, actorName }];
+      if (shouldPost) {
+        postedExpense = buildMaintenanceExpense({ id: `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, task, source: expenseSourceForPaymentSource(input.paymentSource ?? "owner_account"), amount: cost, performedByName: input.performedByName, createdByName: actorName, createdAt: completedAt });
+        completedTask.expenseId = postedExpense.id;
+        auditTrail = [maintenanceAuditEntry(id, "expense_posted", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: `أتم ${actorName} (${actorRole === "owner" ? "المالك" : actorRole === "staff" ? "موظف المنشأة" : "الحارس"}) المهمة بتكلفة ${cost} ${data.settings.currency} - مُرحّل برقم #${postedExpense.id}` }), ...auditTrail];
+        auditEntries = [{ id: `audit-expense-${Date.now()}`, action: "expense-added" as AuditAction, subjectName: task.chaletName ?? "مصروف صيانة", details: `${postedExpense.category} · ${postedExpense.amount} ${data.settings.currency} · ${postedExpense.note}`, createdAt: completedAt, actorName }, ...auditEntries];
+      }
       const notifications = (data.notifications ?? []).map((notification) => notification.dataPayload?.taskId === id && !notification.isRead ? { ...notification, isRead: true, readByIds: [...(notification.readByIds ?? []), user?.id ? String(user.id) : "local"] } : notification);
-      await persist({ ...data, maintenanceTasks: (data.maintenanceTasks ?? []).map((item) => item.id === id ? completedTask : item), notifications, auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-completed" as AuditAction, subjectName: task.title, details: `${task.chaletName ?? "عام"} · اكتملت المهمة، الاستحقاق القادم ${completedTask.nextDueDate}`, createdAt: completedAt, actorName }, ...data.auditLog] });
+      const recurringTask: MaintenanceTask | undefined = input.scheduleNext === true && task.frequency !== "once" ? { id: `maintenance-${Date.now()}-recur-${Math.random().toString(36).slice(2, 6)}`, chaletId: task.chaletId, chaletName: task.chaletName, targetScope: task.targetScope, assetId: task.assetId, assetName: task.assetName, title: task.title, frequency: task.frequency, nextDueDate: completedTask.nextDueDate, lastCompletedDate: task.lastCompletedDate, assignedToStaffId: task.assignedToStaffId, assignedToStaffName: task.assignedToStaffName, status: "scheduled" as const, cost: task.cost, note: task.note, customIntervalDays: task.customIntervalDays, createdAt: completedAt, blockBooking: task.blockBooking === true && task.targetScope !== "all_units", blockPeriod: task.blockPeriod } : undefined;
+      const recurringAudit: MaintenanceAuditEntry[] = recurringTask ? [maintenanceAuditEntry(recurringTask.id, "created", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: `أُنشئت الدورة القادمة تلقائيًا · ${maintenanceTaskUnitLabel(recurringTask)} · استحقاق ${recurringTask.nextDueDate}` })] : [];
+      await persist({ ...data, maintenanceTasks: [...(recurringTask ? [recurringTask] : []), ...(data.maintenanceTasks ?? []).map((item) => item.id === id ? completedTask : item)], expenses: postedExpense ? [postedExpense, ...(data.expenses ?? [])] : data.expenses, maintenanceAuditLog: [...recurringAudit, ...auditTrail, ...(data.maintenanceAuditLog ?? [])], notifications, auditLog: [...auditEntries, ...data.auditLog] });
+    },
+    cancelMaintenanceTask: async (id, mode = "instance") => {
+      if (!can("edit_bookings") && !isCaretaker) throw new Error("maintenance-cancel-forbidden");
+      const task = (data.maintenanceTasks ?? []).find((item) => item.id === id);
+      if (!task) throw new Error("maintenance-task-not-found");
+      if (task.status === "completed") throw new Error("maintenance-already-completed");
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const cancelledAt = new Date().toISOString();
+      const recurring = task.frequency !== "once";
+      const roleLabel = actorRole === "owner" ? "المالك" : actorRole === "staff" ? "موظف المنشأة" : "الحارس";
+      const cancelAll = (items: MaintenanceTask[], details: string) => {
+        const cancelledIds = new Set(items.map((item) => item.id));
+        const cancelEntries = items.map((item) => maintenanceAuditEntry(item.id, "cancelled", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: cancelledAt, details }));
+        const auditEntries = items.map((item) => ({ id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, action: "maintenance-task-updated" as AuditAction, subjectName: item.title, details: `${maintenanceTaskUnitLabel(item)} · ${details}`, createdAt: cancelledAt, actorName }));
+        return { cancelledIds, cancelEntries, auditEntries };
+      };
+      if (mode === "series") {
+        const siblings = (data.maintenanceTasks ?? []).filter((item) => item.id !== id && (item.status === "scheduled" || item.status === "in_progress") && item.frequency === task.frequency && item.title === task.title && (task.targetScope === "all_units" ? item.targetScope === "all_units" : item.chaletId === task.chaletId));
+        const { cancelledIds, cancelEntries, auditEntries } = cancelAll([task, ...siblings], `تم إلغاء المهمة وإنهاء الجدول المتكرر نهائياً بواسطة ${actorName} (${roleLabel})`);
+        await persist({ ...data, maintenanceTasks: (data.maintenanceTasks ?? []).map((item) => cancelledIds.has(item.id) ? { ...item, status: "cancelled" as const, completedAt: cancelledAt, completedByName: actorName } : item), maintenanceAuditLog: [...cancelEntries, ...(data.maintenanceAuditLog ?? [])], auditLog: [...auditEntries, ...data.auditLog] });
+        return;
+      }
+      const cancelNote = recurring ? " · إبقاء الجدولة المتكررة بعد إلغاء استحقاق اليوم" : "";
+      const nextTask: MaintenanceTask | undefined = recurring ? { id: `maintenance-${Date.now()}-recur-${Math.random().toString(36).slice(2, 6)}`, chaletId: task.chaletId, chaletName: task.chaletName, targetScope: task.targetScope, assetId: task.assetId, assetName: task.assetName, title: task.title, frequency: task.frequency, nextDueDate: advanceMaintenanceDueDate(task.nextDueDate, maintenanceIntervalDays(task)), lastCompletedDate: task.lastCompletedDate, assignedToStaffId: task.assignedToStaffId, assignedToStaffName: task.assignedToStaffName, status: "scheduled" as const, cost: task.cost, note: task.note, customIntervalDays: task.customIntervalDays, createdAt: cancelledAt, blockBooking: task.blockBooking === true && task.targetScope !== "all_units", blockPeriod: task.blockPeriod } : undefined;
+      const nextAudit: MaintenanceAuditEntry[] = nextTask ? [maintenanceAuditEntry(nextTask.id, "created", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: cancelledAt, details: `أُنشئت الدورة القادمة تلقائيًا بعد إلغاء استحقاق اليوم · ${maintenanceTaskUnitLabel(nextTask)} · استحقاق ${nextTask.nextDueDate}` })] : [];
+      await persist({ ...data, maintenanceTasks: [...(nextTask ? [nextTask] : []), ...(data.maintenanceTasks ?? []).map((item) => item.id === id ? { ...item, status: "cancelled" as const, completedAt: cancelledAt, completedByName: actorName } : item)], maintenanceAuditLog: [...nextAudit, maintenanceAuditEntry(id, "cancelled", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: cancelledAt, details: `تم إلغاء المهمة بواسطة ${actorName} (${roleLabel})${cancelNote}` }), ...(data.maintenanceAuditLog ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-updated" as AuditAction, subjectName: task.title, details: `${maintenanceTaskUnitLabel(task)} · أُلغيت المهمة${cancelNote}`, createdAt: cancelledAt, actorName }, ...data.auditLog] });
     },
     deleteMaintenanceTask: async (id) => {
       if (!can("edit_bookings")) throw new Error("maintenance-management-forbidden");
@@ -936,7 +1021,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       return true;
     },
     clearLastDeleted: () => setLastDeleted(null),
-  }), [data, hydrated, isDemo, lastDeleted, lastSyncedAt, pendingBackupImport, remoteVersion, remoteReady, resetOperationsRemote, scopedStorageKey, showDemoNotice]);
+  }), [data, hydrated, lastDeleted, lastSyncedAt, pendingBackupImport, purgeRecordsRemote, remoteVersion, remoteReady, resetOperationsRemote, scopedStorageKey]);
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>;
 }

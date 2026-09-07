@@ -1,5 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Image } from "expo-image";
+import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View } from "react-native";
 
@@ -14,6 +15,8 @@ import { useChaletScope } from "@/lib/chalet-scope";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useI18n } from "@/lib/i18n";
 import { useGlobalFeatureFlags } from "@/lib/feature-flags";
+import { useAuthSession } from "@/lib/auth-session";
+import { isSuperAdminUser } from "@/lib/super-admin";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -29,6 +32,7 @@ type HomeTopWidgetProps = {
 export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotifications }: HomeTopWidgetProps) {
   const colors = useColors();
   const { isRTL, language } = useI18n();
+  const { currentUser } = useAuthSession();
   const { formatDate, formatTime, deviceSettings } = useAppPreferences();
   const { chalets } = useBookings();
   const { selectedChaletId } = useChaletScope();
@@ -80,6 +84,8 @@ export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotificati
         <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مركز الإشعارات" : "Notification center"} onPress={onNotifications} style={({ pressed }) => [styles.bellButton, { borderColor: unreadCount > 0 ? colors.warning + "70" : colors.border, backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] }]}><MaterialIcons name="notifications" size={19} color={unreadCount > 0 ? colors.warning : colors.muted} />{unreadCount > 0 ? <View style={[styles.bellBadge, { backgroundColor: colors.warning }]}><Text style={{ color: "#13181D", fontSize: 9, fontWeight: "900" }}>{unreadCount > 9 ? "9+" : unreadCount}</Text></View> : null}</Pressable>
       </View>
 
+      {isSuperAdminUser(currentUser) ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مركز الإدارة العليا" : "Master control center"} onPress={() => router.push("/admin/master-control")} style={({ pressed }) => [styles.masterControl, { borderColor: accent + "55", backgroundColor: accent + "10", opacity: pressed ? 0.7 : 1, flexDirection: row }]}><MaterialIcons name="admin-panel-settings" size={18} color={accent} /><Text style={[styles.masterControlText, { color: accent }]}>{language === "ar" ? "مركز الإدارة العليا" : "Master Control Center"}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={accent} /></Pressable> : null}
+
       {hasTiles ? <>
         <Pressable accessibilityRole="button" accessibilityLabel={collapsed ? (language === "ar" ? "إظهار الطقس والقمر" : "Show weather & moon") : (language === "ar" ? "إخفاء الطقس والقمر" : "Hide weather & moon")} onPress={() => setCollapsed((current) => !current)} style={({ pressed }) => [styles.collapseHandle, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={collapsed ? "keyboard-arrow-down" : "keyboard-arrow-up"} size={18} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{collapsed ? (language === "ar" ? "إظهار الطقس والقمر" : "Show weather & moon") : (language === "ar" ? "إخفاء الطقس والقمر" : "Hide weather & moon")}</Text><View style={styles.flex} /></Pressable>
         <Animated.View style={[styles.collapseBody, { opacity: height, transform: [{ scaleY: height }] }]}>
@@ -103,6 +109,8 @@ const styles = StyleSheet.create({
   bellButton: { width: 44, height: 44, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   bellBadge: { position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "#070B10" },
   collapseHandle: { marginTop: 12, minHeight: 26, alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 4 },
+  masterControl: { marginTop: 12, minHeight: 46, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, alignItems: "center", justifyContent: "space-between", gap: 8 },
+  masterControlText: { fontSize: 12, fontWeight: "900", textAlign: "center" },
   collapseBody: { overflow: "hidden" },
   flex: { flex: 1 },
   tile: { marginTop: 10 },

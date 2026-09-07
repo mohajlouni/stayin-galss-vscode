@@ -6,7 +6,7 @@ import * as db from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { notifyOwner } from "./_core/notification";
 import { ENV } from "./_core/env";
-import { matchesSuperAdminIdentity } from "./_core/identity";
+import { matchesRootAccountCode, matchesSuperAdminIdentity, ROOT_IMMUNITY_VIOLATION } from "./_core/identity";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk, sessionTokenFromRequest } from "./_core/sdk";
@@ -43,6 +43,21 @@ function isSuperAdminActor(actor: EmergencyActor, ownerOpenId: string): boolean 
   if (actor.isSuperAdmin) return true;
   if (actor.role === "super_admin") return true;
   return matchesSuperAdminIdentity({ openId: actor.openId, email: actor.email, phone: actor.phone }, ownerOpenId);
+}
+
+/**
+ * Hard immunity lock for the root Super Admin account (#U1000): this account can
+ * never be deleted, suspended, disabled, or have its role/rank mutated from any
+ * endpoint. Every destructive / role-mutation procedure checks this FIRST and
+ * answers with 403 FORBIDDEN + the canonical Arabic violation message.
+ */
+function isImmutableRootActor(actor: EmergencyActor): boolean {
+  if (isSuperAdminActor(actor, ENV.ownerOpenId)) return true;
+  return matchesRootAccountCode((actor as { userCode?: string | null }).userCode);
+}
+
+function throwRootImmunity(): never {
+  throw new TRPCError({ code: "FORBIDDEN", message: ROOT_IMMUNITY_VIOLATION });
 }
 
 async function requireEmergencyOwner(userId: number, workspaceId: number, actor: EmergencyActor, pin?: string) {
@@ -115,7 +130,10 @@ export const appRouter = router({
   }),
   accountDeletion: router({
     status: protectedProcedure.query(({ ctx }) => db.getAccountDeletionRequest(ctx.user.id)),
-    request: protectedProcedure.input(z.object({ confirmation: z.literal("DELETE"), reason: z.string().trim().max(800).nullable() })).mutation(({ ctx, input }) => db.requestAccountDeletion(ctx.user.id, input.reason)),
+    request: protectedProcedure.input(z.object({ confirmation: z.literal("DELETE"), reason: z.string().trim().max(800).nullable() })).mutation(async ({ ctx, input }) => {
+      if (isImmutableRootActor(ctx.user)) throwRootImmunity();
+      return db.requestAccountDeletion(ctx.user.id, input.reason);
+    }),
     cancel: protectedProcedure.mutation(({ ctx }) => db.cancelAccountDeletion(ctx.user.id)),
     requestRecoveryOtp: publicProcedure.input(z.object({ email: z.string().email() })).mutation(async ({ input }) => {
       const pending = await db.getPendingDeletionByEmail(input.email);
@@ -167,21 +185,42 @@ export const appRouter = router({
       return { workspace: summary.workspace, member: summary.member };
     }),
     routing: protectedProcedure.query(async ({ ctx }) => db.getWorkspaceRouting(ctx.user)),
+    setAlwaysPrompt: protectedProcedure.input(z.object({ enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      await db.setWorkspaceSelectionPreference(ctx.user.id, input.enabled);
+      return db.getWorkspaceRouting(ctx.user);
+    }),
     select: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const member = await db.setActiveWorkspace(ctx.user.id, input.workspaceId);
       const summary = await db.getWorkspaceSummary(ctx.user);
       return { workspace: summary.workspace, member };
     }),
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(2).max(255), phone: z.string().trim().max(32).optional().or(z.literal("")), currency: z.string().trim().max(8).optional().or(z.literal("")) })).mutation(async ({ ctx, input }) => {
-      const member = await db.createWorkspace({ user: ctx.user, name: input.name, phone: input.phone ?? "", currency: input.currency ?? "" });
-      const summary = await db.getWorkspaceSummary(ctx.user);
-      return { workspace: summary.workspace, member };
+      let member;
+      try {
+        member = await db.createWorkspace({ user: ctx.user, name: input.name, phone: input.phone ?? "", currency: input.currency ?? "" });
+      } catch (error) {
+        if (error instanceof Error && error.message === "duplicate-workspace-name") throw new TRPCError({ code: "CONFLICT", message: "يوجد منشأة مسجلة مسبقاً بهذا الاسم، يرجى اختيار اسم مختلف." });
+        throw error;
+      }
+      const summary = await db.getWorkspaceSummary(ctx.user).catch(() => ({ workspace: null, member: null }));
+      return { workspace: summary.workspace ?? null, member };
     }),
     bootstrapOwner: protectedProcedure.mutation(async ({ ctx }) => {
       const existing = await db.getWorkspaceMember(ctx.user.id);
       const member = existing ?? await db.bootstrapOwnerWorkspace(ctx.user);
       const summary = await db.getWorkspaceSummary(ctx.user);
       return { workspace: summary.workspace, member };
+    }),
+    delete: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), confirmation: z.string().trim().max(16) })).mutation(async ({ ctx, input }) => {
+      if (input.confirmation !== "حذف" && input.confirmation !== "DELETE") throw new TRPCError({ code: "BAD_REQUEST", message: "Deletion challenge not matched" });
+      try {
+        return await db.deleteWorkspaceIfOwner(ctx.user, input.workspaceId);
+      } catch (error) {
+        if (error instanceof Error && error.message === "workspace-not-found") throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+        if (error instanceof Error && error.message === "owner-required") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can delete a workspace" });
+        if (error instanceof Error && error.message === "owner-must-keep-one") throw new TRPCError({ code: "BAD_REQUEST", message: "An account must keep at least one owned workspace" });
+        throw error;
+      }
     }),
     overview: protectedProcedure.query(async ({ ctx }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
@@ -216,6 +255,7 @@ export const appRouter = router({
       const target = await db.getWorkspaceMemberById(summary.member.workspaceId, input.memberId);
       if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace member not found" });
       if (target.role === "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Primary owner is immutable" });
+      if (await db.isImmutableRootUserId(target.userId)) throwRootImmunity();
       if (summary.member.role !== "owner" && target.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Operational managers cannot modify other managers" });
       return db.updateWorkspaceMemberPermissions({ workspaceId: summary.member.workspaceId, memberId: input.memberId, permissions: input.permissions, actorUserId: ctx.user.id });
     }),
@@ -225,6 +265,7 @@ export const appRouter = router({
       const target = await db.getWorkspaceMemberById(summary.member.workspaceId, input.memberId);
       if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace member not found" });
       if (target.role === "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Primary owner collection account is managed in settings" });
+      if (await db.isImmutableRootUserId(target.userId)) throwRootImmunity();
       if (summary.member.role !== "owner" && target.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Operational managers cannot modify other managers" });
       return db.updateWorkspaceMemberCollectionProfile({ workspaceId: summary.member.workspaceId, memberId: input.memberId, cliqAlias: input.cliqAlias, bankDetails: input.bankDetails, commissionRate: input.commissionRate, commissionType: input.commissionType, allowDirectCollection: input.allowDirectCollection, actorUserId: ctx.user.id });
     }),
@@ -305,13 +346,45 @@ export const appRouter = router({
       });
       return { ...result, payload, removed };
     }),
+    purgeRecords: protectedProcedure.input(z.object({
+      workspaceId: z.number().int().positive(),
+      categories: z.array(z.enum(["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "units", "workspace"])).min(1),
+      challenge: z.string().trim().max(16),
+    })).mutation(async ({ ctx, input }) => {
+      // Only the verified Property Owner of that workspace or the Super Admin
+      // (#U1000) may execute. The per-workspace scoping then lives in
+      // db.purgeWorkspaceRecords: every category mutates only the JSON document
+      // whose primary key is input.workspaceId (the structural deletion runs the
+      // owner-only deleteWorkspaceIfOwner path), so records of any other
+      // workspace are provably untouched.
+      const isSuperAdmin = isSuperAdminActor(ctx.user, ENV.ownerOpenId);
+      if (!isSuperAdmin) {
+        const owned = await db.getWorkspaceById(input.workspaceId);
+        if (!owned || owned.ownerUserId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Only the verified property owner or the Super Admin (#U1000) can purge records" });
+      }
+      try {
+        return await db.purgeWorkspaceRecords({ id: ctx.user.id, name: ctx.user.name }, input.workspaceId, input.categories, input.challenge);
+      } catch (error) {
+        if (error instanceof Error && error.message === "workspace-not-found") throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+        if (error instanceof Error && error.message === "purge-challenge-not-matched") throw new TRPCError({ code: "BAD_REQUEST", message: "The typing challenge did not match. Type \"تصفير\" for records, or \"حذف\" to delete the workspace." });
+        if (error instanceof Error && error.message === "purge-nothing-selected") throw new TRPCError({ code: "BAD_REQUEST", message: "Select at least one record category to purge" });
+        if (error instanceof Error && error.message === "owner-must-keep-one") throw new TRPCError({ code: "BAD_REQUEST", message: "An account must keep at least one owned workspace" });
+        if (error instanceof Error && error.message === "owner-required") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can delete a workspace" });
+        if (error instanceof Error && error.message === "workspace-data-invalid") throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Stored workspace data is invalid" });
+        throw error;
+      }
+    }),
   }),
   featureControl: router({
     global: router({
       list: protectedProcedure.query(() => db.listGlobalFeatureFlags()),
       update: adminProcedure.input(z.object({ flag: z.enum(GLOBAL_FEATURE_FLAG_KEYS), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
         await db.updateGlobalFeatureFlag({ flag: input.flag, enabled: input.enabled, actorUserId: ctx.user.id });
-        await db.createSuperAdminAudit({ actorUserId: ctx.user.id, action: "feature-flag-updated", targetWorkspaceId: null, targetMemberId: null, details: JSON.stringify({ flag: input.flag, enabled: input.enabled }) });
+        try {
+          await db.createSuperAdminAudit({ actorUserId: ctx.user.id, action: "feature-flag-updated", targetWorkspaceId: null, targetMemberId: null, details: JSON.stringify({ flag: input.flag, enabled: input.enabled }) });
+        } catch (error) {
+          console.warn("[FeatureControl] Audit journal write failed; flag state already persisted:", error);
+        }
         return { success: true as const };
       }),
     }),
@@ -343,9 +416,11 @@ export const appRouter = router({
     pendingDeletionCount: adminProcedure.query(async () => db.getPendingDeletionCount()),
     removedAccounts: adminProcedure.input(z.object({ limit: z.number().int().positive().max(250).default(100) })).query(async ({ input }) => db.listRemovedAccounts(input.limit)),
     previewPurge: adminProcedure.input(z.object({ contact: z.string().trim().min(1) })).query(async ({ input }) => {
+      if (await db.findImmutableRootByContact(input.contact)) throwRootImmunity();
       return db.previewPurgeByContact(input.contact);
     }),
     purgeUserByContact: adminProcedure.input(z.object({ contact: z.string().trim().min(1), typedConfirmation: z.string().trim().min(1) })).mutation(async ({ ctx, input }) => {
+      if (await db.findImmutableRootByContact(input.contact)) throwRootImmunity();
       return db.purgeUserByContact(ctx.user.id, input.contact, input.typedConfirmation);
     }),
     featureFlags: router({
@@ -388,6 +463,7 @@ export const appRouter = router({
       return { simulationOnly: true as const, workspace: detail.workspace, role: input.role, permissions, memberCount: detail.members.filter((member) => member.status === "active").length };
     }),
     assignMembership: adminProcedure.input(z.object({ confirmation: masterConfirmation, workspaceId: z.number().int().positive(), userId: z.number().int().positive(), displayName: z.string().trim().min(2).max(255), phone: z.string().trim().min(2).max(32), role: z.enum(["admin", "staff", "caretaker", "guest"]), permissions: workspacePermissionsSchema, status: z.enum(["active", "disabled"]) })).mutation(async ({ ctx, input }) => {
+      if (await db.isImmutableRootUserId(input.userId)) throwRootImmunity();
       return db.assignMasterWorkspaceMembership({ ...input, actorUserId: ctx.user.id });
     }),
     createRecoveryPoint: adminProcedure.input(z.object({ confirmation: masterConfirmation, workspaceId: z.number().int().positive(), reason: z.string().trim().min(3).max(80) })).mutation(async ({ ctx, input }) => {
@@ -459,6 +535,34 @@ export const appRouter = router({
       status: adminProcedure.query(() => db.getQaSandboxStatus()),
       seed: adminProcedure.mutation(({ ctx }) => db.seedQaSandbox(ctx.user.id)),
       preview: adminProcedure.input(z.object({ actor: z.enum(["super-admin", "owner", "staff", "guest"]), workspaceId: z.number().int().positive() })).mutation(({ ctx, input }) => db.previewQaSandbox({ actorUserId: ctx.user.id, ...input })),
+    }),
+  }),
+  systemDiagnostics: router({
+    healthCheck: adminProcedure.query(async () => {
+      const [database, expiredSessions] = await Promise.all([db.pingDatabase(), db.countExpiredSessions()]);
+      const authOnline = Boolean(ENV.oAuthServerUrl || ENV.ownerOpenId || ENV.cookieSecret);
+      return {
+        serverTime: new Date(),
+        database: { status: database.ok ? "online" : "offline", latencyMs: database.latencyMs },
+        auth: authOnline ? "online" : "degraded",
+        backgroundJobs: { scheduled: true, expiredSessions },
+      };
+    }),
+    errors: adminProcedure.query(async () => db.listUnresolvedSystemErrors()),
+    resolveError: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
+      if (!(await db.resolveSystemError(input.id))) throw new TRPCError({ code: "NOT_FOUND", message: "Error record not found" });
+      return { success: true as const, id: input.id };
+    }),
+    diagnoseUser: adminProcedure.input(z.object({ query: z.string().trim().min(1).max(120) })).query(async ({ input }) => {
+      const report = await db.getUserDiagnosticRecord(input.query);
+      if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "No account found for this identifier" });
+      return report;
+    }),
+    forceLogout: adminProcedure.input(z.object({ userId: z.number().int().positive() })).mutation(async ({ input }) => {
+      const user = await db.getUserById(input.userId);
+      if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      const revokedSessions = await db.revokeUserSessions(user.openId);
+      return { success: true as const, revokedSessions };
     }),
   }),
   advancedTools: router({

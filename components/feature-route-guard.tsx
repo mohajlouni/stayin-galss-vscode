@@ -4,7 +4,6 @@ import { StyleSheet, Text, View } from "react-native";
 
 import { RipplePressable } from "@/components/ripple-pressable";
 import { useColors } from "@/hooks/use-colors";
-import { useDemoMode } from "@/lib/demo-mode";
 import { useGlobalFeatureFlags } from "@/lib/feature-flags";
 import { FEATURE_ROUTE_GUARD_MAP } from "@/shared/feature-flags";
 
@@ -13,13 +12,12 @@ export function FeatureRouteGuard() {
   const pathname = usePathname();
   const router = useRouter();
   const colors = useColors();
-  const { isDemo } = useDemoMode();
   const global = useGlobalFeatureFlags();
 
   const blockedKey = pathname
     ? FEATURE_ROUTE_GUARD_MAP[pathname] ?? Object.entries(FEATURE_ROUTE_GUARD_MAP).find(([route]) => pathname.startsWith(`${route}/`))?.[1]
     : undefined;
-  const blocked = !isDemo && !!blockedKey && global[blockedKey] === false;
+  const blocked = !!blockedKey && global[blockedKey] === false;
 
   if (!blocked) return null;
 

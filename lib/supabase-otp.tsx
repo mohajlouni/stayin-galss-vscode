@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { checkIdentityStatus, checkPendingDeletion, exchangeSupabaseOtp, type PendingDeletionInfo } from "@/lib/_core/api";
+import { checkIdentityStatus, checkPendingDeletion, exchangeSupabaseOtp, type LoginDestination, type PendingDeletionInfo } from "@/lib/_core/api";
 import { useAuthSession } from "@/lib/auth-session";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import {
@@ -158,7 +158,7 @@ export async function verifyEmailOtp(input: { email: string; token: string; refr
 }
 
 export type SignInWithPasswordResult =
-  | { ok: true; email: string }
+  | { ok: true; email: string; destination?: LoginDestination }
   | { ok: false; error: AuthError; pendingDeletion?: PendingDeletionInfo | null };
 
 /**
@@ -188,7 +188,7 @@ export async function signInSuperAdmin(input: { identifier: string; password: st
 
   await input.refresh();
   const identifier = classifyIdentifier(input.identifier);
-  return { ok: true, email: identifier.kind === "email" && identifier.email ? identifier.email : SUPER_ADMIN_EMAIL };
+  return { ok: true, email: identifier.kind === "email" && identifier.email ? identifier.email : SUPER_ADMIN_EMAIL, destination: result.destination };
 }
 
 /**
@@ -233,9 +233,11 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
     return { ok: false, error: code };
   }
 
+  let passwordDestination: LoginDestination | undefined;
   try {
     const otpResult = await exchangeSupabaseOtp({ supabaseAccessToken: data.session.access_token, name: email, mode: "signin", provider: "password" });
     lastPendingDeletion = otpResult.pendingDeletion ?? null;
+    passwordDestination = otpResult.destination;
   } catch (err) {
     console.error("[Login Error] Session bridge failed", err);
     const code = classifyAuthError(err);
@@ -244,7 +246,7 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
   }
 
   await input.refresh();
-  return { ok: true, email };
+  return { ok: true, email, destination: passwordDestination };
 }
 
 /**
@@ -410,7 +412,7 @@ export async function activateEmailSignup(input: { email: string; token: string;
 }
 
 export type SocialSignInResult =
-  | { ok: true }
+  | { ok: true; destination?: LoginDestination }
   | { ok: false; error: AuthError };
 
 /**
@@ -450,9 +452,11 @@ export async function socialSignIn(input: { provider: "google" | "apple"; refres
   const captured = await sessionPromise;
   if (!captured || !captured.accessToken || !captured.email) return { ok: false, error: "unknown" };
 
+  let socialDestination: LoginDestination | undefined;
   try {
     const otpResult = await exchangeSupabaseOtp({ supabaseAccessToken: captured.accessToken, name: captured.email, mode: "signin", provider: input.provider });
     lastPendingDeletion = otpResult.pendingDeletion ?? null;
+    socialDestination = otpResult.destination;
   } catch (err) {
     console.error("[Login Error] Social session bridge failed", err);
     const code = classifyAuthError(err);
@@ -461,7 +465,7 @@ export async function socialSignIn(input: { provider: "google" | "apple"; refres
   }
 
   await input.refresh();
-  return { ok: true };
+  return { ok: true, destination: socialDestination };
 }
 
 /** 5-minute (300s) countdown clock driving the "Resend code" affordance. */

@@ -23,6 +23,7 @@ const fallbackDestinations = {
   "/(tabs)/bookings": { ar: "الحجوزات", en: "Bookings" },
   "/(tabs)/reports": { ar: "التقارير", en: "Reports" },
   "/chalet-management": { ar: "إدارة الوحدات", en: "Property management" },
+  "/properties-hub": { ar: "منشآتي (دليل المنشآت)", en: "Properties" },
 } as const;
 
 /** A consistent, RTL-aware return action for independent application screens. */

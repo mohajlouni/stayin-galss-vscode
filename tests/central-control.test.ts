@@ -89,6 +89,58 @@ describe("central control — feature & operational unit master card", () => {
     expect(screen).toContain("برامج الولاء والنقاط والكاش باك");
   });
 
+  it("hosts the super-admin global kill-switch as a standalone master blackout panel gated to #U1000", () => {
+    const panel = source("app/admin/master-blackout.tsx");
+    expect(panel).toContain("لوحة الحجب المركزي للإدارة العليا");
+    expect(panel).toContain("الحجب المركزي يتجاوز تفضيلات الملاك ويُطبق فورًا في كل المنشآت والوحدات.");
+    expect(panel).toContain("تأكيد الحجب المركزي");
+    expect(panel).toContain("تعطيل الميزة");
+    expect(panel).toContain("محجوبة — مركزيًا");
+    expect(panel).toContain("هذه اللوحة مخصصة لمدير النظام فقط");
+    expect(panel).toContain("isSuperAdmin");
+    expect(panel).toContain("SUPER_ADMIN_USER_CODE");
+    expect(panel).toContain("#U${SUPER_ADMIN_USER_CODE}");
+    expect(panel).toContain("GLOBAL_FEATURE_FLAG_KEYS.map");
+    expect(panel).toContain('trpc.featureControl.global.update');
+    expect(panel).toContain('"feature-flag-updated"');
+  });
+
+  it("labels all 13 global kills in Arabic inside the standalone blackout panel", () => {
+    const panel = source("app/admin/master-blackout.tsx");
+    expect(panel).toContain("الصيانة والوقاية والأصول");
+    expect(panel).toContain("مركز الإشعارات العام");
+    expect(panel).toContain("برامج الولاء وقاعدة العملاء والقائمة السوداء");
+    expect(panel).toContain("لوحة القمر والتقويم الهجري");
+    expect(panel).toContain("قاعدة العملاء وسجل القائمة السوداء");
+    expect(panel).toContain("الأتمتة ومتابعة الطقس");
+    expect(panel).toContain("إجراءات تسجيل وصول الضيف (Check-in)");
+    expect(panel).toContain("شاشة التنظيف والفحص الميداني");
+    expect(panel).toContain("شاشة الأدوات المتقدمة وحالات الطوارئ");
+    expect(panel).toContain("وحدة العقود والإقرارات الإلكترونية");
+    expect(panel).toContain("محرك الفواتير وسندات القبض");
+    expect(panel).toContain("تكامل محادثات واتساب الآلية");
+    expect(panel).toContain("شاشة تدقيق سجل العمليات والأمان (Audit Log)");
+  });
+
+  it("routes an unverifiable session to a fresh login instead of a dead-end locked admin card", () => {
+    const master = source("app/admin/master-control.tsx");
+    const directory = source("app/admin/workspaces-directory.tsx");
+    const component = source("components/admin-session-expired.tsx");
+    expect(master).toContain('overview.error?.data?.code === "UNAUTHORIZED"');
+    expect(master).toContain("<AdminSessionExpired />");
+    expect(directory).toContain("<AdminSessionExpired />");
+    expect(component).toContain('router.replace("/auth/login")');
+    expect(component).toContain("أعد تسجيل الدخول لفتح أدوات الإدارة العليا.");
+    expect(component).toContain("removeSessionToken");
+    expect(component).toContain("clearUserInfo");
+  });
+
+  it("keeps the explicit locked card for a genuinely non-super-admin session", () => {
+    const master = source("app/admin/master-control.tsx");
+    expect(master).toContain("هذه اللوحة مخصصة لمدير النظام فقط");
+    expect(master).toContain('overview.error?.data?.code === "UNAUTHORIZED"');
+  });
+
   it("blocks direct access to killed screens with a protected route guard mounted at the root", () => {
     const guard = source("components/feature-route-guard.tsx");
     const layout = source("app/_layout.tsx");
@@ -111,6 +163,14 @@ describe("central control — feature & operational unit master card", () => {
     expect(master).toContain("مركز التحكم في الميزات");
     expect(master).toContain("فتح مركز التحكم في الميزات");
     expect(master).toContain('router.push("/feature-control"');
+  });
+
+  it("links the super-admin blackout panel from the admin master control gateway", () => {
+    const master = source("app/admin/master-control.tsx");
+    expect(master).toContain("🔒 إدارة الحجب المركزي والتعليق الشامل للوحدات");
+    expect(master).toContain('router.push("/admin/master-blackout"');
+    expect(master).toContain("#U1000");
+    expect(master).toContain("colors.error");
   });
 
   it("respects kills inside settings and home widgets", () => {

@@ -70,15 +70,16 @@ describe("master control security boundaries", () => {
     expect(panel).toContain("auditTarget(item)");
   });
 
-  it("supports reversible facility switching, protected global directory search, tabbed tools, and actor-labelled audit cards", () => {
+  it("preselects workspace operational tools via a protected query parameter while the global directory search lives on its own page, with tabbed tools and actor-labelled audit cards", () => {
     const router = source("server/routers.ts");
     const db = source("server/db.ts");
     const panel = source("app/admin/master-control.tsx");
+    const directoryPage = source("app/admin/workspaces-directory.tsx");
     expect(router).toContain("directory: adminProcedure");
     expect(db).toContain("searchMasterWorkspaceDirectory");
     expect(db).toContain("actorName: users.name");
-    expect(panel).toContain("current === id ? null : id");
-    expect(panel).toContain("masterControl.directory.useQuery");
+    expect(panel).toContain("useLocalSearchParams");
+    expect(directoryPage).toContain("masterControl.directory.useQuery");
     expect(panel).toContain('const TABS = ["ledger", "members", "system"]');
     expect(panel).toContain("item.actorName");
     expect(panel).toContain("tabLabel(tab)");

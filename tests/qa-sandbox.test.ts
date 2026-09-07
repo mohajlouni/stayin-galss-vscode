@@ -34,9 +34,9 @@ describe("QA sandbox and shared-staff isolation", () => {
   });
 
   it("reuses the existing membership selector for real multi-facility routing", () => {
-    const selector = source("app/workspace-select.tsx");
+    const selector = source("app/workspace-hub.tsx");
     const store = source("lib/booking-store.tsx");
-    expect(selector).toContain('memberships.length > 1 ? "اختر المنشأة للعمل"');
+    expect(selector).toContain('workspaceCount > 1 ? "اختر المنشأة للعمل"');
     expect(selector).toContain("trpc.workspace.select.useMutation");
     expect(store).toContain("${STORAGE_KEY}:workspace-${activeWorkspaceId}");
     expect(store).toContain("trpc.workspace.data.useQuery");

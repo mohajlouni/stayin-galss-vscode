@@ -13,8 +13,8 @@ import { useBookings } from "@/lib/booking-store";
 import { useAuthSession } from "@/lib/auth-session";
 import { useI18n } from "@/lib/i18n";
 import { useInternetAvailability } from "@/lib/network-status";
-import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
+import { isSuperAdminUser } from "@/lib/super-admin";
 import { useWorkspaceFeatureFlags, type FeatureFlagKey } from "@/lib/feature-flags";
 
 type MenuRoute =
@@ -25,7 +25,7 @@ type MenuRoute =
   | "/chalet-management"
   | "/properties-hub"
   | "/user-management"
-  | "/workspace-select"
+  | "/workspace-hub"
   | "/whatsapp-templates"
   | "/profile"
   | "/admin/master-control"
@@ -74,7 +74,6 @@ export default function MoreScreen() {
   const { isRTL, language, t } = useI18n();
   const { isAuthenticated, isManager, isOwner, isSuperAdmin, can, isCaretaker, activeWorkspaceId } = useWorkspaceAccess();
   const { currentUser, activePropertyGroup } = useAuthSession();
-  const masterControl = trpc.masterControl.overview.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const internetAvailability = useInternetAvailability();
   const [syncRefreshing, setSyncRefreshing] = useState(false);
   const align = isRTL ? "right" : "left";
@@ -134,8 +133,8 @@ export default function MoreScreen() {
     ...(can("view_audit_logs") && flags.audit_logs ? [{ title: language === "ar" ? "سجل إجراءات النظام" : "System activity log", description: language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions", icon: "history" as const, route: "/audit-log" as const }] : []),
     ...((isOwner || isSuperAdmin) && flags.advanced_tools ? [{ title: language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery", description: language === "ar" ? "نقل الحجز وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN", icon: "health-and-safety" as const, route: "/settings/advanced-tools" as const }] : []),
     ...((isOwner || isSuperAdmin) && flags.master_control ? [{ title: language === "ar" ? "مركز التحكم في الميزات" : "Feature control center", description: language === "ar" ? "تفعيل وتعطيل الشاشات والأدوات في النظام بضغطة زر واحدة" : "Toggle screens and tools with one press", icon: "tune" as const, route: "/feature-control" as const }] : []),
-    ...(masterControl.data && flags.master_control ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
-  ], [isManager, isOwner, isSuperAdmin, language, can, masterControl.data, flags.audit_logs, flags.advanced_tools, flags.master_control]);
+    ...((isSuperAdmin && flags.master_control) ? [{ title: language === "ar" ? "مركز الإدارة العليا" : "Master control", description: language === "ar" ? "محاكاة الأدوار والاسترداد وسجل الحماية" : "Role simulation, recovery, and security audit", icon: "admin-panel-settings" as const, route: "/admin/master-control" as const }] : []),
+  ], [isManager, isOwner, isSuperAdmin, language, can, flags.audit_logs, flags.advanced_tools, flags.master_control]);
 
   const communicationItems: MenuEntry[] = useMemo(() => [
     ...(isManager && flags.whatsapp_templates ? [{ title: language === "ar" ? "قوالب رسائل الواتساب" : "WhatsApp message templates", description: language === "ar" ? "تخصيص القوالب والرسائل الذكية" : "Customize templates and smart messages", icon: "chat" as const, route: "/whatsapp-templates" as const }] : []),
@@ -148,10 +147,26 @@ export default function MoreScreen() {
 
   const suggestion: MenuEntry = { title: language === "ar" ? "مركز الاقتراحات والمساعدة" : "Suggestions & help center", description: language === "ar" ? "شارك فكرة أو اطلب مساعدة لتطوير تجربتك" : "Share an idea or ask for help", icon: "lightbulb-outline", route: "/suggestions" };
 
+  // Profile sub-row label depends on the user identity:
+  // - Super Admin (#U1000): full system administration scope, or "معاينة: <name>"
+  //   while a specific property is actively selected for review.
+  // - Regular owners / staff: the active property name, or a prompt to pick one.
+  // Clicking the row always opens the workspace switcher hub — never /onboarding.
+  const isSuperAdminUserAccount = isSuperAdminUser(currentUser);
+  const activeGroupName = activePropertyGroup?.name ?? null;
+  const workspaceBadgeLabel = isSuperAdminUserAccount
+    ? (language === "ar" ? "وضع مدير النظام" : "System admin mode")
+    : (language === "ar" ? "المنشأة النشطة" : "Active property");
+  const workspaceSubLabel = isSuperAdminUserAccount
+    ? activeGroupName
+      ? (language === "ar" ? `معاينة: ${activeGroupName}` : `Preview: ${activeGroupName}`)
+      : (language === "ar" ? "إدارة النظام بالكامل (الكل)" : "Full system administration (All)")
+    : (activeGroupName ?? (language === "ar" ? "اضغط لاختيار منشأة للعمل" : "Tap to choose a workspace"));
+
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}>
     <ScrollView style={{ flex: 1, minHeight: 0, backgroundColor: "transparent" }} contentContainerStyle={[styles.content, { backgroundColor: "transparent" }]} showsVerticalScrollIndicator={false}>
       <CompactScreenHeader title={t("more")} icon="more-horiz" plain showDateTime={false} />
-      {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => router.push("/workspace-select")} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="business" size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{language === "ar" ? "المنشأة النشطة" : "Active property group"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{activePropertyGroup?.name ?? (language === "ar" ? "غير محدد" : "Not set")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.muted} /></Pressable></BentoGlassCard> : null}
+      {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => (isSuperAdminUserAccount && !activeGroupName ? router.push("/admin/master-control") : router.push("/workspace-hub"))} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={isSuperAdminUserAccount ? "admin-panel-settings" : "business"} size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{workspaceBadgeLabel}</Text><View style={[styles.workspaceBadgeValue, { flexDirection: row }]}>{isSuperAdminUserAccount ? <View style={[styles.superAdminChip, { backgroundColor: colors.primary + "14", borderColor: colors.primary + "55" }]}><MaterialIcons name="shield" size={10} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سوبر أدمن" : "Super Admin"}</Text></View> : null}<Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{workspaceSubLabel}</Text></View></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.muted} /></Pressable></BentoGlassCard> : null}
 
       {showPropertyOps && propertyOpsItems.length ? <MenuSection title={language === "ar" ? "المنشأة والعمليات" : "Property & operations"} items={propertyOpsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
       {showFinance && financeItems.length ? <MenuSection title={language === "ar" ? "المالية والمدفوعات" : "Finance & payments"} items={financeItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
@@ -191,6 +206,8 @@ const styles = StyleSheet.create({
   profileAvatar: { width: 58, height: 58, borderRadius: 18, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   profileImage: { width: "100%", height: "100%" },
   workspaceBadge: { minHeight: 47, borderRadius: 16, paddingHorizontal: 11, alignItems: "center", gap: 8 },
+  workspaceBadgeValue: { marginTop: 4, alignItems: "center", gap: 6 },
+  superAdminChip: { flexDirection: "row", alignItems: "center", gap: 3, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, borderWidth: StyleSheet.hairlineWidth },
   section: { marginTop: 18 },
   sectionTitle: { fontSize: 14, lineHeight: 22, fontWeight: "900", marginBottom: 7 },
   group: { borderRadius: 22, overflow: "hidden" },

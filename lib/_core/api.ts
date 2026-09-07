@@ -16,6 +16,8 @@ export type AuthenticatedUser = {
   lastSignedIn: string;
 };
 
+export type LoginDestination = "admin" | "restore" | "onboarding" | "dashboard" | "selector";
+
 export type PendingDeletionInfo = {
   scheduledFor: string;
   requestedAt: string;
@@ -123,8 +125,8 @@ export async function getMe(): Promise<AuthenticatedUser | null> {
  * Stores the pair exactly like the OAuth/local login paths so routing, tRPC
  * headers, and workspace access keep working unchanged.
  */
-export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; name?: string | null; mode?: "signin" | "signup"; provider?: string | null }): Promise<{ pendingDeletion?: PendingDeletionInfo | null }> {
-  const result = await apiCall<{ app_session_id: string; user: AuthenticatedUser | null; pendingDeletion?: PendingDeletionInfo | null }>("/api/auth/supabase-otp", {
+export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; name?: string | null; mode?: "signin" | "signup"; provider?: string | null }): Promise<{ pendingDeletion?: PendingDeletionInfo | null; destination?: LoginDestination }> {
+  const result = await apiCall<{ app_session_id: string; user: AuthenticatedUser | null; pendingDeletion?: PendingDeletionInfo | null; destination?: LoginDestination }>("/api/auth/supabase-otp", {
     method: "POST",
     body: JSON.stringify({
       supabaseAccessToken: input.supabaseAccessToken,
@@ -150,7 +152,7 @@ export async function exchangeSupabaseOtp(input: { supabaseAccessToken: string; 
       lastSignedIn: new Date(result.user.lastSignedIn),
     });
   }
-  return { pendingDeletion: result.pendingDeletion ?? null };
+  return { pendingDeletion: result.pendingDeletion ?? null, destination: result.destination };
 }
 
 /**
@@ -218,7 +220,7 @@ export async function checkIdentityStatus(email: string): Promise<{ registered: 
  * `super_admin`) are persisted to secure storage, and native session restore
  * accepts it without a server round-trip.
  */
-export async function exchangeSuperAdminLogin(input: { identifier: string; password: string }): Promise<{ ok: boolean; error?: string; local?: boolean }> {
+export async function exchangeSuperAdminLogin(input: { identifier: string; password: string }): Promise<{ ok: boolean; error?: string; local?: boolean; destination?: LoginDestination }> {
   const baseUrl = getApiBaseUrl();
   const url = baseUrl ? `${baseUrl}/api/auth/super-admin-login` : "/api/auth/super-admin-login";
   try {
@@ -239,7 +241,7 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
       }
       return { ok: false, error: message };
     }
-    const result = await response.json() as { app_session_id: string; user: AuthenticatedUser | null };
+    const result = await response.json() as { app_session_id: string; user: AuthenticatedUser | null; destination?: LoginDestination };
     await Auth.setSessionToken(result.app_session_id);
     if (result.user) {
       await Auth.setUserInfo({
@@ -256,7 +258,7 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
         lastSignedIn: new Date(result.user.lastSignedIn),
       });
     }
-    return { ok: true };
+    return { ok: true, destination: result.destination };
   } catch (err) {
     console.error("[CRITICAL LOGIN ERROR] /api/auth/super-admin-login network failure", err);
     // Local bypass: only for the canonical Super Admin master credential.
@@ -276,7 +278,7 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
           isSuperAdmin: true,
           lastSignedIn: new Date(),
         });
-        return { ok: true, local: true };
+        return { ok: true, local: true, destination: "admin" };
       } catch (localErr) {
         console.error("[CRITICAL LOGIN ERROR] local bypass persist failed", localErr);
         return { ok: false, error: localErr instanceof Error ? localErr.message : String(localErr) };

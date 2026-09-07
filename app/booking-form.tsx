@@ -11,7 +11,8 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, activeStaffFloatAccounts, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
+import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, activeStaffFloatAccounts, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, reservedPeriodColorKeyForShift, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
+import { isBookingDateMaintenanceBlocked } from "@/lib/maintenance-blocks";
 import { hasBookingConflict } from "@/services/availabilityService";
 import { configuredBookingPrice } from "@/services/pricingService";
 import { useBookings } from "@/lib/booking-store";
@@ -40,7 +41,7 @@ function localPhoneDigits(value: string, country: CountryDialingCode) { return v
 
 export default function BookingForm() {
   const { id, mode, extend, waitlistId, date: presetDate, bookingType: presetBookingType, shiftId: presetShiftId, chaletId: presetChaletId, copyFromId } = useLocalSearchParams<{ id?: string; mode?: "waitlist"; extend?: "true"; waitlistId?: string; date?: string; bookingType?: BookingType; shiftId?: string; chaletId?: string; copyFromId?: string }>();
-  const { bookings, waitlist, chalets, settings, specialPriceRules, hydrated, customers, addBooking, updateBooking, addWaitlist, promoteWaitlist, replaceConflictsAndSave } = useBookings();
+  const { bookings, waitlist, chalets, settings, specialPriceRules, hydrated, customers, addBooking, updateBooking, addWaitlist, promoteWaitlist, replaceConflictsAndSave, maintenanceTasks } = useBookings();
   const { selectedChaletId } = useChaletScope();
   const { t, language } = useI18n();
   const { triggerHaptic, formatDate, formatHijriDate, formatTime, showHijriDate } = useAppPreferences();
@@ -297,6 +298,11 @@ export default function BookingForm() {
     if (!existing && isBookingPeriodEndedToday(draft, clock)) return Alert.alert(language === "ar" ? "انتهت الفترة اليوم" : "Period has ended", language === "ar" ? "انتهى وقت هذه الفترة اليوم؛ اختر فترة لاحقة أو تاريخ الغد." : "This period has ended today. Choose a later period or tomorrow.");
     if (isInvalidTimeOrder(draft)) return Alert.alert(language === "ar" ? "وقت غير صحيح" : "Invalid time", language === "ar" ? "وقت الخروج يجب أن يكون بعد وقت الدخول." : "End time must be after start time.");
     if (isWaitlistMode) return saveToWaitlist();
+    if (chaletId) {
+      const periodKey = selectedShift ? reservedPeriodColorKeyForShift(selectedShift) : "overnight";
+      const blockedOnStart = isBookingDateMaintenanceBlocked(maintenanceTasks ?? [], startDate, chaletId, multiDayRange || daysCount(startDate, endDate) > 1 ? "full_day" : periodKey);
+      if (blockedOnStart) return Alert.alert(language === "ar" ? "وحدة محجوزة للصيانة" : "Unit under maintenance", language === "ar" ? "توجد صيانة مجدولة لهذه الوحدة في هذا الموعد ولا يمكن الحجز عليها الآن." : "This unit has scheduled maintenance at that time, so it cannot be booked right now.");
+    }
     if (!conflicts.length) return saveConfirmed();
     setConflictDecision("options");
   };

@@ -25,17 +25,16 @@ describe("multi-tenant identity foundation", () => {
   it("exposes safe routing, tenant selection, and tenant-scoped workspace endpoints", () => {
     const database = projectFile("server/db.ts");
     const router = projectFile("server/routers.ts");
-    const gate = projectFile("app/workspace-gate.tsx");
-    const selector = projectFile("app/workspace-select.tsx");
+    const hub = projectFile("app/workspace-hub.tsx");
     const bookingStore = projectFile("lib/booking-store.tsx");
     expect(database).toContain("getWorkspaceRouting");
     expect(database).toContain("setActiveWorkspace");
     expect(router).toContain("routing: protectedProcedure");
     expect(router).toContain("select: protectedProcedure");
     expect(router).toContain("create: protectedProcedure");
-    expect(gate).toContain("<Redirect");
-    expect(gate).toContain('"/auth/select-workspace"');
-    expect(selector).toContain("selectWorkspace.mutateAsync");
+    expect(hub).toContain("<Redirect");
+    expect(hub).toContain('router.replace("/(tabs)")');
+    expect(hub).toContain("selectWorkspace.mutateAsync");
     expect(bookingStore).toContain("scopedStorageKey");
     expect(bookingStore).toContain("canSyncWorkspace");
   });

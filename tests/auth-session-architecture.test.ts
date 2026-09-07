@@ -6,8 +6,7 @@ const session = readFileSync(resolve(process.cwd(), "lib/auth-session.tsx"), "ut
 const login = readFileSync(resolve(process.cwd(), "app/auth/login.tsx"), "utf8");
 const authScreen = readFileSync(resolve(process.cwd(), "components/unified-auth-screen.tsx"), "utf8");
 const root = readFileSync(resolve(process.cwd(), "app/_layout.tsx"), "utf8");
-const gate = readFileSync(resolve(process.cwd(), "app/workspace-gate.tsx"), "utf8");
-const selector = readFileSync(resolve(process.cwd(), "app/auth/select-workspace.tsx"), "utf8");
+const hub = readFileSync(resolve(process.cwd(), "app/workspace-hub.tsx"), "utf8");
 const workspaceAccess = readFileSync(resolve(process.cwd(), "lib/workspace-access.ts"), "utf8");
 const routeAccessGate = readFileSync(resolve(process.cwd(), "components/route-access-gate.tsx"), "utf8");
 
@@ -44,8 +43,11 @@ describe("StayIn authentication and multi-tenant session foundation", () => {
     expect(routeAccessGate).toContain("PUBLIC_ROUTE_PREFIXES");
     expect(routeAccessGate).toContain('<Redirect href="/auth/login" />');
     expect(routeAccessGate).not.toContain("router.replace(");
-    expect(gate).toContain('href={routing.data?.destination === "dashboard" ? "/(tabs)" : "/auth/select-workspace"}');
-    expect(selector).toContain('export { default } from "../workspace-select"');
+    expect(hub).toContain('if (!isAuthenticated) return <Redirect href="/auth/login" />');
+    expect(hub).toContain('routing.data?.destination === "restore"');
+    expect(hub).toContain('router.replace("/(tabs)")');
+    expect(hub).toContain("trpc.workspace.select.useMutation");
+    expect(hub).toContain("trpc.workspace.create.useMutation");
   });
 
   it("shares one session source between routing and workspace access after logout", () => {
@@ -55,7 +57,7 @@ describe("StayIn authentication and multi-tenant session foundation", () => {
     expect(workspaceAccess).toContain("const { currentUser, isAuthenticated, loading, refresh } = useAuthSession()");
     expect(workspaceAccess).toContain("GUEST_PERMISSIONS");
     expect(workspaceAccess).toContain("const permissions = !isAuthenticated");
-    expect(gate).toContain('if (!isAuthenticated) return <Redirect href="/auth/login" />');
-    expect(gate).toContain("if (!loading && !routing.isLoading)");
+    expect(hub).toContain('if (!isAuthenticated) return <Redirect href="/auth/login" />');
+    expect(hub).toContain("if (isAuthenticated && !loading && !routing.isLoading");
   });
 });

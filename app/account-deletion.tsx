@@ -8,13 +8,14 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import { useAuthSession } from "@/lib/auth-session";
+import { isSuperAdminUser } from "@/lib/super-admin";
 import * as Auth from "@/lib/_core/auth";
 import { trpc } from "@/lib/trpc";
 
 export default function AccountDeletionScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
-  const { logout } = useAuthSession();
+  const { logout, currentUser } = useAuthSession();
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const status = trpc.accountDeletion.status.useQuery(undefined, { retry: false });
@@ -95,7 +96,7 @@ export default function AccountDeletionScreen() {
           <Text style={{ color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: 3, textAlign: align }}>{language === "ar" ? "لا يُحذف شيء فورًا. يسجل الطلب، ويهدد حسابك وتعطيله فورًا لمهلة 14 يومًا تبدأ من الآن، ويمكنك استرجاعه عبر البريد أو البصمة قبل انتهائها." : "Nothing is deleted immediately. The request disables your account now for a 14-day grace period that starts immediately; you can recover it via email or biometrics before it ends."}</Text>
         </View>
       </View>
-      {status.isLoading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 36 }} /> : pending ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.warning + "78" }]}>
+      {isSuperAdminUser(currentUser) ? <View style={[styles.locked, { backgroundColor: colors.surface, borderColor: colors.primary + "66" }]}><View style={[styles.lockedIcon, { backgroundColor: colors.primary + "16" }]}><MaterialIcons name="gpp-good" size={30} color={colors.primary} /></View><Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900", textAlign: align }}>حساب السوبر أدمن الأساسي محصّن</Text><Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: 6, textAlign: align }}>هذا الحساب (#U1000) محمي بحصانة نظام كاملة ولا يمكن طلب حذفه أو تعطيله من هذه الشاشة.</Text><Pressable onPress={() => router.replace("/admin/master-control")} style={({ pressed }) => [styles.lockedButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="admin-panel-settings" size={19} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900" }}>{language === "ar" ? "مركز الإدارة العليا" : "Master Control Center"}</Text></Pressable></View> : status.isLoading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 36 }} /> : pending ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.warning + "78" }]}>
         <Text style={{ color: colors.warning, fontWeight: "900", textAlign: align }}>{language === "ar" ? "طلب الحذف قيد المراجعة" : "Deletion request pending"}</Text>
         <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19, marginTop: 8, textAlign: align }}>{language === "ar" ? `موعد المراجعة المحدد: ${formatDate(status.data?.scheduledFor)}.` : `Scheduled review date: ${formatDate(status.data?.scheduledFor)}.`}</Text>
         <Pressable disabled={cancel.isPending} onPress={cancelRequest} style={({ pressed }) => [styles.cancel, { borderColor: colors.primary, flexDirection: row, opacity: pressed || cancel.isPending ? 0.6 : 1 }]}><MaterialIcons name="undo" size={19} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900" }}>{language === "ar" ? "إلغاء طلب الحذف والاحتفاظ بالحساب" : "Cancel request and keep account"}</Text></Pressable>
@@ -115,4 +116,5 @@ export default function AccountDeletionScreen() {
     </ScrollView>
   </ScreenContainer>;
 }
-const styles = StyleSheet.create({ content: { flexGrow: 1, padding: 16, paddingBottom: 42, gap: 14 }, warning: { borderWidth: 1, borderRadius: 17, padding: 13, flexDirection: "row", gap: 10, marginTop: 2 }, flex: { flex: 1, minWidth: 0 }, card: { borderWidth: 1, borderRadius: 20, padding: 15 }, bullet: { gap: 8, marginTop: 12, alignItems: "flex-start" }, label: { marginTop: 17, fontSize: 12, fontWeight: "900" }, reason: { minHeight: 90, borderWidth: 1, borderRadius: 13, padding: 11, marginTop: 7, fontSize: 13, textAlignVertical: "top" }, confirmation: { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, marginTop: 7, fontSize: 14, writingDirection: "ltr" }, delete: { minHeight: 52, borderRadius: 14, marginTop: 18, alignItems: "center", justifyContent: "center", gap: 8 }, cancel: { minHeight: 48, borderWidth: 1, borderRadius: 13, marginTop: 17, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }, feedback: { minHeight: 46, borderWidth: 1, borderRadius: 13, marginTop: 12, padding: 10, alignItems: "center", gap: 8 } });
+const styles = StyleSheet.create({ content: { flexGrow: 1, padding: 16, paddingBottom: 42, gap: 14 }, warning: { borderWidth: 1, borderRadius: 17, padding: 13, flexDirection: "row", gap: 10, marginTop: 2 }, flex: { flex: 1, minWidth: 0 }, card: { borderWidth: 1, borderRadius: 20, padding: 15 }, bullet: { gap: 8, marginTop: 12, alignItems: "flex-start" }, label: { marginTop: 17, fontSize: 12, fontWeight: "900" }, reason: { minHeight: 90, borderWidth: 1, borderRadius: 13, padding: 11, marginTop: 7, fontSize: 13, textAlignVertical: "top" }, confirmation: { minHeight: 50, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, marginTop: 7, fontSize: 14, writingDirection: "ltr" }, delete: { minHeight: 52, borderRadius: 14, marginTop: 18, alignItems: "center", justifyContent: "center", gap: 8 }, cancel: { minHeight: 48, borderWidth: 1, borderRadius: 13, marginTop: 17, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }, feedback: { minHeight: 46, borderWidth: 1, borderRadius: 13, marginTop: 12, padding: 10, alignItems: "center", gap: 8 },
+  locked: { borderWidth: 1, borderRadius: 20, paddingVertical: 22, paddingHorizontal: 18, alignItems: "center" }, lockedIcon: { width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center" }, lockedButton: { minHeight: 46, borderRadius: 13, marginTop: 16, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 } });

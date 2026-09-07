@@ -4,12 +4,12 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
+import { CalendarDateField } from "@/components/calendar-date-picker";
 import { useColors } from "@/hooks/use-colors";
-import { localDateISO, type Asset, type AssetCondition, type MaintenanceFrequency, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
+import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, MAINTENANCE_PAYMENT_SOURCES, maintenanceAuditActionLabel, maintenancePaymentSourceLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePaymentSource, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
-import { addDays } from "@/lib/booking-model";
 import { useI18n } from "@/lib/i18n";
-import { assetConditionLabel, isMaintenanceDueToday, isMaintenanceOverdue, isMaintenanceUpcoming, MAINTENANCE_FREQUENCIES, maintenanceFrequencyLabel, maintenanceStats, maintenanceTaskStatusLabel } from "@/lib/maintenance";
+import { assetConditionLabel, isMaintenanceDueToday, isMaintenanceOverdue, isMaintenanceUpcoming, MAINTENANCE_FREQUENCIES, maintenanceFrequencyLabel, maintenanceStats, nextMaintenanceDueDate } from "@/lib/maintenance";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 
@@ -27,33 +27,136 @@ const ASSET_CONDITION_OPTIONS: { id: AssetCondition; icon: "verified" | "check-c
   { id: "needs_service", icon: "warning" },
 ];
 
-type TaskDraft = { id?: string; title: string; chaletId: string; chaletName?: string; frequency: MaintenanceFrequency; nextDueDate: string; note?: string; cost?: string; customIntervalDays?: string };
-type AssetDraft = { id?: string; name: string; chaletId: string; chaletName?: string; category: string; condition: AssetCondition; serialNumber?: string; purchaseCost?: string };
+const BLOCK_PERIOD_OPTIONS: { id: MaintenanceBlockPeriod; label: [string, string] }[] = [
+  { id: "full_day", label: ["يوم كامل", "Full day"] },
+  { id: "morning", label: ["صباحي (M)", "Morning (M)"] },
+  { id: "evening", label: ["مسائي (N)", "Evening (N)"] },
+  { id: "overnight", label: ["مبيت / سهرة", "Overnight"] },
+];
+
+const MAINTENANCE_PRESETS: { title: string; frequency: MaintenanceFrequency; icon: "pool" | "ac-unit" | "yard" | "water-drop" }[] = [
+  { title: "كلورة وفلترة المسبح", frequency: "weekly", icon: "pool" },
+  { title: "تنظيف فلاتر المكيفات", frequency: "monthly", icon: "ac-unit" },
+  { title: "صيانة وقص الحديقة", frequency: "biweekly", icon: "yard" },
+  { title: "فحص المضخات والبويلر", frequency: "monthly", icon: "water-drop" },
+];
+
+/** فلاتر تكرار الصيانة: يومية / أسبوعية / شهرية / أخرى (كل أسبوعين وفترة مخصصة). */
+const CADENCE_FILTERS: { id: "all" | "daily" | "weekly" | "monthly" | "other"; label: [string, string]; icon: "done-all" | "today" | "view-week" | "calendar-month" | "schedule" }[] = [
+  { id: "all", label: ["كافة الفترات", "All periods"], icon: "done-all" },
+  { id: "daily", label: ["يومية", "Daily"], icon: "today" },
+  { id: "weekly", label: ["أسبوعية", "Weekly"], icon: "view-week" },
+  { id: "monthly", label: ["شهرية", "Monthly"], icon: "calendar-month" },
+  { id: "other", label: ["أخرى / موسمية", "Other / Seasonal"], icon: "schedule" },
+];
+
+const matchesCadenceFilter = (frequency: MaintenanceFrequency, cadence: "all" | "daily" | "weekly" | "monthly" | "other") => cadence === "all" ? true : cadence === "other" ? frequency === "biweekly" || frequency === "custom" || frequency === "once" : frequency === cadence;
+
+/** أسماء أيام الأسبوع حسب فهرس getDay (0 = الأحد). */
+const ROLLER_WEEKDAYS: { ar: string[]; en: string[] } = { ar: ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
+/** مدى الشريط الزمني: اليوم / الأيام السبعة القادمة / الثلاثين القادمة / الكل / فترة مخصصة. */
+type RollerRange = { kind: "today" | "7" | "30" | "all" | "custom"; start?: string; end?: string };
+const ROLLER_RANGE_OPTIONS: { id: "today" | "7" | "30" | "all"; label: [string, string] }[] = [
+  { id: "today", label: ["اليوم", "Today"] },
+  { id: "7", label: ["خلال 7 أيام", "Next 7 days"] },
+  { id: "30", label: ["خلال 30 يوماً", "Next 30 days"] },
+  { id: "all", label: ["الكل", "All"] },
+];
+/** يبني قائمة تواريخ متسلسلة ضمن [start..end] مع سقف أمان ضد الأفق الضخم. */
+const buildDateRange = (start: string, end: string, cap = 120) => {
+  const list: string[] = [];
+  let cursor = start;
+  let guard = 0;
+  while (cursor <= end && guard < cap && cursor) {
+    list.push(cursor);
+    cursor = addDays(cursor, 1);
+    guard += 1;
+  }
+  return list;
+};
+
+type TaskDraft = { id?: string; title: string; unitIds: string[]; allUnits: boolean; chaletName?: string; frequency: MaintenanceFrequency; nextDueDate: string; note?: string; cost?: string; customIntervalDays?: string; blockBooking?: boolean; blockPeriod?: MaintenanceBlockPeriod };
+type AssetDraft = { id?: string; name: string; unitIds: string[]; chaletName?: string; category: string; condition: AssetCondition; serialNumber?: string; purchaseCost?: string };
+/** خيار منفّذ المهمة في نافذة الإتمام: المستخدم الحالي، عهدة موظف/حارس، أو حارس الوحدة. */
+type PerformerOption = { id: string; name: string; role: MaintenancePerformerRole };
+type CompletionDraft = { task: MaintenanceTask; performerId: string; actualCost: string; paymentSource: MaintenancePaymentSource; postExpense: boolean; scheduleNext: boolean; notes: string };
 
 export default function MaintenanceDashboard() {
-  const { maintenanceTasks, assets, chalets, saveMaintenanceTask, completeMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
+  const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
   const { isRTL, language } = useI18n();
   const { triggerHaptic, formatDate } = useAppPreferences();
-  const { can, user } = useWorkspaceAccess();
+  const { can, isManager, role, user } = useWorkspaceAccess();
   const colors = useColors();
-  const [tab, setTab] = useState<"tasks" | "assets">("tasks");
+  const [tab, setTab] = useState<"active" | "archive" | "assets">("active");
   const [taskSheet, setTaskSheet] = useState<{ mode: "create" | "edit"; draft: TaskDraft } | null>(null);
   const [assetSheet, setAssetSheet] = useState<{ mode: "create" | "edit"; draft: AssetDraft } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState<{ kind: "complete" | "delete-task" | "delete-asset"; id: string } | null>(null);
+  const [busy, setBusy] = useState<{ kind: "complete" | "start" | "cancel" | "delete-task" | "delete-asset"; id: string } | null>(null);
+  const [completion, setCompletion] = useState<CompletionDraft | null>(null);
+  const [performerMenuOpen, setPerformerMenuOpen] = useState(false);
+  const [auditFor, setAuditFor] = useState<string | null>(null);
+  const [cancelFor, setCancelFor] = useState<MaintenanceTask | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [unitFilter, setUnitFilter] = useState<string | null>(null);
+  const [cadenceFilter, setCadenceFilter] = useState<"all" | "daily" | "weekly" | "monthly" | "other">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [unitMenuOpen, setUnitMenuOpen] = useState(false);
+  const [cadenceMenuOpen, setCadenceMenuOpen] = useState(false);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [horizon, setHorizon] = useState<"today" | "7" | "30" | "all">("all");
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const [rollerRange, setRollerRange] = useState<RollerRange>({ kind: "all" });
+  const [rangeDraft, setRangeDraft] = useState<{ start: string; end: string }>({ start: "", end: "" });
+  const [rangePanelOpen, setRangePanelOpen] = useState(false);
+  const rollerRef = useRef<ScrollView | null>(null);
+  const rollerOffsetRef = useRef(0);
   const inFlight = useRef(false);
 
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const canManage = can("edit_bookings");
+  // بدء التنفيذ والإلغاء والإتمام متاحة للمالك/الموظفين والحراس بالتساوي؛ الإضافة والتحرير والحذف للمديرين/الموظفين فقط.
+  const canOperate = canManage || role === "caretaker";
+  const hasPositiveActualCost = (draft: CompletionDraft) => draft.actualCost.trim() !== "" && Number(draft.actualCost) > 0;
+  const completionNextDate = completion ? nextMaintenanceDueDate(completion.task) : "";
   const now = useMemo(() => Date.now(), []);
+  const todayISO = localDateISO(new Date(now));
   const stats = useMemo(() => maintenanceStats(maintenanceTasks ?? [], now), [maintenanceTasks, now]);
+
+  /** عدد المهام النشطة (غير المغلقة) لكل تاريخ استحقاق تُستخدم لنقاط الشريط الزمني. */
+  const dueTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    (maintenanceTasks ?? []).forEach((task) => { if (task.status === "scheduled" || task.status === "in_progress") counts.set(task.nextDueDate, (counts.get(task.nextDueDate) ?? 0) + 1); });
+    return counts;
+  }, [maintenanceTasks]);
+
+  /** تواريخ الشريط الزمني الأفقي حسب الأفق المختار؛ الوضع "all" يغطي من أقدم استحقاق متأخر حتى أبعد استحقاق قادم. */
+  /** الشريط الزمني مستمر دائماً: من اليوم حتى +59 يوماً (60 خلية). لا يتقلص أبداً عند تبديل أفاق الفلترة. */
+  const timelineDates = useMemo(() => {
+    const horizonEnd = rollerRange.kind === "custom" && rollerRange.end ? rollerRange.end : addDays(todayISO, 59);
+    return buildDateRange(todayISO, horizonEnd >= todayISO ? horizonEnd : addDays(todayISO, 59), 120);
+  }, [rollerRange, todayISO]);
+
+  /** قائمة المنفّذين المحتملين: المستخدم الحالي ثم عهدة الموظفين ثم حرّاس الوحدات، بدون تكرار. */
+  const performerOptions = useMemo<PerformerOption[]>(() => {
+    const options: PerformerOption[] = [];
+    if (user?.name?.trim()) options.push({ id: "current", name: user.name.trim(), role: role === "owner" || role === "admin" ? "owner" : role === "caretaker" ? "guard" : "staff" });
+    activeStaffFloatAccounts(settings).forEach((account) => {
+      const name = account.memberName?.trim() || account.label.trim();
+      if (name) options.push({ id: account.memberUserId != null ? `staff-${account.memberUserId}` : `staff-${account.id}`, name, role: "staff" });
+    });
+    const guardians = new Set<string>();
+    chalets.forEach((chalet) => { const name = chalet.guardianName?.trim(); if (name) guardians.add(name); });
+    guardians.forEach((name) => options.push({ id: `guard-${name}`, name, role: "guard" }));
+    const seen = new Set<string>();
+    return options.filter((option) => { if (seen.has(option.name)) return false; seen.add(option.name); return true; });
+  }, [user, role, settings, chalets]);
 
   const sortedTasks = useMemo(() => {
     const tasks = [...(maintenanceTasks ?? [])];
     tasks.sort((left, right) => {
-      const leftDone = left.status === "completed" ? 1 : 0;
-      const rightDone = right.status === "completed" ? 1 : 0;
+      const leftDone = left.status === "completed" || left.status === "cancelled" ? 1 : 0;
+      const rightDone = right.status === "completed" || right.status === "cancelled" ? 1 : 0;
       if (leftDone !== rightDone) return leftDone - rightDone;
       const leftDays = isMaintenanceOverdue(left, now) ? -1 : isMaintenanceDueToday(left, now) ? 0 : isMaintenanceUpcoming(left, now) ? 1 : 2;
       const rightDays = isMaintenanceOverdue(right, now) ? -1 : isMaintenanceDueToday(right, now) ? 0 : isMaintenanceUpcoming(right, now) ? 1 : 2;
@@ -62,49 +165,157 @@ export default function MaintenanceDashboard() {
     return tasks;
   }, [maintenanceTasks, now]);
 
+  const activeTasks = useMemo(() => sortedTasks.filter((task) => task.status === "scheduled" || task.status === "in_progress"), [sortedTasks]);
+  const archiveTasks = useMemo(() => sortedTasks.filter((task) => task.status === "completed" || task.status === "cancelled"), [sortedTasks]);
+  const searchActive = searchQuery.trim() !== "";
+
+  const visibleTasks = useMemo(() => {
+    const pool = tab === "archive" ? archiveTasks : activeTasks;
+    const query = searchQuery.trim().toLowerCase();
+    const matchesDate = (task: MaintenanceTask) => {
+      if (dateFilter !== null) return task.nextDueDate === dateFilter;
+      if (horizon === "today") return task.nextDueDate === todayISO;
+      if (horizon === "7") return task.nextDueDate >= todayISO && task.nextDueDate <= addDays(todayISO, 6);
+      if (horizon === "30") return task.nextDueDate >= todayISO && task.nextDueDate <= addDays(todayISO, 29);
+      return true;
+    };
+    return pool.filter((task) => matchesDate(task) && (unitFilter === null || task.targetScope === "all_units" || task.chaletId === unitFilter) && matchesCadenceFilter(task.frequency, cadenceFilter) && (query === "" || task.title.toLowerCase().includes(query) || (task.assetName ?? "").toLowerCase().includes(query)));
+  }, [tab, activeTasks, archiveTasks, dateFilter, horizon, todayISO, unitFilter, cadenceFilter, searchQuery]);
+
+  const visibleAssets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return (assets ?? []).filter((asset) => (query === "" || asset.name.toLowerCase().includes(query)) && (unitFilter === null || asset.chaletId === unitFilter));
+  }, [assets, searchQuery, unitFilter]);
+
+  const switchTab = (next: "active" | "archive" | "assets") => { setTab(next); setMenuFor(null); setUnitMenuOpen(false); setCadenceMenuOpen(false); setDateFilter(null); setHorizon("all"); setRangePanelOpen(false); };
+
   const openCreateTask = () => {
     if (!canManage) return;
     triggerHaptic();
-    setTaskSheet({ mode: "create", draft: { title: "", chaletId: chalets[0]?.id ?? "", frequency: "monthly", nextDueDate: addDays(localDateISO(), 1), customIntervalDays: "30" } });
+    setTaskError(null);
+    setTaskSheet({ mode: "create", draft: { title: "", unitIds: [], allUnits: false, frequency: "once", nextDueDate: addDays(localDateISO(), 1), customIntervalDays: "30" } });
   };
   const openEditTaskSheet = (task: MaintenanceTask) => {
     if (!canManage) return;
+    if (task.status === "in_progress") {
+      Alert.alert(language === "ar" ? "لا يمكن تعديل المهمة" : "Cannot edit task", language === "ar" ? "لا يمكن تعديل تفاصيل مهمة بدأت بالفعل، يمكنك إتمامها أو إلغاؤها" : "Details of a task that already started cannot be edited; you can complete or cancel it.");
+      return;
+    }
     triggerHaptic();
-    setTaskSheet({ mode: "edit", draft: { id: task.id, title: task.title, chaletId: task.chaletId, chaletName: task.chaletName, frequency: task.frequency, nextDueDate: task.nextDueDate, note: task.note, cost: task.cost !== undefined ? String(task.cost) : "", customIntervalDays: task.customIntervalDays !== undefined ? String(task.customIntervalDays) : "" } });
+    setTaskError(null);
+    setTaskSheet({ mode: "edit", draft: { id: task.id, title: task.title, unitIds: task.targetScope === "all_units" ? chalets.map((chalet) => chalet.id) : (task.chaletId ? [task.chaletId] : []), allUnits: task.targetScope === "all_units", chaletName: task.chaletName, frequency: task.frequency, nextDueDate: task.nextDueDate, note: task.note, cost: task.cost !== undefined ? String(task.cost) : "", customIntervalDays: task.customIntervalDays !== undefined ? String(task.customIntervalDays) : "", blockBooking: task.blockBooking, blockPeriod: task.blockPeriod } });
   };
-  const closeTaskSheet = () => { if (!saving) setTaskSheet(null); };
+  const toggleTaskUnit = (id: string) => { if (!taskSheet) return; setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, unitIds: taskSheet.draft.unitIds.includes(id) ? taskSheet.draft.unitIds.filter((unitId) => unitId !== id) : [...taskSheet.draft.unitIds, id], allUnits: false } }); setTaskError(null); };
+  const toggleAllTaskUnits = () => { if (!taskSheet) return; setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, allUnits: !taskSheet.draft.allUnits, unitIds: !taskSheet.draft.allUnits ? chalets.map((chalet) => chalet.id) : [] } }); setTaskError(null); };
+  const closeTaskSheet = () => { if (!saving) { setTaskSheet(null); setTaskError(null); } };
 
   const saveTaskDraft = async () => {
     const sheet = taskSheet;
     if (!sheet || inFlight.current) return;
     const draft = sheet.draft;
-    if (!draft.title.trim() || !draft.chaletId || !/^\d{4}-\d{2}-\d{2}$/.test(draft.nextDueDate)) return;
+    if (!draft.title.trim()) { setTaskError(language === "ar" ? "يرجى كتابة عنوان المهمة قبل الحفظ" : "Please type the task title before saving"); return; }
+    if (!draft.allUnits && !draft.unitIds.length) { setTaskError(language === "ar" ? "يرجى اختيار شاليه واحد على الأقل أو تحديد كافة الوحدات" : "Please select at least one chalet or select all units"); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.nextDueDate)) return;
+    setTaskError(null);
     inFlight.current = true;
     setSaving(true);
     try {
-      const chalet = chalets.find((item) => item.id === draft.chaletId);
       const customIntervalDays = draft.frequency === "custom" ? Math.max(1, Math.round(Number(draft.customIntervalDays) || 0)) || 1 : undefined;
-      await saveMaintenanceTask({ id: draft.id, title: draft.title, chaletId: draft.chaletId, chaletName: chalet?.name ?? draft.chaletName, frequency: draft.frequency, nextDueDate: draft.nextDueDate, note: draft.note?.trim() || undefined, cost: draft.cost?.trim() ? Math.max(0, Number(draft.cost) || 0) : undefined, customIntervalDays, status: "pending" });
+      const isEdit = Boolean(draft.id);
+      const targets = draft.allUnits ? [undefined] : (isEdit ? (draft.unitIds[0] ? [draft.unitIds[0]] : [""]) : draft.unitIds);
+      for (const chaletId of targets) {
+        const resolved = chaletId ?? "";
+        const chalet = chalets.find((item) => item.id === resolved);
+        await saveMaintenanceTask({ id: isEdit ? draft.id : undefined, title: draft.title, chaletId: resolved || undefined, chaletName: resolved ? (chalet?.name ?? draft.chaletName) : undefined, targetScope: resolved ? undefined : "all_units", frequency: draft.frequency, nextDueDate: draft.nextDueDate, note: draft.note?.trim() || undefined, cost: draft.cost?.trim() ? Math.max(0, Number(draft.cost) || 0) : undefined, customIntervalDays, status: "scheduled", blockBooking: !draft.allUnits && draft.blockBooking === true, blockPeriod: !draft.allUnits && draft.blockBooking === true ? (draft.blockPeriod ?? "full_day") : undefined });
+      }
       setTaskSheet(null);
-    } catch {
-      Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
+      setTaskError(null);
+    } catch (error) {
+      if (error instanceof Error && error.message === "maintenance-block-collision") {
+        Alert.alert(language === "ar" ? "تعارض مع حجز" : "Booking collision", language === "ar" ? "يوجد حجز مؤكد مسبقاً للوحدة في هذا الموعد. يرجى نقل الحجز أو اختيار موعد آخر للصيانة." : "There is already a confirmed booking for this unit at that time. Please move the booking or pick a different maintenance date.");
+      } else {
+        Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
+      }
     } finally {
       setSaving(false);
       inFlight.current = false;
     }
   };
 
-  const completeTask = async (task: MaintenanceTask) => {
-    if (!canManage || busy) return;
-    setBusy({ kind: "complete", id: task.id });
+  const startTask = async (task: MaintenanceTask) => {
+    if (!canOperate || busy) return;
+    setBusy({ kind: "start", id: task.id });
     try {
       await triggerHaptic();
-      await completeMaintenanceTask(task.id, user?.name);
+      await startMaintenanceTask(task.id);
     } catch {
-      Alert.alert(language === "ar" ? "تعذر الإنجاز" : "Could not complete", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
+      Alert.alert(language === "ar" ? "تعذر بدء العمل" : "Could not start", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
     } finally {
       setBusy(null);
     }
+  };
+
+  const openCompletionModal = (task: MaintenanceTask) => {
+    if (!canOperate || busy) return;
+    triggerHaptic();
+    const currentPerformer = performerOptions.find((option) => option.id === "current");
+    setCompletion({ task, performerId: currentPerformer?.id ?? performerOptions[0]?.id ?? "", actualCost: task.actualCost !== undefined ? String(task.actualCost) : task.cost !== undefined ? String(task.cost) : "", paymentSource: "owner_account", postExpense: true, scheduleNext: task.frequency === "once" ? false : true, notes: "" });
+    setPerformerMenuOpen(false);
+  };
+
+  const submitCompletion = async () => {
+    if (!canOperate || busy || !completion) return;
+    const performer = performerOptions.find((option) => option.id === completion.performerId);
+    if (!performer) return;
+    setBusy({ kind: "complete", id: completion.task.id });
+    try {
+      await triggerHaptic();
+      await completeMaintenanceTaskWithExpense(completion.task.id, {
+        performedByName: performer.name,
+        performedByRole: performer.role,
+        actualCost: completion.actualCost.trim() ? Math.max(0, Number(completion.actualCost) || 0) : undefined,
+        paymentSource: completion.paymentSource,
+        completionNotes: completion.notes,
+        postExpense: completion.postExpense,
+        scheduleNext: completion.scheduleNext,
+      });
+      setCompletion(null);
+    } catch (error) {
+      if (error instanceof Error && error.message === "maintenance-already-completed") {
+        Alert.alert(language === "ar" ? "اكتملت مسبقًا" : "Already completed", language === "ar" ? "تم ترحيل هذه المهمة من قبل." : "This task was already completed and posted.");
+      } else {
+        Alert.alert(language === "ar" ? "تعذر الإنجاز والترحيل" : "Could not complete", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmCancel = async (task: MaintenanceTask, mode: "instance" | "series") => {
+    if (!canOperate || busy) return;
+    setCancelFor(null);
+    setBusy({ kind: "cancel", id: task.id });
+    try {
+      await triggerHaptic();
+      await cancelMaintenanceTask(task.id, mode);
+    } catch {
+      Alert.alert(language === "ar" ? "تعذر الإلغاء" : "Could not cancel", language === "ar" ? "حاول مرة أخرى." : "Please try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openCancelFlow = (task: MaintenanceTask) => {
+    if (!canOperate || busy) return;
+    triggerHaptic();
+    if (task.frequency === "once") {
+      Alert.alert(language === "ar" ? "إلغاء مهمة الصيانة" : "Cancel maintenance task", language === "ar" ? "هل أنت متأكد من إلغاء هذه المهمة؟\nسيتم إتاحة الوحدة للحجز في التقويم (يُحرَّر منع الصيانة تلقائيًا)." : `Are you sure you want to cancel this task?\nThe unit will be unblocked in the calendar automatically.`, [
+        { text: language === "ar" ? "تراجع" : "Back", style: "cancel" },
+        { text: language === "ar" ? "إلغاء المهمة" : "Cancel task", style: "destructive", onPress: () => void confirmCancel(task, "instance") },
+      ]);
+      return;
+    }
+    setCancelFor(task);
   };
 
   const removeTask = async (task: MaintenanceTask) => {
@@ -118,25 +329,31 @@ export default function MaintenanceDashboard() {
   const openCreateAsset = () => {
     if (!canManage) return;
     triggerHaptic();
-    setAssetSheet({ mode: "create", draft: { name: "", chaletId: chalets[0]?.id ?? "", category: "appliances", condition: "good" } });
+    setAssetSheet({ mode: "create", draft: { name: "", unitIds: chalets.map((chalet) => chalet.id), category: "appliances", condition: "good" } });
   };
   const openEditAssetSheet = (asset: Asset) => {
     if (!canManage) return;
     triggerHaptic();
-    setAssetSheet({ mode: "edit", draft: { id: asset.id, name: asset.name, chaletId: asset.chaletId, chaletName: asset.chaletName, category: asset.category, condition: asset.condition, serialNumber: asset.serialNumber, purchaseCost: asset.purchaseCost !== undefined ? String(asset.purchaseCost) : "" } });
+    setAssetSheet({ mode: "edit", draft: { id: asset.id, name: asset.name, unitIds: [asset.chaletId], chaletName: asset.chaletName, category: asset.category, condition: asset.condition, serialNumber: asset.serialNumber, purchaseCost: asset.purchaseCost !== undefined ? String(asset.purchaseCost) : "" } });
   };
+  const toggleAssetUnit = (id: string) => { if (!assetSheet) return; setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.includes(id) ? assetSheet.draft.unitIds.filter((unitId) => unitId !== id) : [...assetSheet.draft.unitIds, id] } }); };
+  const toggleAllAssetUnits = () => { if (!assetSheet) return; setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.length === chalets.length && chalets.length > 0 ? [] : chalets.map((chalet) => chalet.id) } }); };
   const closeAssetSheet = () => { if (!saving) setAssetSheet(null); };
 
   const saveAssetDraft = async () => {
     const sheet = assetSheet;
     if (!sheet || inFlight.current) return;
     const draft = sheet.draft;
-    if (!draft.name.trim() || !draft.chaletId) return;
+    if (!draft.name.trim() || !draft.unitIds.length) return;
     inFlight.current = true;
     setSaving(true);
     try {
-      const chalet = chalets.find((item) => item.id === draft.chaletId);
-      await saveAsset({ id: draft.id, name: draft.name, chaletId: draft.chaletId, chaletName: chalet?.name ?? draft.chaletName, category: draft.category, condition: draft.condition, serialNumber: draft.serialNumber?.trim() || undefined, purchaseCost: draft.purchaseCost?.trim() ? Math.max(0, Number(draft.purchaseCost) || 0) : undefined });
+      const isEdit = Boolean(draft.id);
+      const targets = isEdit ? [draft.unitIds[0]] : draft.unitIds;
+      for (const chaletId of targets) {
+        const chalet = chalets.find((item) => item.id === chaletId);
+        await saveAsset({ id: isEdit ? draft.id : undefined, name: draft.name, chaletId, chaletName: chalet?.name ?? draft.chaletName, category: draft.category, condition: draft.condition, serialNumber: draft.serialNumber?.trim() || undefined, purchaseCost: draft.purchaseCost?.trim() ? Math.max(0, Number(draft.purchaseCost) || 0) : undefined });
+      }
       setAssetSheet(null);
     } catch {
       Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
@@ -154,41 +371,177 @@ export default function MaintenanceDashboard() {
     ]);
   };
 
-  const dueBadge = (task: MaintenanceTask) => {
-    if (task.status === "completed") return { icon: "done-all" as const, color: colors.success, label: maintenanceTaskStatusLabel("completed", language) };
-    if (isMaintenanceOverdue(task, now)) return { icon: "new-releases" as const, color: colors.error, label: language === "ar" ? "متأخرة" : "Overdue" };
-    if (isMaintenanceDueToday(task, now)) return { icon: "today" as const, color: colors.warning, label: language === "ar" ? "مستحقة اليوم" : "Due today" };
-    if (isMaintenanceUpcoming(task, now)) return { icon: "schedule" as const, color: colors.primary, label: language === "ar" ? "قريبة" : "Upcoming" };
-    return { icon: "event" as const, color: colors.muted, label: language === "ar" ? "لاحقًا" : "Later" };
+  const cardTone = (task: MaintenanceTask) => {
+    if (task.status === "completed") return { icon: "done-all" as const, color: colors.success };
+    if (task.status === "cancelled") return { icon: "cancel" as const, color: colors.muted };
+    if (isMaintenanceOverdue(task, now)) return { icon: "new-releases" as const, color: colors.error };
+    if (isMaintenanceDueToday(task, now)) return { icon: "today" as const, color: colors.warning };
+    if (isMaintenanceUpcoming(task, now)) return { icon: "schedule" as const, color: colors.primary };
+    return { icon: "event" as const, color: colors.muted };
   };
 
+  const statusPillInfo = (status: MaintenanceTaskStatus) => status === "scheduled" ? { label: language === "ar" ? "مجدولة" : "Scheduled", color: colors.primary } : status === "in_progress" ? { label: language === "ar" ? "قيد التنفيذ" : "In progress", color: colors.warning } : status === "completed" ? { label: language === "ar" ? "مكتملة ومُرحّلة" : "Completed & posted", color: colors.success } : { label: language === "ar" ? "ملغاة" : "Cancelled", color: colors.muted };
+
+  /** شرح الجدولة الديناميكي الذي يظهر تحت خيارات الدورية في نافذة إنشاء المهمة. */
+  const frequencyHint = (frequency: MaintenanceFrequency) => ({ once: ["ستُنفذ هذه المهمة لمرة واحدة فقط دون تكرار تلقائي.", "This task will run only once without automatic recurrence."], daily: ["سيتكرر استحقاق هذه المهمة تلقائياً كل يوم للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur daily for the selected chalets once completed."], weekly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل أسبوع للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur weekly for the selected chalets once completed."], biweekly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل أسبوعين للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur every two weeks for the selected chalets once completed."], monthly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل شهر للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur monthly for the selected chalets once completed."], custom: ["سيتكرر استحقاق هذه المهمة تلقائياً وفق الفاصل المخصص للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur on the custom interval for the selected chalets once completed."] } as const)[frequency][language === "ar" ? 0 : 1];
+
   const statCard = (label: string, value: number, color: string, icon: "new-releases" | "today" | "schedule" | "done-all") => <View style={[styles.statCard, { backgroundColor: color + "12", borderColor: color + "55" }]}><MaterialIcons name={icon} size={15} color={color} /><Text style={{ color, fontSize: 21, fontWeight: "900", marginTop: 6 }}>{value}</Text><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "700" }}>{label}</Text></View>;
+
+  /** يضبط أفق الفلترة لقائمة المهام أدناه فقط؛ الشريط الزمني يبقى مستمراً دون تغيير. */
+  const selectHorizon = (id: "today" | "7" | "30" | "all") => {
+    setHorizon(id);
+    setDateFilter(null);
+    if (id === "all") setRollerRange({ kind: "all" });
+    if (id === "today" || id === "7") rollerRef.current?.scrollTo({ x: 0, animated: true });
+    setRangePanelOpen(false);
+  };
+  /** يمرر الشريط الزمني أفقياً بمقدار ثابت للتنقل السلس للأمام/الخلف. */
+  const nudgeRoller = (amount: number) => rollerRef.current?.scrollTo({ x: rollerOffsetRef.current + amount, animated: true });
+  const openRangePanel = () => {
+    if (!rangePanelOpen) setRangeDraft({ start: todayISO, end: addDays(todayISO, 29) });
+    setRangePanelOpen(!rangePanelOpen);
+  };
+  const applyCustomRange = () => {
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(rangeDraft.start) ? rangeDraft.start : "";
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(rangeDraft.end) ? rangeDraft.end : "";
+    if (start && end && start <= end) setRollerRange({ kind: "custom", start, end });
+    else if (start) setRollerRange({ kind: "custom", start, end: end >= start ? end : addDays(start, 29) });
+    else setRollerRange({ kind: "all" });
+    setRangePanelOpen(false);
+  };
 
   return <ScreenContainer edges={["top", "left", "right"]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
     <View style={[styles.header, { flexDirection: row }]}><ScreenBackButton fallbackHref="/(tabs)/more" /><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 24, fontWeight: "900", textAlign: align }}>{language === "ar" ? "الصيانة الوقائية" : "Preventive maintenance"}</Text><Text style={[styles.subtitle, { color: colors.muted, textAlign: align, marginTop: 3 }]}>{language === "ar" ? "جرد الأصول والجدولة الدورية ومتابعة الاستحقاق" : "Asset inventory, recurring schedules & due tracking"}</Text></View></View>
     <View style={[styles.statsRow, { flexDirection: row }]}>{statCard(language === "ar" ? "متأخرة" : "Overdue", stats.overdue, colors.error, "new-releases")}{statCard(language === "ar" ? "اليوم" : "Today", stats.dueToday, colors.warning, "today")}{statCard(language === "ar" ? "قريبة" : "Upcoming", stats.upcoming, colors.primary, "schedule")}{statCard(language === "ar" ? "مكتملة" : "Completed", stats.completed, colors.success, "done-all")}</View>
 
     <View style={[styles.tabRow, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}>
-      <Pressable accessibilityRole="button" onPress={() => setTab("tasks")} style={[styles.tab, { backgroundColor: tab === "tasks" ? colors.primary : "transparent" }]}><MaterialIcons name="build" size={16} color={tab === "tasks" ? "#FFFFFF" : colors.muted} /><Text style={{ color: tab === "tasks" ? "#FFFFFF" : colors.muted, fontSize: 12, fontWeight: "900" }}>{language === "ar" ? `المهام (${(maintenanceTasks ?? []).length})` : `Tasks (${(maintenanceTasks ?? []).length})`}</Text></Pressable>
-      <Pressable accessibilityRole="button" onPress={() => setTab("assets")} style={[styles.tab, { backgroundColor: tab === "assets" ? colors.primary : "transparent" }]}><MaterialIcons name="inventory" size={16} color={tab === "assets" ? "#FFFFFF" : colors.muted} /><Text style={{ color: tab === "assets" ? "#FFFFFF" : colors.muted, fontSize: 12, fontWeight: "900" }}>{language === "ar" ? `الأصول (${(assets ?? []).length})` : `Assets (${(assets ?? []).length})`}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => switchTab("assets")} style={[styles.tab, { backgroundColor: tab === "assets" ? colors.primary : "transparent" }]}><MaterialIcons name="inventory" size={15} color={tab === "assets" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "assets" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `الأصول (${(assets ?? []).length})` : `Assets (${(assets ?? []).length})`}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => switchTab("active")} style={[styles.tab, { backgroundColor: tab === "active" ? colors.primary : "transparent" }]}><MaterialIcons name="list-alt" size={15} color={tab === "active" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "active" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `المهام النشطة (${activeTasks.length})` : `Active (${activeTasks.length})`}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => switchTab("archive")} style={[styles.tab, { backgroundColor: tab === "archive" ? colors.primary : "transparent" }]}><MaterialIcons name="archive" size={15} color={tab === "archive" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "archive" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `المهام المكتملة (${stats.completed})` : `Completed (${stats.completed})`}</Text></Pressable>
     </View>
 
-    {tab === "tasks" ? <>
-      {sortedTasks.length ? sortedTasks.map((task) => {
-        const badge = dueBadge(task);
+    <View style={[styles.rollerWrap, { marginTop: 13, zIndex: rangePanelOpen ? 30 : 0 }]}>
+      <View style={[styles.rollerToolbar, { flexDirection: row }]}>
+        <View style={styles.rollerChips}>{ROLLER_RANGE_OPTIONS.map((option) => { const active = horizon === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.label[language === "ar" ? 0 : 1]} onPress={() => selectHorizon(option.id)} style={[styles.rollerRangeChip, { backgroundColor: active ? colors.primary + "1F" : colors.surface, borderColor: active ? colors.primary : colors.border }]}><Text style={{ color: active ? colors.primary : colors.muted, fontSize: 12, fontWeight: active ? "900" : "700" }}>{option.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
+        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary + "1F" : colors.surface, borderColor: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.border }]}><MaterialIcons name="date-range" size={14} color={rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.muted} /><Text style={{ color: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.muted, fontSize: 12, fontWeight: rangePanelOpen || rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable>
+          {rangePanelOpen ? <View style={[styles.rollerRangePanel, { backgroundColor: colors.surface, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+            <View style={[styles.rollerRangeField, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "من" : "From"} value={rangeDraft.start} onChange={(value) => setRangeDraft({ ...rangeDraft, start: value })} /></View>
+            <View style={[styles.rollerRangeField, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "إلى" : "To"} value={rangeDraft.end} onChange={(value) => setRangeDraft({ ...rangeDraft, end: value })} /></View>
+            <View style={[styles.rollerRangeActions, { flexDirection: row }]}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تطبيق الفترة" : "Apply range"} onPress={applyCustomRange} style={[styles.rollerAction, { backgroundColor: colors.primary, borderColor: colors.primary }]}><MaterialIcons name="check" size={15} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "تطبيق" : "Apply"}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setRangePanelOpen(false)} style={[styles.rollerActionGhost, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="close" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "إغلاق" : "Close"}</Text></Pressable></View>
+          </View> : null}
+        </View>
+      </View>
+      <View style={[styles.rollerScroller, { flexDirection: row }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={() => nudgeRoller(320)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
+          {timelineDates.map((date) => {
+            const singleSelected = dateFilter === date;
+            const inWindow = dateFilter === null && ((horizon === "today" && date === todayISO) || (horizon === "7" && date >= todayISO && date <= addDays(todayISO, 6)) || (horizon === "30" && date >= todayISO && date <= addDays(todayISO, 29)));
+            const selected = singleSelected || inWindow;
+            const isToday = date === todayISO;
+            const hasDue = dueTaskCounts.has(date);
+            const overdue = date < todayISO && hasDue;
+            const dot = hasDue ? (overdue ? colors.error : colors.warning) : null;
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(selected && singleSelected ? null : date)} style={[styles.rollerChip, { backgroundColor: selected ? colors.primary + "20" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border, borderWidth: selected ? 2 : 1 }, selected && { shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }]}>
+              <Text style={{ color: selected ? colors.primary : "#94A3B8", fontSize: 10, fontWeight: selected ? "800" : "500", textAlign: "center" }}>{ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()]}</Text>
+              <Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 14, fontWeight: selected ? "900" : "700", textAlign: "center" }}>{date.slice(8, 10)}</Text>
+              <View style={[styles.rollerDot, { backgroundColor: selected ? colors.primary : dot ?? "transparent" }]} />
+              {isToday && !selected ? <View style={[styles.rollerTodayBadge, { backgroundColor: colors.primary + "22" }]}><Text style={{ color: colors.primary, fontSize: 8, fontWeight: "900" }}>{language === "ar" ? "اليوم" : "Today"}</Text></View> : null}
+            </Pressable>;
+          })}
+        </ScrollView>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={() => nudgeRoller(-320)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+      </View>
+    </View>
+
+    <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen || rangePanelOpen ? 2 : 0 }]}>
+      <View style={[styles.searchWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}>
+        <MaterialIcons name="search" size={16} color={colors.muted} />
+        <TextInput accessibilityLabel={language === "ar" ? "بحث سريع" : "Quick search"} value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث سريع باسم المهمة أو الأصل..." : "Quick search by task or asset name..."} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
+        {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={16} color={colors.muted} /></Pressable> : null}
+      </View>
+      <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
+        {unitMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "كافة الوحدات" : "All units"} onPress={() => { setUnitFilter(null); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: unitFilter === null ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={unitFilter === null ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: unitFilter === null ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "كافة الوحدات" : "All units"}</Text></Pressable>
+          {chalets.map((chalet) => { const selected = unitFilter === chalet.id; return <Pressable key={chalet.id} accessibilityRole="button" accessibilityLabel={chalet.name} onPress={() => { setUnitFilter(selected ? null : chalet.id); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: selected ? colors.primary + "14" : "transparent", flexDirection: row }]}><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text></Pressable>; })}
+        </View> : null}
+      </View>
+      <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة دورية الصيانة" : "Recurrence list"} onPress={() => { setCadenceMenuOpen(!cadenceMenuOpen); setUnitMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="schedule" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{CADENCE_FILTERS.find((cadence) => cadence.id === cadenceFilter)?.label[language === "ar" ? 0 : 1] ?? (language === "ar" ? "كافة الفترات" : "All periods")}</Text><MaterialIcons name={cadenceMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
+        {cadenceMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+          {CADENCE_FILTERS.map((cadence) => { const selected = cadenceFilter === cadence.id; return <Pressable key={cadence.id} accessibilityRole="button" accessibilityLabel={cadence.label[language === "ar" ? 0 : 1]} onPress={() => { setCadenceFilter(selected ? "all" : cadence.id); setCadenceMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: selected ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name={cadence.icon} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{cadence.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}
+        </View> : null}
+      </View>
+    </View>
+
+    {unitMenuOpen || cadenceMenuOpen || rangePanelOpen || menuFor ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => { setUnitMenuOpen(false); setCadenceMenuOpen(false); setRangePanelOpen(false); setMenuFor(null); }} style={[StyleSheet.absoluteFill, styles.clickAway]} /> : null}
+
+    {tab === "active" ? <>
+      {visibleTasks.length ? visibleTasks.map((task) => {
+        const tone = cardTone(task);
+        const pill = statusPillInfo(task.status);
         const editing = busy?.kind === "complete" && busy.id === task.id;
-        return <Pressable key={task.id} accessibilityRole="button" accessibilityLabel={task.title} onPress={() => openEditTaskSheet(task)} disabled={!canManage || Boolean(busy)} style={({ pressed }) => [styles.card, { backgroundColor: colors.surface, borderColor: badge.color + "55", opacity: pressed ? 0.72 : 1 }]}>
-          <View style={[styles.taskIcon, { backgroundColor: badge.color + "18" }]}><MaterialIcons name={badge.icon} size={20} color={badge.color} /></View>
-          <View style={styles.flex}>
-            <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{task.title}</Text><View style={[styles.badgePill, { backgroundColor: badge.color + "18" }]}><Text style={{ color: badge.color, fontSize: 9, fontWeight: "900" }}>{badge.label}</Text></View></View>
-            <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{task.chaletName ?? "—"} · {maintenanceFrequencyLabel(task.frequency, language)}{task.assetName ? ` · ${task.assetName}` : ""}{task.status === "completed" && task.completedByName ? ` · ${task.completedByName}` : ""}</Text>
-            <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "استحقاق" : "Due"}: {formatDate(task.nextDueDate) ?? task.nextDueDate}{task.cost ? ` · ${task.cost} ${language === "ar" ? "د.أ" : "JOD"}` : ""}</Text>
+        const isClosed = task.status === "completed" || task.status === "cancelled";
+        const menuOpen = menuFor === task.id;
+        const posted = task.status === "completed" && Boolean(task.expenseId);
+        const allUnits = task.targetScope === "all_units";
+        const unitLabel = allUnits ? (language === "ar" ? "كافة الوحدات" : "All units") : task.chaletName ?? "—";
+        const dueColor = isMaintenanceOverdue(task, now) ? colors.error : isMaintenanceDueToday(task, now) ? colors.warning : colors.primary;
+        return <View key={task.id} style={[styles.taskCard, { backgroundColor: colors.surface, borderColor: tone.color + "55", zIndex: menuOpen ? 2 : 0 }]}>
+          {menuOpen ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق القائمة" : "Close menu"} onPress={() => setMenuFor(null)} style={StyleSheet.absoluteFill} /> : null}
+          <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
+            <View style={[styles.taskIcon, { backgroundColor: tone.color + "18" }]}><MaterialIcons name={tone.icon} size={20} color={tone.color} /></View>
+            <View style={styles.flex}>
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{task.title}</Text>{allUnits ? <View style={[styles.badgePill, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "تشمل كافة الوحدات" : "All units"}</Text></View> : null}{posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "#مصروف" : "#Expense"}</Text></View> : null}</View>
+              <View style={[styles.badgeRow, { flexDirection: row }]}>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="holiday-village" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{unitLabel}</Text></View>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="refresh" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{maintenanceFrequencyLabel(task.frequency, language)}</Text></View>
+                <View style={[styles.badgePill, { backgroundColor: dueColor + "18", borderColor: dueColor + "44" }]}><MaterialIcons name="event" size={11} color={dueColor} /><Text numberOfLines={1} style={{ color: dueColor, fontSize: 9, fontWeight: "800" }}>{language === "ar" ? "استحقاق:" : "Due:"} {formatDate(task.nextDueDate) ?? task.nextDueDate}</Text></View>
+                {posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18", borderColor: colors.success + "44" }]}><MaterialIcons name="receipt-long" size={11} color={colors.success} /><Text numberOfLines={1} style={{ color: colors.success, fontSize: 9, fontWeight: "800" }}>{language === "ar" ? "مُرحَّل للمصروفات" : "Expense posted"}</Text></View> : null}
+              </View>
+              {task.actualCost !== undefined || task.cost ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost ?? task.cost} {language === "ar" ? "د.أ" : "JOD"}{task.assetName ? ` · ${task.assetName}` : ""}</Text> : null}
+              {task.status === "completed" && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
+            </View>
+            <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
+              <View style={[styles.cardSideTop, { flexDirection: row }]}>
+                <View style={[styles.statusPill, { backgroundColor: pill.color + "18" }]}><Text style={{ color: pill.color, fontSize: 9, fontWeight: "900" }}>{pill.label}</Text></View>
+              </View>
+              {!isClosed && canOperate ? (task.status === "scheduled" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "بدء العمل" : "Start work"} disabled={Boolean(busy)} onPress={() => void startTask(task)} style={({ pressed }) => [styles.actionBtn, { backgroundColor: colors.primary, borderColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={busy?.kind === "start" && busy.id === task.id ? "hourglass-top" : "play-arrow"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{busy?.kind === "start" && busy.id === task.id ? (language === "ar" ? "جارٍ..." : "Starting...") : (language === "ar" ? "بدء العمل" : "Start work")}</Text></Pressable> : <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إتمام وإغلاق" : "Complete & close"} disabled={Boolean(busy)} onPress={() => openCompletionModal(task)} style={({ pressed }) => [styles.actionBtn, { backgroundColor: colors.success, borderColor: colors.success, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={editing ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{editing ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "إتمام وإغلاق" : "Complete & close")}</Text></Pressable>) : null}
+            </View>
+            <View style={[styles.menuAnchor, { alignSelf: "center" }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "خيارات المهمة" : "Task options"} onPress={() => { setMenuFor(menuOpen ? null : task.id); setUnitMenuOpen(false); setCadenceMenuOpen(false); }} style={({ pressed }) => [styles.moreBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={menuOpen ? "close" : "more-vert"} size={18} color={colors.muted} /></Pressable>
+              {menuOpen ? <View style={[styles.floatMenu, { left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+                {task.status === "scheduled" && canManage ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تعديل المهمة" : "Edit task"} onPress={() => { setMenuFor(null); openEditTaskSheet(task); }} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="edit" size={16} color={colors.primary} /><Text style={{ color: "#E2E8F0", fontSize: 12, fontWeight: "800", flex: 1, textAlign: align }}>{language === "ar" ? "تعديل المهمة" : "Edit task"}</Text></Pressable> : null}
+                {!isClosed && canOperate ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء المهمة" : "Cancel task"} onPress={() => { setMenuFor(null); void openCancelFlow(task); }} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="cancel" size={16} color={colors.error} /><Text style={{ color: colors.error, fontSize: 12, fontWeight: "800", flex: 1, textAlign: align }}>{language === "ar" ? "إلغاء المهمة" : "Cancel task"}</Text></Pressable> : null}
+                {isClosed && canManage ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف المهمة" : "Delete task"} onPress={() => { setMenuFor(null); void removeTask(task); }} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="delete-outline" size={16} color={colors.error} /><Text style={{ color: colors.error, fontSize: 12, fontWeight: "800", flex: 1, textAlign: align }}>{language === "ar" ? "حذف المهمة" : "Delete task"}</Text></Pressable> : null}
+                <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "عرض سجل التدقيق" : "View audit trail"} onPress={() => { setMenuFor(null); setAuditFor(task.id); }} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="history" size={16} color="#94A3B8" /><Text style={{ color: "#CBD5E1", fontSize: 12, fontWeight: "800", flex: 1, textAlign: align }}>{language === "ar" ? "عرض سجل التدقيق" : "View audit trail"}</Text></Pressable>
+              </View> : null}
+            </View>
           </View>
-          {task.status === "completed" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف المهمة" : "Delete task"} onPress={() => removeTask(task)} disabled={Boolean(busy)} style={({ pressed }) => [styles.iconDanger, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={18} color={colors.muted} /></Pressable> : canManage ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إنجاز المهمة" : "Mark complete"} onPress={() => void completeTask(task)} disabled={Boolean(busy)} style={({ pressed }) => [styles.completeButton, { backgroundColor: editing ? colors.muted : colors.success, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={editing ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /></Pressable> : null}
-        </Pressable>;
-      }) : <View style={styles.empty}><MaterialIcons name="handyman" size={38} color={colors.muted + "88"} /><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "800", marginTop: 12 }}>{language === "ar" ? "لا توجد مهام صيانة بعد" : "No maintenance tasks yet"}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4, textAlign: "center" }}>{language === "ar" ? "أنشئ مهمة دورية، وستظهر هنا عند استحقاقها مع تنبيه تلقائي." : "Create a recurring task; it will appear here when due with an automatic alert."}</Text></View>}
+        </View>;
+      }) : <View style={styles.empty}><MaterialIcons name="handyman" size={38} color={colors.muted + "88"} /><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "800", marginTop: 12, textAlign: "center" }}>{language === "ar" ? (searchActive ? "لا توجد نتائج مطابقة للبحث" : unitFilter !== null ? "لا توجد مهام صيانة لهذه الوحدة" : cadenceFilter !== "all" ? "لا توجد مهام صيانة مطابقة للتكرار المحدد" : "لا توجد مهام صيانة مجدولة لهذه المنشأة") : (searchActive ? "No results match your search" : unitFilter !== null ? "No maintenance tasks for this unit" : cadenceFilter !== "all" ? "No maintenance tasks match the selected recurrence" : "No scheduled maintenance tasks for this property")}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4, textAlign: "center" }}>{language === "ar" ? (searchActive ? "حاول تغيير كلمات البحث أو امسح الحقل لعرض كل المهام." : unitFilter !== null ? "اختر وحدة أخرى من شريط الفلترة." : cadenceFilter !== "all" ? "اختر كافة الفترات لرؤية كل المهام." : chalets.length ? "أنشئ مهمة دورية، وستظهر هنا عند استحقاقها مع تنبيه تلقائي." : "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل صيانة.") : (searchActive ? "Try different search terms or clear the field to show every task." : unitFilter !== null ? "Pick another unit from the filter bar." : cadenceFilter !== "all" ? "Select all periods to see every task." : chalets.length ? "Create a recurring task; it will appear here when due with an automatic alert." : "Add a unit to this property first to register maintenance.")}</Text>{canManage ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task"} onPress={openCreateTask} style={({ pressed }) => [styles.emptyCta, { borderColor: colors.primary + "55", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="add" size={16} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 13 }}>{language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task"}</Text></Pressable> : null}</View>}
+    </> : tab === "archive" ? <>
+      {visibleTasks.length ? visibleTasks.map((task) => {
+        const settled = task.status === "completed";
+        const posted = settled && Boolean(task.expenseId);
+        const allUnits = task.targetScope === "all_units";
+        const unitLabel = allUnits ? (language === "ar" ? "كافة الوحدات" : "All units") : task.chaletName ?? "—";
+        const settledDate = task.completedAt?.slice(0, 10) ?? task.lastCompletedDate ?? "";
+        return <View key={task.id} style={[styles.archiveCard, { backgroundColor: colors.surfaceMuted, borderColor: settled ? colors.success + "33" : colors.muted + "33" }]}>
+          <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
+            <View style={[styles.archiveIcon, { backgroundColor: (settled ? colors.success : colors.muted) + "1A" }]}><MaterialIcons name={settled ? "done-all" : "cancel"} size={18} color={settled ? colors.success : colors.muted} /></View>
+            <View style={styles.flex}>
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{task.title}</Text>{!settled ? <View style={[styles.badgePill, { backgroundColor: colors.muted + "18" }]}><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "ملغاة" : "Cancelled"}</Text></View> : posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سند صرف مرتبط" : "Receipt linked"}</Text></View> : null}</View>
+              <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{unitLabel} · {maintenanceFrequencyLabel(task.frequency, language)}{task.assetName ? ` · ${task.assetName}` : ""}</Text>
+              {settled && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
+              {settled && task.actualCost !== undefined ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost} {language === "ar" ? "د.أ" : "JOD"}{posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}</Text> : null}
+              {settledDate ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: {formatDate(settledDate) ?? settledDate}</Text> : null}
+            </View>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "سجل الإجراءات" : "Action log"} onPress={() => setAuditFor(task.id)} style={({ pressed }) => [styles.archiveLogBtn, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="history" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "800" }}>{language === "ar" ? "سجل الإجراءات" : "Action log"}</Text></Pressable>
+        </View>;
+      }) : <View style={styles.empty}><MaterialIcons name="archive" size={38} color={colors.muted + "88"} /><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "800", marginTop: 12, textAlign: "center" }}>{language === "ar" ? (searchActive ? "لا توجد نتائج مطابقة في الأرشيف للبحث" : unitFilter !== null || cadenceFilter !== "all" ? "لا توجد مهام مكتملة مطابقة للفلاتر" : "لا توجد مهام مكتملة في الأرشيف بعد") : (searchActive ? "No archived results match your search" : unitFilter !== null || cadenceFilter !== "all" ? "No completed tasks match the filters" : "No completed tasks in the archive yet")}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4, textAlign: "center" }}>{language === "ar" ? "عند إتمام مهمة من المهام النشطة، تُحفظ هنا مع سجل إجراءاتها وسند المصروف." : "Completing a task from the active list archives it here with its action log and receipt."}</Text></View>}
     </> : <>
-      {(assets ?? []).length ? (assets ?? []).map((asset) => {
+      {visibleAssets.length ? visibleAssets.map((asset) => {
         const condition = ASSET_CONDITION_OPTIONS.find((item) => item.id === asset.condition);
         const conditionColor = asset.condition === "needs_service" ? colors.error : asset.condition === "excellent" ? colors.success : colors.primary;
         return <Pressable key={asset.id} accessibilityRole="button" accessibilityLabel={asset.name} onPress={() => openEditAssetSheet(asset)} disabled={!canManage || Boolean(busy)} style={({ pressed }) => [styles.card, { backgroundColor: colors.surface, borderColor: asset.condition === "needs_service" ? colors.error + "66" : colors.border, opacity: pressed ? 0.72 : 1 }]}>
@@ -200,13 +553,13 @@ export default function MaintenanceDashboard() {
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف الأصل" : "Delete asset"} onPress={() => removeAsset(asset)} disabled={Boolean(busy)} style={({ pressed }) => [styles.iconDanger, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={18} color={colors.muted} /></Pressable>
         </Pressable>;
-      }) : <View style={styles.empty}><MaterialIcons name="inventory" size={38} color={colors.muted + "88"} /><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "800", marginTop: 12 }}>{language === "ar" ? "لا توجد أصول مسجلة" : "No assets recorded"}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4, textAlign: "center" }}>{language === "ar" ? "رصد الأصول يتيح متابعة حالتها وإنشاء مهام صيانة مرتبطة بها." : "Tracking assets lets you follow their condition and create linked maintenance tasks."}</Text></View>}
+      }) : <View style={styles.empty}><MaterialIcons name="inventory" size={38} color={colors.muted + "88"} /><Text style={{ color: colors.muted, fontSize: 13, fontWeight: "800", marginTop: 12, textAlign: "center" }}>{language === "ar" ? "لا توجد أصول مسجلة لهذه المنشأة حالياً" : "No assets registered for this property yet"}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 4, textAlign: "center" }}>{language === "ar" ? (chalets.length ? "رصد الأصول يتيح متابعة حالتها وإنشاء مهام صيانة مرتبطة بها." : "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل أصول.") : (chalets.length ? "Tracking assets lets you follow their condition and create linked maintenance tasks." : "Add a unit to this property first to register assets.")}</Text>{canManage ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إضافة أصل" : "Add asset"} onPress={openCreateAsset} style={({ pressed }) => [styles.emptyCta, { borderColor: colors.primary + "55", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="add" size={16} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 13 }}>{language === "ar" ? "إضافة أصل" : "Add asset"}</Text></Pressable> : null}</View>}
     </>}
 
-    {!canManage ? <View style={[styles.lockCard, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="lock-outline" size={16} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 11, marginLeft: 6, textAlign: align }}>{language === "ar" ? "عرض الجدولة متاح؛ الإضافة والإنجاز والحذف خاص بالمالك والمديرين." : "Schedule viewing is open; adding, completing, and deleting are owner/manager only."}</Text></View> : null}
+    {!canManage ? <View style={[styles.lockCard, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="lock-outline" size={16} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 11, marginLeft: 6, textAlign: align }}>{language === "ar" ? "عرض الجدولة متاح للجميع؛ إضافة وتحرير وحذف المهام للمالك والموظفين، بينما بدء التنفيذ والإلغاء والإتمام والترحيل متاح للمالك والموظفين والحراس." : "Schedule viewing is open to everyone; adding, editing, and deleting tasks are for owners/staff, while starting, cancelling, and completing with expense posting are open to owners, staff, and guards."}</Text></View> : null}
   </ScrollView>
 
-  {canManage ? <View style={[styles.dock, { backgroundColor: colors.background }]}><Pressable accessibilityRole="button" accessibilityLabel={tab === "tasks" ? (language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task") : (language === "ar" ? "إضافة أصل" : "Add asset")} onPress={tab === "tasks" ? openCreateTask : openCreateAsset} style={({ pressed }) => [styles.dockButton, { backgroundColor: colors.primary, opacity: pressed ? 0.78 : 1 }]}><MaterialIcons name={tab === "tasks" ? "build" : "inventory"} size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 14 }}>{tab === "tasks" ? (language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task") : (language === "ar" ? "إضافة أصل" : "Add asset")}</Text></Pressable></View> : null}
+  {canManage ? <View style={[styles.dock, { backgroundColor: colors.background }]}><Pressable accessibilityRole="button" accessibilityLabel={tab === "assets" ? (language === "ar" ? "إضافة أصل" : "Add asset") : (language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task")} onPress={tab === "assets" ? openCreateAsset : openCreateTask} style={({ pressed }) => [styles.dockButton, { backgroundColor: colors.primary, opacity: pressed ? 0.78 : 1 }]}><MaterialIcons name={tab === "assets" ? "inventory" : "build"} size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 14 }}>{tab === "assets" ? (language === "ar" ? "إضافة أصل" : "Add asset") : (language === "ar" ? "إضافة مهمة صيانة" : "Add maintenance task")}</Text></Pressable></View> : null}
 
   <Modal visible={Boolean(taskSheet)} transparent animationType="slide" onRequestClose={closeTaskSheet} statusBarTranslucent>
     {taskSheet ? <View style={styles.backdrop}>
@@ -214,20 +567,64 @@ export default function MaintenanceDashboard() {
       <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.sheetHeader, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.primary + "1A" }]}><MaterialIcons name="build" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align }}>{taskSheet.mode === "create" ? (language === "ar" ? "مهمة صيانة جديدة" : "New maintenance task") : (language === "ar" ? "تعديل المهمة" : "Edit task")}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={closeTaskSheet} disabled={saving} style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align }}>{language === "ar" ? "العنوان" : "Title"}</Text>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align }}>{language === "ar" ? "قوالب سريعة" : "Quick presets"}</Text>
+          <View style={[styles.chipWrap, { flexDirection: row }]}>{MAINTENANCE_PRESETS.map((preset) => <Pressable key={preset.title} accessibilityRole="button" accessibilityLabel={`${language === "ar" ? "تعبئة من القالب" : "Apply preset"}: ${preset.title}`} onPress={() => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, title: preset.title, frequency: preset.frequency, customIntervalDays: undefined } })} style={[styles.presetChip, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name={preset.icon} size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flexShrink: 1 }}>{preset.title}</Text></Pressable>)}</View>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "العنوان" : "Title"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "العنوان" : "Title"} value={taskSheet.draft.title} onChangeText={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, title: value } })} placeholder={language === "ar" ? "مثال: معالجة تفتفة المكيف الرئيسي" : "e.g. Service the main AC unit"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الوحدة" : "Property"}</Text>
-          <View style={[styles.chipWrap, { flexDirection: row }]}>{chalets.map((chalet) => { const selected = taskSheet.draft.chaletId === chalet.id; return <Pressable key={chalet.id} onPress={() => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, chaletId: chalet.id, chaletName: chalet.name } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{chalet.name}</Text></Pressable>; })}</View>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الوحدات المستهدفة" : "Target units"}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تحديد كافة الوحدات" : "Select all units"} onPress={toggleAllTaskUnits} style={[styles.checkRow, { backgroundColor: taskSheet.draft.allUnits ? colors.primary + "14" : colors.surfaceMuted, borderColor: taskSheet.draft.allUnits ? colors.primary : colors.border }]}><MaterialIcons name={taskSheet.draft.allUnits ? "check-box" : "check-box-outline-blank"} size={18} color={taskSheet.draft.allUnits ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: taskSheet.draft.allUnits ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "تحديد كافة الوحدات" : "Select all units"}</Text><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>{chalets.length}</Text></Pressable>
+          {chalets.map((chalet) => { const selected = taskSheet.draft.unitIds.includes(chalet.id); return <Pressable key={chalet.id} accessibilityRole="checkbox" accessibilityLabel={chalet.name} onPress={() => toggleTaskUnit(chalet.id)} style={[styles.checkRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "check-box" : "check-box-outline-blank"} size={18} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /></Pressable>; })}
+          {!chalets.length ? <View style={[styles.unitWarning, { backgroundColor: colors.warning + "14", borderColor: colors.warning + "55" }]}><MaterialIcons name="error-outline" size={17} color={colors.warning} /><Text style={{ color: colors.warning, fontSize: 12, fontWeight: "800", marginLeft: 7, flex: 1, textAlign: align }}>{language === "ar" ? "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل صيانة أو أصول" : "You must add a unit to this property before registering maintenance or assets."}</Text></View> : null}
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الدورية" : "Frequency"}</Text>
-          <View style={[styles.chipWrap, { flexDirection: row }]}>{MAINTENANCE_FREQUENCIES.map((freq) => { const selected = taskSheet.draft.frequency === freq.id; return <Pressable key={freq.id} onPress={() => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, frequency: freq.id } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{freq.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
+          <View style={[styles.chipWrap, { flexDirection: row }]}>{MAINTENANCE_FREQUENCIES.map((freq) => { const selected = taskSheet.draft.frequency === freq.id; return <Pressable key={freq.id} accessibilityRole="button" accessibilityLabel={freq.label[language === "ar" ? 0 : 1]} onPress={() => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, frequency: freq.id } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{freq.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
+          <View style={[styles.scheduleHint, { backgroundColor: (taskSheet.draft.frequency === "once" ? colors.primary : colors.warning) + "12", borderColor: (taskSheet.draft.frequency === "once" ? colors.primary : colors.warning) + "55" }]}><MaterialIcons name="info-outline" size={16} color={taskSheet.draft.frequency === "once" ? colors.primary : colors.warning} /><Text style={{ color: taskSheet.draft.frequency === "once" ? colors.primary : colors.warning, fontSize: 11, fontWeight: "700", flex: 1, textAlign: align }}>{frequencyHint(taskSheet.draft.frequency)}</Text></View>
           {taskSheet.draft.frequency === "custom" ? <><Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "عدد الأيام بين كل صيانة" : "Days between each visit"}</Text><TextInput accessibilityLabel={language === "ar" ? "عدد الأيام" : "Days"} value={taskSheet.draft.customIntervalDays} onChangeText={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, customIntervalDays: value } })} keyboardType="number-pad" placeholder="30" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} /></> : null}
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الاستحقاق القادم (درجة التاريخ YYYY-MM-DD)" : "Next due date (YYYY-MM-DD)"}</Text>
-          <TextInput accessibilityLabel={language === "ar" ? "الاستحقاق القادم" : "Next due date"} value={taskSheet.draft.nextDueDate} onChangeText={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, nextDueDate: value } })} placeholder="2026-09-15" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الاستحقاق القادم" : "Next due date"}</Text>
+          <CalendarDateField label={language === "ar" ? "الاستحقاق القادم" : "Next due date"} value={taskSheet.draft.nextDueDate} onChange={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, nextDueDate: value } })} />
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "التكلفة المتوقعة (اختياري)" : "Estimated cost (optional)"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "التكلفة" : "Cost"} value={taskSheet.draft.cost} onChangeText={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, cost: value } })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "ملاحظة (اختياري)" : "Note (optional)"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "ملاحظة" : "Note"} value={taskSheet.draft.note} onChangeText={(value) => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, note: value } })} multiline placeholder={language === "ar" ? "تفاصيل إضافية" : "Extra details"} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ المهمة" : "Save task"} disabled={saving || !taskSheet.draft.title.trim() || !taskSheet.draft.chaletId || !/^\d{4}-\d{2}-\d{2}$/.test(taskSheet.draft.nextDueDate)} onPress={() => void saveTaskDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ المهمة" : "Save task")}</Text></Pressable>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "إيقاف حجز الوحدة أثناء الصيانة" : "Block unit during maintenance"}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إيقاف حجز الوحدة أثناء الصيانة" : "Block unit during maintenance"} disabled={taskSheet.draft.allUnits} onPress={() => { if (taskSheet.draft.allUnits) return; setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, blockBooking: taskSheet.draft.blockBooking !== true, blockPeriod: taskSheet.draft.blockBooking !== true ? "full_day" : undefined } }); }} style={({ pressed }) => [styles.chip, { flexDirection: row, borderColor: taskSheet.draft.allUnits ? colors.border : taskSheet.draft.blockBooking === true ? colors.primary : colors.border, backgroundColor: taskSheet.draft.allUnits ? colors.surfaceMuted : taskSheet.draft.blockBooking === true ? colors.primary + "18" : colors.surfaceMuted, opacity: taskSheet.draft.allUnits ? 0.45 : pressed ? 0.8 : 1, marginTop: 7 }]}>
+            <MaterialIcons name={taskSheet.draft.allUnits ? "toggle-off" : (taskSheet.draft.blockBooking === true ? "toggle-on" : "toggle-off")} size={18} color={taskSheet.draft.allUnits ? colors.muted : taskSheet.draft.blockBooking === true ? colors.primary : colors.muted} />
+            <Text style={{ color: taskSheet.draft.allUnits ? colors.muted : taskSheet.draft.blockBooking === true ? colors.primary : colors.muted, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? (taskSheet.draft.allUnits ? "غير متاح لمهمة كافة الوحدات" : taskSheet.draft.blockBooking === true ? "مفعّل" : "غير مفعّل") : (taskSheet.draft.allUnits ? "Not available for all-units tasks" : taskSheet.draft.blockBooking === true ? "ON" : "OFF")}</Text>
+          </Pressable>
+          {taskSheet.draft.blockBooking === true && !taskSheet.draft.allUnits ? <><Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "مدى المنع" : "Blocking scope"}</Text>
+          <View style={[styles.chipWrap, { flexDirection: row }]}>{BLOCK_PERIOD_OPTIONS.map((option) => { const selected = (taskSheet.draft.blockPeriod ?? "full_day") === option.id; return <Pressable key={option.id} onPress={() => setTaskSheet({ ...taskSheet, draft: { ...taskSheet.draft, blockPeriod: option.id } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{option.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View></> : null}
+          {taskError ? <View style={[styles.taskErrorBox, { backgroundColor: colors.error + "14", borderColor: colors.error + "55" }]}><MaterialIcons name="error-outline" size={17} color={colors.error} /><Text style={{ color: colors.error, fontSize: 12, fontWeight: "800", marginLeft: 7, flex: 1, textAlign: align }}>{taskError}</Text></View> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ المهمة" : "Save task"} disabled={saving} onPress={() => void saveTaskDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ المهمة" : "Save task")}</Text></Pressable>
+        </ScrollView>
+      </View>
+    </View> : null}
+  </Modal>
+
+  <Modal visible={Boolean(completion)} transparent animationType="slide" onRequestClose={() => !busy && setCompletion(null)} statusBarTranslucent>
+    {completion ? <View style={styles.backdrop}>
+      <Pressable style={StyleSheet.absoluteFill} disabled={Boolean(busy)} onPress={() => !busy && setCompletion(null)} />
+      <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.sheetHeader, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.success + "1A" }]}><MaterialIcons name="assignment-turned-in" size={20} color={colors.success} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إتمام وإغلاق مهمة الصيانة" : "Complete & close maintenance task"}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => !busy && setCompletion(null)} disabled={Boolean(busy)} style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
+          <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{completion.task.title}</Text>
+          <Text style={{ color: colors.muted, fontSize: 11, textAlign: align, marginTop: 2 }}>{completion.task.targetScope === "all_units" ? (language === "ar" ? "كافة الوحدات" : "All units") : completion.task.chaletName ?? "—"} · {maintenanceFrequencyLabel(completion.task.frequency, language)} · {language === "ar" ? "التكلفة المتوقعة" : "Expected cost"}: {formatMoney(completion.task.cost ?? 0, settings.currency)}</Text>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "منفّذ المهمة" : "Performed by"}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "منفّذ المهمة" : "Performed by"} onPress={() => setPerformerMenuOpen(!performerMenuOpen)} style={[styles.performerSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="badge" size={17} color={colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{(() => { const current = performerOptions.find((option) => option.id === completion.performerId); return current ? current.name : (language === "ar" ? "اختر منفّذًا" : "Select performer"); })()}</Text><MaterialIcons name={performerMenuOpen ? "expand-less" : "expand-more"} size={18} color={colors.muted} /></Pressable>
+          {performerMenuOpen ? <View style={[styles.performerMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
+            {performerOptions.length ? performerOptions.map((option) => { const selected = completion.performerId === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.name} onPress={() => { setCompletion({ ...completion, performerId: option.id }); setPerformerMenuOpen(false); }} style={[styles.performerRow, { backgroundColor: selected ? colors.primary + "14" : "transparent" }]}><MaterialIcons name="person-outline" size={16} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{option.name}</Text><View style={[styles.roleTag, { backgroundColor: option.role === "owner" ? colors.primary + "1A" : option.role === "staff" ? colors.warning + "1A" : colors.success + "1A" }]}><Text style={{ color: option.role === "owner" ? colors.primary : option.role === "staff" ? "#B45309" : colors.success, fontSize: 9, fontWeight: "900" }}>{maintenancePerformerRoleLabel(option.role, language)}</Text></View></Pressable>; }) : <Text style={{ color: colors.muted, fontSize: 12, textAlign: "center", paddingVertical: 12 }}>{language === "ar" ? "لا يوجد منفّذون متاحون" : "No performers available"}</Text>}
+          </View> : null}
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "التكلفة الفعلية" : "Actual cost"} · {settings.currency}</Text>
+          <TextInput accessibilityLabel={language === "ar" ? "التكلفة الفعلية" : "Actual cost"} value={completion.actualCost} onChangeText={(value) => setCompletion({ ...completion, actualCost: value, postExpense: value.trim() !== "" && Number(value) > 0 })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "مصدر الدفع" : "Payment source"}</Text>
+          {MAINTENANCE_PAYMENT_SOURCES.map((source) => { const selected = completion.paymentSource === source; return <Pressable key={source} accessibilityRole="button" accessibilityLabel={maintenancePaymentSourceLabel(source, language)} onPress={() => setCompletion({ ...completion, paymentSource: source })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{maintenancePaymentSourceLabel(source, language)}</Text></Pressable>; })}
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "الترحيل التلقائي للمصروفات" : "Auto post expense"} disabled={!hasPositiveActualCost(completion)} onPress={() => setCompletion({ ...completion, postExpense: !completion.postExpense })} style={[styles.checkRow, { backgroundColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success + "12" : colors.surfaceMuted, borderColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.border, opacity: hasPositiveActualCost(completion) ? 1 : 0.45 }]}><MaterialIcons name={hasPositiveActualCost(completion) && completion.postExpense ? "check-box" : "check-box-outline-blank"} size={18} color={hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.muted} /><Text style={{ flex: 1, color: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "ترحيل تلقائي إلى سجل المصروفات تحت بند (صيانة وتشغيل)" : "Auto post to the expenses ledger under (Maintenance & operations)"}</Text></Pressable>
+          {hasPositiveActualCost(completion) ? null : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "أدخل تكلفة فعلية أكبر من صفر لتفعيل الترحيل التلقائي للمصروفات." : "Enter an actual cost greater than zero to enable automatic expense posting."}</Text>}
+          {completion.task.frequency !== "once" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "جدولة الاستحقاق القادم" : "Schedule next occurrence"} onPress={() => setCompletion({ ...completion, scheduleNext: !completion.scheduleNext })} style={[styles.checkRow, { backgroundColor: completion.scheduleNext ? colors.primary + "12" : colors.surfaceMuted, borderColor: completion.scheduleNext ? colors.primary : colors.border }]}><MaterialIcons name={completion.scheduleNext ? "check-box" : "check-box-outline-blank"} size={18} color={completion.scheduleNext ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: completion.scheduleNext ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? `جدولة الاستحقاق القادم تلقائياً (تاريخ: ${formatDate(completionNextDate) ?? completionNextDate})` : `Automatically schedule the next occurrence (date: ${formatDate(completionNextDate) ?? completionNextDate})`}</Text></Pressable> : null}
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "ملاحظات الإتمام (اختياري)" : "Completion notes (optional)"}</Text>
+          <TextInput accessibilityLabel={language === "ar" ? "ملاحظات الإتمام" : "Completion notes"} value={completion.notes} onChangeText={(value) => setCompletion({ ...completion, notes: value })} multiline placeholder={language === "ar" ? "ما تم إنجازه، قطع الغيار، ملاحظات إضافية..." : "What was done, parts, extra notes..."} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <View style={[styles.completionActions, { flexDirection: row }]}>
+            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} disabled={Boolean(busy)} onPress={() => setCompletion(null)} style={({ pressed }) => [styles.completionSecondary, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13 }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting"} disabled={Boolean(busy) || !completion.performerId} onPress={() => void submitCompletion()} style={({ pressed }) => [styles.completionPrimary, { backgroundColor: busy?.kind === "complete" ? colors.muted : colors.success, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name={busy?.kind === "complete" ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{busy?.kind === "complete" ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting")}</Text></Pressable>
+          </View>
         </ScrollView>
       </View>
     </View> : null}
@@ -241,8 +638,9 @@ export default function MaintenanceDashboard() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align }}>{language === "ar" ? "اسم الأصل" : "Asset name"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "اسم الأصل" : "Asset name"} value={assetSheet.draft.name} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, name: value } })} placeholder={language === "ar" ? "مثال: مكيف صالة رئيسي" : "e.g. Main hall air conditioner"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الوحدة" : "Property"}</Text>
-          <View style={[styles.chipWrap, { flexDirection: row }]}>{chalets.map((chalet) => { const selected = assetSheet.draft.chaletId === chalet.id; return <Pressable key={chalet.id} onPress={() => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, chaletId: chalet.id, chaletName: chalet.name } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{chalet.name}</Text></Pressable>; })}</View>
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الوحدات المستهدفة" : "Target units"}</Text>
+          {chalets.length ? <><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تحديد كافة الوحدات" : "Select all units"} onPress={toggleAllAssetUnits} style={[styles.checkRow, { backgroundColor: assetSheet.draft.unitIds.length === chalets.length ? colors.primary + "14" : colors.surfaceMuted, borderColor: assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.border }]}><MaterialIcons name={assetSheet.draft.unitIds.length === chalets.length ? "check-box" : "check-box-outline-blank"} size={18} color={assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "تحديد كافة الوحدات" : "Select all units"}</Text><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>{chalets.length}</Text></Pressable>
+          {chalets.map((chalet) => { const selected = assetSheet.draft.unitIds.includes(chalet.id); return <Pressable key={chalet.id} accessibilityRole="checkbox" accessibilityLabel={chalet.name} onPress={() => toggleAssetUnit(chalet.id)} style={[styles.checkRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "check-box" : "check-box-outline-blank"} size={18} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /></Pressable>; })}</> : <View style={[styles.unitWarning, { backgroundColor: colors.warning + "14", borderColor: colors.warning + "55" }]}><MaterialIcons name="error-outline" size={17} color={colors.warning} /><Text style={{ color: colors.warning, fontSize: 12, fontWeight: "800", marginLeft: 7, flex: 1, textAlign: align }}>{language === "ar" ? "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل صيانة أو أصول" : "You must add a unit to this property before registering maintenance or assets."}</Text></View>}
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "التصنيف" : "Category"}</Text>
           <View style={[styles.chipWrap, { flexDirection: row }]}>{ASSET_CATEGORIES.map((category) => { const selected = assetSheet.draft.category === category.id; return <Pressable key={category.id} onPress={() => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, category: category.id } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{category.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الحالة" : "Condition"}</Text>
@@ -251,8 +649,40 @@ export default function MaintenanceDashboard() {
           <TextInput accessibilityLabel={language === "ar" ? "الرقم التسلسلي" : "Serial number"} value={assetSheet.draft.serialNumber} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, serialNumber: value } })} placeholder={language === "ar" ? "اختياري" : "Optional"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "تكلفة الشراء (اختياري)" : "Purchase cost (optional)"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "تكلفة الشراء" : "Purchase cost"} value={assetSheet.draft.purchaseCost} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, purchaseCost: value } })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ الأصل" : "Save asset"} disabled={saving || !assetSheet.draft.name.trim() || !assetSheet.draft.chaletId} onPress={() => void saveAssetDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الأصل" : "Save asset")}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ الأصل" : "Save asset"} disabled={saving || !assetSheet.draft.name.trim() || !assetSheet.draft.unitIds.length} onPress={() => void saveAssetDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الأصل" : "Save asset")}</Text></Pressable>
         </ScrollView>
+      </View>
+    </View> : null}
+  </Modal>
+
+  <Modal visible={Boolean(auditFor)} transparent animationType="fade" onRequestClose={() => setAuditFor(null)} statusBarTranslucent>
+    {auditFor ? <View style={styles.auditOverlay}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => setAuditFor(null)} />
+      <View style={[styles.auditCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.auditCardHeader, { flexDirection: row }]}><View style={[styles.auditCardTitleRow, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.primary + "1A" }]}><MaterialIcons name="history" size={20} color={colors.primary} /></View><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align, flex: 1 }}>{language === "ar" ? "سجل الإجراءات" : "Action log"}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setAuditFor(null)} style={({ pressed }) => [styles.closeBtn, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.foreground} /></Pressable></View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.auditSheetBody}>
+          {(() => {
+            const task = maintenanceTasks?.find((t) => t.id === auditFor);
+            if (!task) return null;
+            const entries = (maintenanceAuditLog ?? []).filter((entry) => entry.taskId === auditFor);
+            const dot = (action: MaintenanceAuditAction) => action === "completed" || action === "expense_posted" ? colors.success : action === "cancelled" ? colors.error : colors.warning;
+            if (!entries.length) return <Text style={{ color: colors.muted, fontSize: 12, textAlign: "center", paddingVertical: 24 }}>{language === "ar" ? "لا توجد إجراءات مسجلة بعد." : "No recorded actions yet."}</Text>;
+            return entries.map((entry) => <View key={entry.id} style={[styles.auditRow, { flexDirection: row }]}><View style={[styles.auditIcon, { backgroundColor: dot(entry.action) + "1A" }]}><MaterialIcons name="check" size={14} color={dot(entry.action)} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "900", textAlign: align }}>{maintenanceAuditActionLabel(entry.action, language)}{entry.details ? <Text style={{ color: colors.muted, fontWeight: "600" }}> — {entry.details}</Text> : null}</Text><View style={[styles.auditMetaRow, { flexDirection: row, marginTop: 3 }]}><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800" }}>{entry.userName}</Text>{entry.userRole ? <View style={[styles.roleTag, { backgroundColor: entry.userRole === "owner" ? colors.primary + "1A" : entry.userRole === "staff" ? colors.warning + "1A" : colors.success + "1A" }]}><Text style={{ color: entry.userRole === "owner" ? colors.primary : entry.userRole === "staff" ? "#B45309" : colors.success, fontSize: 9, fontWeight: "900" }}>{maintenancePerformerRoleLabel(entry.userRole, language)}</Text></View> : null}<Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600" }}>{(() => { const day = formatDate(entry.timestamp.slice(0, 10)) ?? entry.timestamp.slice(0, 10); const time = entry.timestamp.slice(11, 16); return ` · ${day}${time ? ` · ${time}` : ""}`; })()}</Text></View></View></View>);
+          })()}
+        </ScrollView>
+      </View>
+    </View> : null}
+  </Modal>
+
+  <Modal visible={Boolean(cancelFor)} transparent animationType="fade" onRequestClose={() => !busy && setCancelFor(null)} statusBarTranslucent>
+    {cancelFor ? <View style={styles.auditOverlay}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => !busy && setCancelFor(null)} />
+      <View style={[styles.cancelCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.auditCardHeader, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.error + "1A" }]}><MaterialIcons name="cancel" size={20} color={colors.error} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إلغاء مهمة متكررة" : "Cancel recurring task"}</Text><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600", textAlign: align, marginTop: 2 }}>{maintenanceFrequencyLabel(cancelFor.frequency, language)} · {cancelFor.title}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setCancelFor(null)} disabled={Boolean(busy)} style={({ pressed }) => [styles.closeBtn, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.foreground} /></Pressable></View>
+        <Text style={{ color: colors.muted, fontSize: 12, textAlign: align, lineHeight: 19 }}>{language === "ar" ? "هذه مهمة دورية. اختر كيف تريد التعامل مع الجدولة المتبقية:" : "This is a recurring maintenance task. Choose how to handle the remaining schedule:"}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء استحقاق اليوم فقط" : "Cancel today's occurrence only"} disabled={Boolean(busy)} onPress={() => void confirmCancel(cancelFor, "instance")} style={({ pressed }) => [styles.cancelChoice, { borderColor: colors.primary + "55", backgroundColor: colors.primary + "0F", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="event-available" size={18} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 13, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إلغاء استحقاق اليوم فقط" : "Cancel today's occurrence only"}</Text><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600", textAlign: align, marginTop: 2 }}>{language === "ar" ? "تُلغى مهمة اليوم وتستمر الجدولة للدورات القادمة تلقائياً." : "Cancels today's task; following recurrences continue automatically."}</Text></View></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء وحذف الجدول المتكرر نهائياً" : "Cancel & terminate the schedule permanently"} disabled={Boolean(busy)} onPress={() => void confirmCancel(cancelFor, "series")} style={({ pressed }) => [styles.cancelChoice, { borderColor: colors.error + "66", backgroundColor: colors.error + "0F", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="delete-sweep" size={18} color={colors.error} /><View style={styles.flex}><Text style={{ color: colors.error, fontSize: 13, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إلغاء وحذف الجدول المتكرر نهائياً" : "Cancel & terminate the schedule permanently"}</Text><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "600", textAlign: align, marginTop: 2 }}>{language === "ar" ? "تُلغى المهمة وتتوقف جميع الدورات القادمة لهذا الجدول نهائياً." : "Cancels this task and stops every future occurrence of this schedule permanently."}</Text></View></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} disabled={Boolean(busy)} onPress={() => setCancelFor(null)} style={({ pressed }) => [styles.cancelDismiss, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "800" }}>{language === "ar" ? "إغلاق" : "Close"}</Text></Pressable>
       </View>
     </View> : null}
   </Modal>
@@ -269,14 +699,67 @@ const styles = StyleSheet.create({
   tabRow: { borderRadius: 15, padding: 4, gap: 4, marginTop: 14 },
   tab: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
   card: { borderRadius: 17, borderWidth: 1, padding: 12, marginTop: 9, alignItems: "center", gap: 10, flexDirection: "row" },
+  taskCard: { borderRadius: 17, borderWidth: 1, padding: 12, marginTop: 9 },
+  cardRow: { alignItems: "center", gap: 10, flexDirection: "row" },
+  cardSide: { paddingLeft: 8, alignItems: "center" },
+  cardSideTop: { alignItems: "center", gap: 6 },
+  badgeRow: { flexWrap: "wrap", gap: 6, marginTop: 5 },
   taskIcon: { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   cardTitleRow: { alignItems: "center", gap: 7 },
   cardTitle: { fontSize: 14, fontWeight: "900" },
   cardMeta: { fontSize: 11, marginTop: 4, fontWeight: "600" },
+  statusPill: { minHeight: 22, borderRadius: 11, paddingHorizontal: 9, alignItems: "center", justifyContent: "center" },
   badgePill: { minHeight: 20, borderRadius: 10, paddingHorizontal: 7, alignItems: "center", justifyContent: "center" },
-  completeButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  iconAction: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   iconDanger: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  actionBtn: { minHeight: 36, borderRadius: 11, borderWidth: 1, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  auditToggle: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 8 },
+  auditWrap: { borderRadius: 12, borderWidth: 1, padding: 10, marginTop: 8, gap: 9 },
+  auditOverlay: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)", alignItems: "center", justifyContent: "center", padding: 20 },
+  auditCard: { width: "100%", maxWidth: 520, maxHeight: "78%", borderRadius: 22, borderWidth: 1, padding: 20, shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 20 },
+  auditCardHeader: { alignItems: "center", gap: 12, marginBottom: 14 },
+  auditCardTitleRow: { alignItems: "center", gap: 10, minWidth: 0, flex: 1 },
+  cancelCard: { width: "100%", maxWidth: 400, borderRadius: 22, borderWidth: 1, padding: 20, shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 20 },
+  cancelChoice: { minHeight: 62, borderRadius: 14, borderWidth: 1, paddingHorizontal: 13, marginTop: 11, alignItems: "center", flexDirection: "row", gap: 10 },
+  cancelDismiss: { minHeight: 46, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 12 },
+  filterRow: { marginTop: 12 },
+  clickAway: { zIndex: 1 },
+  rollerWrap: { marginTop: 13 },
+  rollerToolbar: { alignItems: "center", gap: 7, marginBottom: 8 },
+  rollerChips: { flex: 1, minWidth: 0, alignItems: "center", gap: 6, flexWrap: "wrap", flexDirection: "row" },
+  rollerRangeChip: { minHeight: 30, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
+  rollerRangeAnchor: { position: "relative", flexShrink: 0 },
+  rollerRangePanel: { position: "absolute", top: "100%", marginTop: 8, minWidth: 280, maxWidth: 320, borderRadius: 16, borderWidth: 1, padding: 12, gap: 8, zIndex: 50, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 16 },
+  rollerRangeField: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 4, overflow: "hidden" },
+  rollerRangeActions: { gap: 7, marginTop: 2 },
+  rollerAction: { flex: 1, minHeight: 40, borderRadius: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  rollerActionGhost: { flex: 1, minHeight: 40, borderRadius: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  rollerScroller: { alignItems: "center", gap: 6 },
+  rollerArrow: { width: 34, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1, flexShrink: 0 },
+  rollerStrip: { flexDirection: "row", gap: 6, paddingVertical: 3, paddingHorizontal: 2 },
+  rollerChip: { minWidth: 50, maxWidth: 54, height: 60, borderRadius: 14, borderWidth: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center", gap: 2 },
+  rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 1 },
+  rollerTodayBadge: { position: "absolute", top: 3, right: 3, minWidth: 26, borderRadius: 6, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
+  filterDot: { width: 8, height: 8, borderRadius: 4 },
+  searchWrap: { flex: 1, minWidth: 0, maxWidth: 480, alignItems: "center", gap: 6, minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700", padding: 0 },
+  toolbarMenuAnchor: { position: "relative", flexShrink: 1, maxWidth: 175, minWidth: 110 },
+  toolbarSelect: { minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", gap: 5 },
+  toolbarMenu: { position: "absolute", top: "100%", marginTop: 8, minWidth: 200, maxWidth: 280, borderRadius: 12, borderWidth: 1, overflow: "hidden", zIndex: 50 },
+  toolbarRow: { minHeight: 40, paddingHorizontal: 12, alignItems: "center", gap: 8 },
+  moreBtn: { width: 40, height: 36, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  menuAnchor: { position: "relative", zIndex: 50 },
+  floatMenu: { position: "absolute", left: 0, top: "100%", marginTop: 4, minWidth: 190, maxWidth: 240, borderRadius: 12, borderWidth: 1, padding: 6, flexDirection: "column", gap: 4, zIndex: 50, backgroundColor: "#0f172a", borderColor: "rgba(51, 65, 85, 0.8)", shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  menuItem: { minHeight: 42, paddingHorizontal: 12, alignItems: "center", flexDirection: "row", gap: 9, borderRadius: 9 },
+  archiveCard: { borderRadius: 15, borderWidth: 1, padding: 11, marginTop: 8, gap: 8 },
+  archiveIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  archiveLogBtn: { minHeight: 34, borderRadius: 11, borderWidth: 1, paddingHorizontal: 12, alignSelf: "flex-start", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  auditSheetBody: { gap: 12, paddingBottom: 10 },
+  auditRow: { alignItems: "flex-start", gap: 8 },
+  auditIcon: { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   empty: { alignItems: "center", justifyContent: "center", paddingVertical: 42, paddingHorizontal: 24 },
+  emptyCta: { minHeight: 44, borderRadius: 13, borderWidth: 1, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, marginTop: 14 },
+  unitWarning: { flexDirection: "row", alignItems: "center", borderRadius: 12, borderWidth: 1, padding: 10, marginTop: 7 },
   lockCard: { flexDirection: "row", alignItems: "center", borderRadius: 13, borderWidth: 1, padding: 10, marginTop: 12 },
   dock: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 14, paddingBottom: 22, borderTopWidth: 1, borderTopColor: "rgba(128,150,140,0.14)" },
   dockButton: { minHeight: 50, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
@@ -290,5 +773,18 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 76, textAlignVertical: "top", paddingTop: 11 },
   chipWrap: { flexWrap: "wrap", gap: 7, marginTop: 7 },
   chip: { minHeight: 36, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
+  presetChip: { minHeight: 34, borderRadius: 12, borderWidth: 1, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, maxWidth: "100%" },
+  performerSelect: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, marginTop: 5, alignItems: "center", flexDirection: "row", gap: 8 },
+  performerMenu: { borderRadius: 13, borderWidth: 1, marginTop: 5, overflow: "hidden" },
+  performerRow: { minHeight: 44, paddingHorizontal: 12, alignItems: "center", flexDirection: "row", gap: 8 },
+  roleTag: { minHeight: 18, borderRadius: 9, paddingHorizontal: 7, alignItems: "center", justifyContent: "center" },
+  radioRow: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, marginTop: 7, alignItems: "center", flexDirection: "row", gap: 9 },
+  checkRow: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, marginTop: 7, alignItems: "center", flexDirection: "row", gap: 9 },
+  taskErrorBox: { flexDirection: "row", alignItems: "center", borderRadius: 13, borderWidth: 1, padding: 11, marginTop: 14 },
+  scheduleHint: { flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 12, borderWidth: 1, padding: 10, marginTop: 8 },
+  auditMetaRow: { alignItems: "center", gap: 6, flexWrap: "wrap" },
+  completionActions: { gap: 9, marginTop: 18 },
+  completionPrimary: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
+  completionSecondary: { minWidth: 96, minHeight: 48, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
   saveBtn: { minHeight: 50, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, marginTop: 16 },
 });

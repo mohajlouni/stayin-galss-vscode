@@ -39,7 +39,7 @@ export default function HomeScreen() {
   const { selectedChaletId } = useChaletScope();
   const { isRTL, language } = useI18n();
   const { formatTime, formatDate, deviceSettings, updateDeviceSettings } = useAppPreferences();
-  const { isAuthenticated } = useWorkspaceAccess();
+  const { isAuthenticated, isSuperAdmin, activeWorkspaceId, loading: accessLoading } = useWorkspaceAccess();
   const globalFlags = useGlobalFeatureFlags();
   const cleaningFlowEnabled = globalFlags.feat_cleaning_inspection;
   const guestCheckInEnabled = globalFlags.feat_guest_checkin;
@@ -150,6 +150,7 @@ export default function HomeScreen() {
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}>
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <HomeTopWidget logoUrl={settings.businessLogoUrl} unreadCount={unreadCount} onNewBooking={() => appRouter.push("/booking-form" as never)} onNotifications={() => appRouter.push("/notifications" as never)} />
+      {isSuperAdmin && !accessLoading && !activeWorkspaceId ? <BentoGlassCard radius={20} style={styles.superAdminPrompt} contentStyle={styles.superAdminPromptContent}><View style={[styles.superAdminPromptIcon, { backgroundColor: colors.primary + "16" }]}><MaterialIcons name="admin-panel-settings" size={22} color={colors.primary} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "900", textAlign: align }}>{language === "ar" ? "وضع الإشراف على النظام" : "System oversight mode"}</Text><Text style={{ color: colors.muted, fontSize: 11, lineHeight: 17, marginTop: 3, textAlign: align }}>{language === "ar" ? "اختر منشأة من دليل المنشآت لاستعراض عملياتها اليومية (التقويم والوحدات)، أو افتح مركز الإدارة العليا مباشرة." : "Pick a workspace from the directory to review its daily operations (calendar & units), or open the Master Control Center directly."}</Text><View style={[styles.superAdminPromptActions, { flexDirection: row }]}><Pressable accessibilityRole="button" onPress={() => appRouter.push("/workspace-hub" as never)} style={({ pressed }) => [styles.promptButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1, flexDirection: row }]}><MaterialIcons name="holiday-village" size={17} color={colors.background} /><Text style={{ color: colors.background, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? "اختيار منشأة للعمل" : "Choose a workspace"}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => appRouter.push("/admin/master-control" as never)} style={({ pressed }) => [styles.promptButton, { borderColor: colors.primary + "66", borderWidth: 1, backgroundColor: "transparent", opacity: pressed ? 0.8 : 1, flexDirection: row }]}><MaterialIcons name="shield" size={17} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? "مركز الإدارة العليا" : "Master Control Center"}</Text></Pressable></View></View></BentoGlassCard> : null}
       <BentoGlassCard radius={20} style={styles.quickSearchCard} contentStyle={{ padding: 0 }}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح البحث السريع" : "Open quick search"} onPress={() => appRouter.push("/quick-search" as never)} style={({ pressed }) => [styles.quickSearch, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="search" size={19} color={colors.primary} /><Text style={[styles.flex, { color: colors.muted, fontSize: 12, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "بحث سريع بالاسم أو الهاتف أو المرجع" : "Quick search by guest, phone, or reference"}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={19} color={colors.primary} /></Pressable></BentoGlassCard>
 
       <View style={[styles.scopeBlock, { flexDirection: row }]}><View style={styles.scopeChalet}><ChaletSwitcher /></View><BookingViewToggle value={deviceSettings.bookingCardViewMode} onChange={(bookingCardViewMode) => void updateDeviceSettings({ bookingCardViewMode })} accentColor={selectedChaletAccent} /></View>
@@ -196,6 +197,11 @@ const styles = StyleSheet.create({
   scopeBlock: { marginTop: 13, alignItems: "center", justifyContent: "space-between", gap: 10 },
   scopeChalet: { flex: 1, minWidth: 0 },
   quickSearchCard: { marginTop: 12, borderRadius: 20 },
+  superAdminPrompt: { marginTop: 12, borderRadius: 20 },
+  superAdminPromptContent: { padding: 14, flexDirection: "row-reverse", alignItems: "flex-start", gap: 10 },
+  superAdminPromptIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  superAdminPromptActions: { marginTop: 10, gap: 8, flexWrap: "wrap" },
+  promptButton: { minHeight: 40, borderRadius: 12, paddingHorizontal: 13, alignItems: "center", justifyContent: "center", gap: 5 },
   quickSearch: { minHeight: 50, borderRadius: 20, paddingHorizontal: 16, alignItems: "center", justifyContent: "space-between", gap: 10 },
   summaryBar: { minHeight: 104, borderRadius: 24, marginTop: 14 },
   summaryBarContent: { minHeight: 104, paddingVertical: 14, alignItems: "stretch", justifyContent: "space-between", gap: 4 },

@@ -9,7 +9,7 @@ const task: MaintenanceTask = {
   title: "فحص المكيف",
   frequency: "weekly",
   nextDueDate: "2026-01-10",
-  status: "pending",
+  status: "scheduled",
   createdAt: "2026-01-01T10:00:00.000Z",
 };
 
@@ -38,13 +38,15 @@ describe("maintenance due windows", () => {
   it("classifies overdue, due today, and upcoming", () => {
     const now = new Date("2026-01-10T12:00:00Z").getTime();
     const today = localDateISO(new Date(now));
-    expect(isMaintenanceOverdue({ ...task, nextDueDate: "2026-01-09", status: "pending" }, now)).toBe(true);
-    expect(isMaintenanceOverdue({ ...task, nextDueDate: today, status: "pending" }, now)).toBe(false);
-    expect(isMaintenanceDueToday({ ...task, nextDueDate: today, status: "pending" }, now)).toBe(true);
-    expect(isMaintenanceDueToday({ ...task, nextDueDate: "2026-01-12", status: "pending" }, now)).toBe(false);
-    expect(isMaintenanceUpcoming({ ...task, nextDueDate: "2026-01-13", status: "pending" }, now)).toBe(true);
-    expect(isMaintenanceUpcoming({ ...task, nextDueDate: "2026-01-20", status: "pending" }, now)).toBe(false);
+    expect(isMaintenanceOverdue({ ...task, nextDueDate: "2026-01-09", status: "scheduled" }, now)).toBe(true);
+    expect(isMaintenanceOverdue({ ...task, nextDueDate: today, status: "scheduled" }, now)).toBe(false);
+    expect(isMaintenanceDueToday({ ...task, nextDueDate: today, status: "scheduled" }, now)).toBe(true);
+    expect(isMaintenanceDueToday({ ...task, nextDueDate: "2026-01-12", status: "scheduled" }, now)).toBe(false);
+    expect(isMaintenanceUpcoming({ ...task, nextDueDate: "2026-01-13", status: "scheduled" }, now)).toBe(true);
+    expect(isMaintenanceUpcoming({ ...task, nextDueDate: "2026-01-20", status: "scheduled" }, now)).toBe(false);
     expect(isMaintenanceDueToday({ ...task, nextDueDate: "2026-01-10", status: "completed" }, now)).toBe(false);
+    expect(isMaintenanceOverdue({ ...task, nextDueDate: "2026-01-09", status: "cancelled" }, now)).toBe(false);
+    expect(isMaintenanceDueToday({ ...task, nextDueDate: today, status: "cancelled" }, now)).toBe(false);
   });
 
   it("normalizes due-in-days arithmetic", () => {
@@ -60,11 +62,12 @@ describe("maintenanceStats", () => {
     const today = localDateISO(new Date(now));
     const stats = maintenanceStats([
       { ...task, nextDueDate: "2026-01-05", status: "in_progress" },
-      { ...task, id: "m2", nextDueDate: today, status: "pending" },
-      { ...task, id: "m3", nextDueDate: "2026-01-12", status: "pending" },
+      { ...task, id: "m2", nextDueDate: today, status: "scheduled" },
+      { ...task, id: "m3", nextDueDate: "2026-01-12", status: "scheduled" },
       { ...task, id: "m4", nextDueDate: "2026-01-08", status: "completed" },
+      { ...task, id: "m5", nextDueDate: "2026-01-07", status: "cancelled" },
     ], now);
-    expect(stats).toEqual({ overdue: 1, dueToday: 1, upcoming: 1, completed: 1, total: 4 });
+    expect(stats).toEqual({ overdue: 1, dueToday: 1, upcoming: 1, completed: 1, total: 5 });
   });
 });
 
@@ -73,6 +76,9 @@ describe("labels", () => {
     expect(maintenanceFrequencyLabel("weekly", "ar")).toBe("أسبوعيًا");
     expect(maintenanceFrequencyLabel("daily", "en")).toBe("Daily");
     expect(maintenanceTaskStatusLabel("in_progress", "ar")).toBe("قيد التنفيذ");
+    expect(maintenanceTaskStatusLabel("scheduled", "ar")).toBe("مجدولة");
+    expect(maintenanceTaskStatusLabel("scheduled", "en")).toBe("Scheduled");
+    expect(maintenanceTaskStatusLabel("cancelled", "ar")).toBe("ملغاة");
     expect(assetConditionLabel("needs_service", "ar")).toBe("بحاجة لصيانة");
     expect(assetConditionLabel("good", "en")).toBe("Good");
   });

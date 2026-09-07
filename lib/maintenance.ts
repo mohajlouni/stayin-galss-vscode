@@ -1,8 +1,9 @@
 import { addDays, localDateISO, type MaintenanceFrequency, type MaintenanceTask, type MaintenanceTaskStatus, type AssetCondition } from "./booking-model";
 
 export function maintenanceIntervalDays(task: Pick<MaintenanceTask, "frequency" | "customIntervalDays">) {
+  if (task.frequency === "once") return 1;
   if (task.frequency === "custom") return Math.max(1, Math.abs(Math.round(Number(task.customIntervalDays) || 0))) || 1;
-  return task.frequency === "daily" ? 1 : task.frequency === "weekly" ? 7 : 30;
+  return task.frequency === "daily" ? 1 : task.frequency === "weekly" ? 7 : task.frequency === "biweekly" ? 14 : 30;
 }
 
 export function advanceMaintenanceDueDate(current: string, intervalDays: number) {
@@ -22,17 +23,22 @@ export function maintenanceDueInDays(task: Pick<MaintenanceTask, "nextDueDate">,
   return Number.isNaN(diff) ? Number.MAX_SAFE_INTEGER : diff;
 }
 
+/** المهمة ما زالت نشطة (غير مكتملة وغير ملغاة) — تُحسب ضمن المهام المفتوحة وتحجز التقويم. */
+export function isMaintenanceTaskClosed(task: Pick<MaintenanceTask, "status">) {
+  return task.status === "completed" || task.status === "cancelled";
+}
+
 export function isMaintenanceOverdue(task: Pick<MaintenanceTask, "nextDueDate" | "status">, now = Date.now()) {
-  return task.status !== "completed" && maintenanceDueInDays(task, now) < 0;
+  return !isMaintenanceTaskClosed(task) && maintenanceDueInDays(task, now) < 0;
 }
 
 export function isMaintenanceDueToday(task: Pick<MaintenanceTask, "nextDueDate" | "status">, now = Date.now()) {
-  return task.status !== "completed" && maintenanceDueInDays(task, now) <= 0;
+  return !isMaintenanceTaskClosed(task) && maintenanceDueInDays(task, now) <= 0;
 }
 
 export function isMaintenanceUpcoming(task: Pick<MaintenanceTask, "nextDueDate" | "status">, now = Date.now(), horizonDays = 3) {
   const days = maintenanceDueInDays(task, now);
-  return task.status !== "completed" && days > 0 && days <= horizonDays;
+  return !isMaintenanceTaskClosed(task) && days > 0 && days <= horizonDays;
 }
 
 export function maintenanceTasksForChalet(tasks: MaintenanceTask[], chaletId: string | undefined) {
@@ -49,7 +55,7 @@ export function maintenanceStats(tasks: MaintenanceTask[], now = Date.now()): Ma
   let dueToday = 0;
   let upcoming = 0;
   tasks.forEach((task) => {
-    if (task.status === "completed") return;
+    if (isMaintenanceTaskClosed(task)) return;
     const days = maintenanceDueInDays(task, now);
     if (days < 0) overdue += 1;
     else if (days <= 0) dueToday += 1;
@@ -59,11 +65,11 @@ export function maintenanceStats(tasks: MaintenanceTask[], now = Date.now()): Ma
 }
 
 export function maintenanceFrequencyLabel(frequency: MaintenanceFrequency, language: "ar" | "en") {
-  return ({ daily: ["يوميًا", "Daily"], weekly: ["أسبوعيًا", "Weekly"], monthly: ["شهريًا", "Monthly"], custom: ["فترة مخصصة", "Custom"] } as const)[frequency][language === "ar" ? 0 : 1];
+  return ({ once: ["مرة واحدة", "One-time"], daily: ["يوميًا", "Daily"], weekly: ["أسبوعيًا", "Weekly"], biweekly: ["كل أسبوعين", "Biweekly"], monthly: ["شهريًا", "Monthly"], custom: ["فترة مخصصة", "Custom"] } as const)[frequency][language === "ar" ? 0 : 1];
 }
 
 export function maintenanceTaskStatusLabel(status: MaintenanceTaskStatus, language: "ar" | "en") {
-  return ({ pending: ["قيد الانتظار", "Pending"], in_progress: ["قيد التنفيذ", "In progress"], completed: ["مكتملة", "Completed"] } as const)[status][language === "ar" ? 0 : 1];
+  return ({ scheduled: ["مجدولة", "Scheduled"], in_progress: ["قيد التنفيذ", "In progress"], completed: ["مكتملة", "Completed"], cancelled: ["ملغاة", "Cancelled"] } as const)[status][language === "ar" ? 0 : 1];
 }
 
 export function assetConditionLabel(condition: AssetCondition, language: "ar" | "en") {
@@ -71,8 +77,10 @@ export function assetConditionLabel(condition: AssetCondition, language: "ar" | 
 }
 
 export const MAINTENANCE_FREQUENCIES: { id: MaintenanceFrequency; label: [string, string] }[] = [
+  { id: "once", label: ["اليوم فقط (مرة واحدة)", "Today only (one-time)"] },
   { id: "daily", label: ["يوميًا", "Daily"] },
   { id: "weekly", label: ["أسبوعيًا", "Weekly"] },
+  { id: "biweekly", label: ["كل أسبوعين", "Biweekly"] },
   { id: "monthly", label: ["شهريًا", "Monthly"] },
   { id: "custom", label: ["فترة مخصصة", "Custom"] },
 ];

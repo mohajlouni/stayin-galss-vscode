@@ -39,6 +39,15 @@ describe("owner master identity (super admin)", () => {
     expect(trpc).toContain("matchesSuperAdminIdentity(ctx.user, ENV.ownerOpenId)");
   });
 
+  it("distinguishes an expired/missing session (UNAUTHORIZED) from a logged-in non-admin (FORBIDDEN)", () => {
+    const nullSessionIndex = trpc.indexOf("if (!ctx.user) {");
+    const identityIndex = trpc.indexOf("matchesSuperAdminIdentity(ctx.user, ENV.ownerOpenId)");
+    expect(nullSessionIndex).toBeGreaterThanOrEqual(0);
+    expect(identityIndex).toBeGreaterThan(nullSessionIndex);
+    expect(trpc).toContain('code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG');
+    expect(trpc).toContain('code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG');
+  });
+
   it("grants the super-admin role at user sync when identity matches and persists the phone", () => {
     expect(dbSource).toContain('const textFields = ["name", "email", "phone", "loginMethod"] as const;');
     expect(dbSource).toContain("matchesSuperAdminIdentity({ openId: user.openId, phone: user.phone, email: user.email }, ENV.ownerOpenId)");
@@ -63,5 +72,15 @@ describe("owner master identity (super admin)", () => {
     expect(oauth).toContain("SUPABASE_SERVICE_ROLE_KEY");
     expect(oauth).toContain("seedSupabaseSuperAdmin(SUPER_ADMIN_EMAIL)");
     expect(oauth).toContain("email_confirm: true");
+  });
+
+  it("re-orders the super admin login: identity-only destination, zero workspace/tenant queries", () => {
+    expect(dbSource).toContain("getLoginDestination");
+    expect(dbSource).toContain("matchesSuperAdminIdentity({ openId: user.openId ?? null, email: user.email ?? null, phone: user.phone ?? null }, ENV.ownerOpenId)");
+    expect(dbSource).toContain("const routing = await getWorkspaceRouting(user);");
+    expect(dbSource).toContain("await getAccountDeletionRequest(user.id).catch(() => null)");
+    expect(oauth).toContain("const destination = await getLoginDestination(saved);");
+    expect(oauth).toContain("destination,");
+    expect(oauth).not.toContain("linkOwnerWorkspace");
   });
 });

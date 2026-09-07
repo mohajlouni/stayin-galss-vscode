@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { COOKIE_NAME, SESSION_TTL_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
-import { ensureLocalDevAccess, getDb, getUserByEmail, getUserByOpenId, linkOwnerWorkspace, upsertUser } from "../db";
+import { ensureLocalDevAccess, getDb, getLoginDestination, getUserByEmail, getUserByOpenId, upsertUser, type RouteDestination } from "../db";
 import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { isSuperAdminEmail, isSuperAdminPhone, matchesSuperAdminIdentity, SUPER_ADMIN_EMAIL } from "./identity";
@@ -124,7 +124,12 @@ async function seedSupabaseSuperAdmin(email: string): Promise<void> {
   }
 }
 
-/** Establishes the owner session directly for the Super Admin master login. */
+/** Establishes the owner session directly for the Super Admin master login.
+ *  Re-ordered authorization: after persisting/refreshing the canonical owner
+ *  identity this path issues the session WITHOUT any workspace-membership /
+ *  tenant / onboarding query. The login response carries `destination: "admin"`
+ *  so the client goes straight to /admin/master-control; routing for the super
+ *  admin is decided by identity, not by workspaces. */
 async function establishSuperAdminSession() {
   const openId = ENV.ownerOpenId;
   const displayName = "مالك StayIn (سوبر أدمن)";
@@ -133,10 +138,6 @@ async function establishSuperAdminSession() {
   await upsertUser({ openId, name: displayName, email: SUPER_ADMIN_EMAIL, phone: "0797402940", loginMethod: "super-admin", lastSignedIn: new Date() });
   const saved = await getUserByOpenId(openId);
   if (!saved?.id) throw new Error("Super Admin user could not be created");
-  // Link the owner to their EXISTING workspace (with all real chalets/data)
-  // instead of provisioning a fresh demo workspace. Never bootstrap a new empty
-  // workspace for the canonical owner identity.
-  await linkOwnerWorkspace({ id: saved.id, name: saved.name ?? displayName });
   const sessionToken = await sdk.createSessionToken(openId, { name: displayName, expiresInMs: SESSION_TTL_MS });
   return { sessionToken, saved };
 }
@@ -507,13 +508,32 @@ export function registerSupabaseAuthRoutes(app: Express) {
 
       const pendingDeletion = await (await import("../db")).getPendingDeletionByEmail(email).catch(() => null);
 
+      // The login response carries the destination so the client renders the
+      // right landing screen immediately and never guesses. Super Admin gets
+      // "admin" without any workspace/tenant query; every other identity is
+      // delegated to the routing ladder (restore / onboarding / dashboard /
+      // selector), and a zero-workspace account resolves to "onboarding"
+      // without crashing.
+      let destination: RouteDestination = "onboarding";
+      if (existing?.id) {
+        destination = await getLoginDestination({
+          id: existing.id,
+          name: existing.name ?? null,
+          openId: existing.openId ?? null,
+          email: existing.email ?? null,
+          phone: existing.phone ?? null,
+          alwaysPromptWorkspaceSelection: existing.alwaysPromptWorkspaceSelection ?? null,
+        });
+      }
+
       res.json({
         app_session_id: sessionToken,
         user: buildUserResponse(existing ?? { openId: resolvedOpenId, name: displayName, email, loginMethod: "supabase", lastSignedIn }),
+        destination,
         pendingDeletion: pendingDeletion ? { scheduledFor: pendingDeletion.scheduledFor.toISOString(), requestedAt: pendingDeletion.requestedAt.toISOString() } : null,
       });
     } catch (error) {
-      console.error("[SupabaseOTP] Bridge exchange failed", error);
+      console.error("[SupabaseOTP] Bridge exchange failed:\n", error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error));
       res.status(500).json({ error: "Could not establish a session for the verified identity" });
     }
   });
@@ -540,13 +560,20 @@ export function registerSupabaseAuthRoutes(app: Express) {
       const { sessionToken, saved } = await establishSuperAdminSession();
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: SESSION_TTL_MS });
+      // Re-ordered authorization: the Super Admin response is finalized from the
+      // identity alone — `getLoginDestination` returns "admin" without touching
+      // workspace-membership / tenant / onboarding queries, so the login can
+      // never 500 on those tables and the client goes straight to the command
+      // center.
       const typed = saved as unknown as { phone?: string | null };
+      const destination = await getLoginDestination(saved);
       res.json({
         app_session_id: sessionToken,
         user: { ...buildUserResponse(saved), phone: typed.phone ?? null },
+        destination,
       });
     } catch (error) {
-      console.error("[SuperAdmin] Login failed:", error);
+      console.error("[SuperAdmin] Login failed:\n", error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error));
       res.status(500).json({ error: "Could not establish the Super Admin session" });
     }
   });

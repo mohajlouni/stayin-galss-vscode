@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { appRouter } from "../server/routers";
 import { COOKIE_NAME } from "../shared/const";
 import type { TrpcContext } from "../server/_core/context";
+
+const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 type CookieCall = {
   name: string;
@@ -21,6 +25,7 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
     phone: null,
     avatarUrl: null,
     userCode: null,
+    alwaysPromptWorkspaceSelection: false,
     termsVersion: null,
     privacyVersion: null,
     conditionsVersion: null,
@@ -65,5 +70,14 @@ describe("auth.logout", () => {
       httpOnly: true,
       path: "/",
     });
+  });
+
+  it("provides a forced local sign-out route that clears storage without the server", () => {
+    const route = source("app/logout.tsx");
+    const gate = source("components/route-access-gate.tsx");
+    expect(route).toContain("router.replace(\"/auth/login\")");
+    expect(route).toContain("removeSessionToken");
+    expect(route).toContain("clearUserInfo");
+    expect(gate).toContain('"/logout"');
   });
 });

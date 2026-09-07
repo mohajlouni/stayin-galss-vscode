@@ -44,3 +44,22 @@ export function matchesSuperAdminIdentity(identity: SuperAdminCandidate, ownerOp
   if (isSuperAdminEmail(identity.email)) return true;
   return false;
 }
+
+/**
+ * الحصانة النظامية الكاملة لحساب السوبر أدمن الأساسي (#U1000): هذا الحساب لا
+ * يمكن حذفه أو إيقافه أو تعديل رتبته تحت أي ظرف. تُستخدم كأول سطر حماية في كل
+ * نقطة حذف/تعليق/تعديل رتبة خادمية، وتُعاد كاستجابة FORBIDDEN مع هذه الرسالة.
+ */
+export const ROOT_IMMUNITY_VIOLATION =
+  "CRITICAL_SECURITY_VIOLATION: حساب السوبر أدمن الأساسي محمي بحصانة نظام كاملة ولا يمكن حذفه، إيقافه، أو تعديل رتبته تحت أي ظرف.";
+
+/** المعرّفات الرقمية للحساب المحصّن (#U1000 ومعرف قاعدة البيانات 1000 مجازًا). */
+export const ROOT_USER_IDENTIFIERS = new Set(["U1000", "1000"]);
+
+/** هل المعرّف (رمز المستخدم/معرف رقمي) يشير إلى الحساب المحصّن؟ */
+export function matchesRootAccountCode(candidate: string | number | null | undefined): boolean {
+  if (candidate == null) return false;
+  const normalized = String(candidate).trim().toLowerCase();
+  if (ROOT_USER_IDENTIFIERS.has(normalized)) return true;
+  return normalized === "u1000" || normalized === "1000";
+}

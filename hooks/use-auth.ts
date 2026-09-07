@@ -22,8 +22,8 @@ export function useAuth(options?: UseAuthOptions) {
       if (Platform.OS === "web") {
         const apiUser = await Api.getMe();
         if (!apiUser) {
-          setUser(null);
-          await Auth.clearUserInfo();
+          const stored = await Auth.getUserInfo();
+          setUser(stored ? { ...stored, lastSignedIn: stored.lastSignedIn ? new Date(stored.lastSignedIn) : new Date() } : null);
           return;
         }
 

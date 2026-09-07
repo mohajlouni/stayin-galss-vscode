@@ -75,6 +75,24 @@ async function unwrap<T>(promise: PromiseLike<{ data: T | null; error: unknown }
   return data;
 }
 
+/**
+ * Detects a permanently missing RPC (PGRST202 / HTTP 404) or a missing
+ * configuration. These are not transient network failures: retrying them only
+ * spams the network with doomed requests. Callers use this to stop the Supabase
+ * mirror loop and keep serving real local/tRPC state without demo fixtures.
+ */
+export function isSupabaseRpcMissing(error: unknown): boolean {
+  if (error instanceof SupabaseDataError) {
+    if (error.code === "NOT_CONFIGURED") return true;
+    if (error.message.toLowerCase().includes("could not find the function")) return true;
+  }
+  const raw = error as { code?: string; message?: string; status?: number } | null;
+  if (String(raw?.code ?? "").toUpperCase() === "PGRST202") return true;
+  if (raw?.status === 404) return true;
+  const message = String(raw?.message ?? "").toLowerCase();
+  return message.includes("could not find the function") || message.includes("pgrst202");
+}
+
 // ---------------------------------------------------------------------------
 // Row shapes (mirror the normalized tables from the migration).
 // ---------------------------------------------------------------------------

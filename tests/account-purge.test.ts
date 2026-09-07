@@ -8,7 +8,7 @@ describe("super-admin permanent account purge", () => {
   it("provides a privileged, server-gated permanent purge requiring a typed confirmation", () => {
     const db = source("server/db.ts");
     const router = source("server/routers.ts");
-    const screen = source("app/admin/manage-deletions.tsx");
+    const screen = source("app/admin/deletion-management.tsx");
     expect(db).toContain("export async function purgeUserByContact");
     expect(db).toContain("export async function previewPurgeByContact");
     expect(db).toContain("db.delete(workspaceMembers)");
@@ -33,7 +33,7 @@ describe("super-admin permanent account purge", () => {
   });
 
   it("shows a read-only preview of all related records and uses a strict red confirmation modal", () => {
-    const screen = source("app/admin/manage-deletions.tsx");
+    const screen = source("app/admin/deletion-management.tsx");
     expect(screen).toContain("السجلات المرتبطة التي ستُمسح");
     expect(screen).toContain("حذف نهائي لا رجعة فيه");
     expect(screen).toContain('placeholder="اكتب «حذف» أو «DELETE» للتأكيد"');
@@ -44,7 +44,7 @@ describe("super-admin permanent account purge", () => {
   it("lists pending-deletion accounts with remaining time and archives removed accounts with the actor", () => {
     const db = source("server/db.ts");
     const router = source("server/routers.ts");
-    const screen = source("app/admin/manage-deletions.tsx");
+    const screen = source("app/admin/deletion-management.tsx");
     const card = source("app/admin/master-control.tsx");
     expect(db).toContain("export async function listPendingDeletionAccounts");
     expect(db).toContain("remainingMs");
@@ -58,8 +58,9 @@ describe("super-admin permanent account purge", () => {
     expect(screen).toContain("قيد المهلة (١٤ يومًا)");
     expect(screen).toContain("سجل المحذوفات");
     expect(screen).toContain("حذف نهائي الآن");
-    expect(card).toContain("فتح قائمة طلبات الحذف");
-    expect(card).toContain("router.push(\"/admin/manage-deletions\")");
-    expect(card).toContain("pendingDeletionCount");
+    expect(card).toContain("إدارة الحذف النهائي والمهلة الزمنية");
+    expect(card).toContain("router.push(\"/admin/deletion-management\"");
+    expect(screen).toContain("محذوفة نهائياً");
+    expect(screen).toContain("قيد المهلة (14 يوماً)");
   });
 });

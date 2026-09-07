@@ -49,7 +49,7 @@ export default function OAuthCallback() {
     const finish = () => {
       if (!active) return;
       setStatus("success");
-      redirectTimer = setTimeout(() => router.replace("/workspace-gate"), 1000);
+      redirectTimer = setTimeout(() => router.replace("/workspace-hub"), 1000);
     };
 
     const persistUser = async (candidate: unknown) => {

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { CompactScreenHeader } from "@/components/compact-screen-header";
+import { AdminSessionExpired } from "@/components/admin-session-expired";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
@@ -62,6 +63,7 @@ export default function QaSandboxScreen() {
   };
 
   if (status.isLoading) return <ScreenContainer><View style={styles.center}><ActivityIndicator color={colors.primary} /><Text style={{ color: colors.muted }}>جارٍ تحميل بيئة الاختبار…</Text></View></ScreenContainer>;
+  if (status.error?.data?.code === "UNAUTHORIZED") return <AdminSessionExpired />;
   if (status.error) return <ScreenContainer><View style={styles.center}><MaterialIcons name="lock-outline" size={36} color={colors.error} /><Text style={[styles.denied, { color: colors.foreground }]}>بيئة الاختبار مخصصة للإدارة العليا</Text><Pressable onPress={() => router.replace("/admin/master-control")} style={[styles.back, { backgroundColor: colors.primary }]}><Text style={styles.whiteText}>العودة إلى الإدارة العليا</Text></Pressable></View></ScreenContainer>;
 
   const result = preview.data;

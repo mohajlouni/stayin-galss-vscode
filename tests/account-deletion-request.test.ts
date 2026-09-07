@@ -92,6 +92,19 @@ describe("account deletion request", () => {
     expect(screen).not.toContain('Alert.alert(language === "ar" ? "إلغاء طلب الحذف"');
   });
 
+  it("carries the scheduledFor deadline into the restore gateway and never wipes a valid session mid-loop", () => {
+    const gate = source("components/route-access-gate.tsx");
+    const hub = source("app/workspace-hub.tsx");
+    const recovery = source("app/account-recovery.tsx");
+    expect(gate).toContain('pathname: "/restore-account"');
+    expect(gate).toContain("routing.data?.deletion?.scheduledFor");
+    expect(hub).toContain('pathname: "/restore-account"');
+    expect(hub).toContain("routing.data?.deletion?.scheduledFor");
+    expect(recovery).toContain("routing.data?.deletion?.scheduledFor");
+    expect(recovery).not.toContain('if (!scheduledFor) {');
+    expect(recovery).not.toContain('router.replace("/auth/login")');
+  });
+
   it("exposes a public check for a pending deletion by email so login can detect and offer OTP recovery", () => {
     const oauth = source("server/_core/oauth.ts");
     const api = source("lib/_core/api.ts");

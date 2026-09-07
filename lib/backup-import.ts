@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { AppData, Booking, BookingStatus, BookingType, Chalet, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, DepositRefund, Expense, Payment, Settings, TurnoverTask, WaitlistEntry, normalizeAppData } from "./booking-model";
-import { type LoyaltyAccount, type LoyaltyTransaction, type UtilityReading, type WeatherLog } from "./booking-model";
+import { type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceTask, type UtilityReading, type WeatherLog } from "./booking-model";
 
 export const BACKUP_VERSION = 8;
 
@@ -279,23 +279,44 @@ const assetSchema = z.object({
 
 const maintenanceTaskSchema = z.object({
   id: identifierSchema,
-  chaletId: identifierSchema,
+  chaletId: identifierSchema.optional(),
   chaletName: z.string().optional(),
+  targetScope: z.enum(["all_units"]).optional(),
   assetId: z.string().optional(),
   assetName: z.string().optional(),
   title: identifierSchema,
-  frequency: z.enum(["daily", "weekly", "monthly", "custom"]),
+  frequency: z.enum(["once", "daily", "weekly", "biweekly", "monthly", "custom"]),
   nextDueDate: dateSchema,
   lastCompletedDate: dateSchema.optional(),
   assignedToStaffId: z.number().int().optional(),
   assignedToStaffName: z.string().optional(),
-  status: z.enum(["pending", "in_progress", "completed"]),
+  status: z.enum(["scheduled", "pending", "in_progress", "completed", "cancelled"]),
   cost: moneySchema.optional(),
   note: optionalText,
+  actualCost: moneySchema.optional(),
+  performedById: z.number().int().positive().optional(),
+  performedByName: z.string().optional(),
+  performedByRole: z.enum(["owner", "staff", "guard"]).optional(),
+  paymentSource: z.enum(["owner_account", "staff_custody", "guard_custody"]).optional(),
+  completionNotes: optionalText,
   customIntervalDays: z.number().int().min(1).optional(),
+  expenseId: identifierSchema.optional(),
   createdAt: z.string(),
   completedAt: z.string().optional(),
   completedByName: z.string().optional(),
+  blockBooking: z.boolean().optional(),
+  blockPeriod: z.enum(["full_day", "morning", "evening", "overnight"]).optional(),
+});
+
+const maintenanceAuditEntrySchema = z.object({
+  id: identifierSchema,
+  taskId: identifierSchema,
+  userId: z.number().int().positive().optional(),
+  userName: z.string(),
+  userRole: z.enum(["owner", "staff", "guard"]),
+  action: z.enum(["created", "started", "completed", "cancelled", "expense_posted"]),
+  timestamp: z.string(),
+  details: z.string().optional(),
 });
 
 const notificationSchema = z.object({
@@ -375,6 +396,7 @@ const expenseSchema = z.object({
   paymentMethod: z.enum(["cash", "click"]).optional(),
   receiptUri: optionalText,
   generalAllocations: z.array(expenseAllocationSchema).optional(),
+  expenseSource: z.enum(["guard-custody", "staff-float", "owner-account"]).optional(),
   createdAt: z.string(),
   createdByName: z.string().optional(),
 }) satisfies z.ZodType<Expense>;
@@ -408,6 +430,7 @@ const backupSchema = z.object({
   contracts: z.array(leaseContractSchema).optional(),
   assets: z.array(assetSchema).optional(),
   maintenanceTasks: z.array(maintenanceTaskSchema).optional(),
+  maintenanceAuditLog: z.array(maintenanceAuditEntrySchema).optional(),
   notifications: z.array(notificationSchema).optional(),
   weatherLogs: z.array(weatherLogSchema).optional(),
   utilityReadings: z.array(utilityReadingSchema).optional(),
@@ -493,7 +516,8 @@ export function parseBackupData(raw: string): AppData {
     customers: imported.customers ?? [],
     contracts: imported.contracts ?? [],
     assets: imported.assets ?? [],
-    maintenanceTasks: imported.maintenanceTasks ?? [],
+    maintenanceTasks: imported.maintenanceTasks as unknown as MaintenanceTask[],
+    maintenanceAuditLog: imported.maintenanceAuditLog ?? [],
     notifications: imported.notifications ?? [],
     weatherLogs: imported.weatherLogs as unknown as WeatherLog[],
     utilityReadings: imported.utilityReadings as unknown as UtilityReading[],

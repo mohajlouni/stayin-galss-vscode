@@ -109,7 +109,7 @@ export default function OtpVerificationScreen() {
           router.replace({ pathname: "/account-recovery", params: { scheduledFor: pendingDeletion.scheduledFor } });
           return;
         }
-        router.replace("/onboarding");
+        router.replace("/workspace-hub");
         return;
       }
       const code = result.error as SupabaseOtpError | AuthError;

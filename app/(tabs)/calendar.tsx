@@ -28,7 +28,9 @@ import {
   reservedPeriodColorForBookingType,
   reservedPeriodColorKeyForShift,
   todayISO,
+  type MaintenanceTask,
 } from "@/lib/booking-model";
+import { isShiftMaintenanceBlocked } from "@/lib/maintenance-blocks";
 import { findBookingConflicts } from "@/services/availabilityService";
 import { useBookings } from "@/lib/booking-store";
 import { indexCalendarBookingsByDate } from "@/lib/calendar-booking-index";
@@ -44,7 +46,7 @@ const EMPTY_DAY_WAITLIST: WaitlistEntry[] = [];
 type CalendarDaySummary = { bookings: Booking[]; arrivals: number; departures: number; waiting: boolean };
 const EMPTY_DAY_SUMMARY: CalendarDaySummary = { bookings: EMPTY_DAY_BOOKINGS, arrivals: 0, departures: 0, waiting: false };
 export default function CalendarScreen() {
-  const { bookings, waitlist, chalets, settings, hydrated } = useBookings();
+  const { bookings, waitlist, chalets, settings, maintenanceTasks, hydrated } = useBookings();
   const { selectedChaletId } = useChaletScope();
   const { t, isRTL, language } = useI18n();
   const { formatDate, formatMonth, formatHijriMonth, formatTime, showHijriDate, deviceSettings } = useAppPreferences();
@@ -79,6 +81,16 @@ export default function CalendarScreen() {
     return hasOther ? [...keys, "other"] : [...keys];
   }, [selectedChaletShifts]);
   const chaletMarkers = useMemo(() => Object.fromEntries(chalets.map((chalet) => [chalet.id, { color: chalet.color, icon: propertyTypeIcon(chalet.propertyType) }])), [chalets]);
+  const maintenanceTasksList = (maintenanceTasks ?? []) as MaintenanceTask[];
+
+  /** هل يوجد يومًا فيه مهمة صيانة محصورة للوحدة (للنظرية العامة). */
+  const dayMaintenanceActive = useMemo(() => {
+    const index = new Set<string>();
+    for (const task of maintenanceTasksList) {
+      if (task.status !== "completed" && task.blockBooking === true) index.add(task.nextDueDate.slice(0, 10));
+    }
+    return (date: string) => index.has(date);
+  }, [maintenanceTasksList]);
 
   const monthHolidays = useMemo(() => jordanianHolidaysForMonth(year, month), [month, year]);
   const holidayIndex = useMemo(() => {
@@ -152,7 +164,7 @@ export default function CalendarScreen() {
             {days.map((date, index) => {
               if (!date) return <View key={`blank-${index}`} style={styles.blankDay} />;
               const summary = daySummary(date);
-              return <CalendarDay key={date} date={date} bookings={summary.bookings} arrivals={summary.arrivals} departures={summary.departures} waiting={summary.waiting} selected={selected === date} today={date === today} todayDate={today} colors={colors} accentColor={selectedChaletAccent} chaletMarkers={chaletMarkers} tintActiveUnit={!isAllUnitsView} holiday={holidayOn(date)} onPress={() => selectDay(date)} />;
+              return <CalendarDay key={date} date={date} bookings={summary.bookings} arrivals={summary.arrivals} departures={summary.departures} waiting={summary.waiting} selected={selected === date} today={date === today} todayDate={today} colors={colors} accentColor={selectedChaletAccent} chaletMarkers={chaletMarkers} tintActiveUnit={!isAllUnitsView} holiday={holidayOn(date)} hasMaintenance={dayMaintenanceActive(date)} onPress={() => selectDay(date)} />;
             })}
           </View>
         </BentoGlassCard>
@@ -185,13 +197,13 @@ export default function CalendarScreen() {
           <MaterialIcons name="touch-app" size={20} color={colors.primary} />
           <Text style={[styles.flex, { color: colors.muted, fontSize: 12, lineHeight: 19, textAlign: align }]}>{language === "ar" ? "اضغط على أي يوم لفتح ملخص حجوزاته وتفاصيله" : "Tap any day to open its booking summary and details."}</Text>
         </View>
-        <DayDetailsModal visible={Boolean(selected)} date={selected} bookings={selectedBookings} waiting={selectedWaitlist} chalets={chalets} selectedChaletId={selectedChaletId} settings={settings} formatDate={formatDate} formatTime={formatTime} colors={colors} language={language} isRTL={isRTL} onClose={() => setSelected(null)} />
+        <DayDetailsModal visible={Boolean(selected)} date={selected} bookings={selectedBookings} waiting={selectedWaitlist} chalets={chalets} selectedChaletId={selectedChaletId} settings={settings} maintenanceTasks={maintenanceTasksList} formatDate={formatDate} formatTime={formatTime} colors={colors} language={language} isRTL={isRTL} onClose={() => setSelected(null)} />
       </ScrollView>
     </ScreenContainer>
   );
 }
 
-function DayDetailsModal({ visible, date, bookings, waiting, chalets, selectedChaletId, settings, formatDate, formatTime, colors, language, isRTL, onClose }: { visible: boolean; date: string | null; bookings: Booking[]; waiting: import("@/lib/booking-model").WaitlistEntry[]; chalets: import("@/lib/booking-model").Chalet[]; selectedChaletId: string | null; settings: import("@/lib/booking-model").Settings; formatDate: (date: string) => string; formatTime: (time: string) => string; colors: ReturnType<typeof useColors>; language: "ar" | "en"; isRTL: boolean; onClose: () => void }) {
+function DayDetailsModal({ visible, date, bookings, waiting, chalets, selectedChaletId, settings, maintenanceTasks, formatDate, formatTime, colors, language, isRTL, onClose }: { visible: boolean; date: string | null; bookings: Booking[]; waiting: import("@/lib/booking-model").WaitlistEntry[]; chalets: import("@/lib/booking-model").Chalet[]; selectedChaletId: string | null; settings: import("@/lib/booking-model").Settings; maintenanceTasks: MaintenanceTask[]; formatDate: (date: string) => string; formatTime: (time: string) => string; colors: ReturnType<typeof useColors>; language: "ar" | "en"; isRTL: boolean; onClose: () => void }) {
   if (!date) return null;
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
@@ -201,13 +213,15 @@ function DayDetailsModal({ visible, date, bookings, waiting, chalets, selectedCh
   const slotBookingsByShift = new Map(shifts.map((shift) => [shift.id, selectedChalet ? bookings.filter((booking) => findBookingConflicts({ chaletId: selectedChalet.id, startDate: date, endDate: date, bookingType: bookingTypeForShift(shift.id), shiftId: shift.id, startTime: shift.startTime, endTime: shift.endTime }, [booking]).length > 0) : EMPTY_DAY_BOOKINGS]));
   const slotBookings = (shift: ChaletShift) => slotBookingsByShift.get(shift.id) ?? EMPTY_DAY_BOOKINGS;
   const openSlot = (shift: ChaletShift) => { if (!selectedChalet) return; onClose(); router.push({ pathname: "/booking-form", params: { date, chaletId: selectedChalet.id, bookingType: bookingTypeForShift(shift.id), shiftId: shift.id } } as never); };
-  const availableShifts = shifts.filter((shift) => slotBookings(shift).length === 0);
+  const isBlockedShift = (shift: ChaletShift) => Boolean(selectedChalet) && isShiftMaintenanceBlocked(maintenanceTasks, date, selectedChalet!.id, shift);
+  const availableShifts = shifts.filter((shift) => slotBookings(shift).length === 0 && !isBlockedShift(shift));
+  const anyBlocked = shifts.some((shift) => isBlockedShift(shift));
   const openDetails = (bookingId: string) => { onClose(); requestAnimationFrame(() => router.push({ pathname: "/booking-detail", params: { id: bookingId } } as never)); };
-  const dayFooter = <>{selectedChalet ? availableShifts.length ? <><Text style={{ color: colors.muted, fontSize: 12, marginTop: bookings.length ? 8 : 0, marginBottom: 8, textAlign: align }}>{language === "ar" ? "الفترات المتاحة" : "Available shifts"}</Text>{availableShifts.map((shift) => <AvailableSlot key={shift.id} shift={shift} shiftColor={shift.color} formatTime={formatTime} colors={colors} language={language} row={row} onBook={() => openSlot(shift)} />)}</> : <GlowGlassCard glowColor={colors.muted} intensity={12} style={styles.allBookedBadge} contentStyle={styles.allBookedBadgeContent}><MaterialIcons name="event-busy" size={17} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "لا توجد فترة متاحة" : "No available shift"}</Text></GlowGlassCard> : <GlowGlassCard glowColor={colors.muted} intensity={12} style={styles.allBookedBadge} contentStyle={styles.allBookedBadgeContent}><MaterialIcons name="info-outline" size={17} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "اختر شاليهًا لعرض فتراته المتاحة" : "Select a chalet to view available shifts"}</Text></GlowGlassCard>}{waiting.length ? <GlowGlassCard glowColor={PERIOD_COLORS.waitlist} intensity={14} style={styles.waitlistSection} contentStyle={styles.waitlistSectionContent}><Text style={{ color: PERIOD_COLORS.waitlist, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "طلبات الانتظار" : "Waitlist requests"}</Text>{waiting.map((entry) => <WaitlistQuickRow key={entry.id} entry={entry} settings={settings} colors={colors} language={language} row={row} />)}</GlowGlassCard> : null}</>;
+  const dayFooter = <>{selectedChalet ? availableShifts.length ? <><Text style={{ color: colors.muted, fontSize: 12, marginTop: bookings.length ? 8 : 0, marginBottom: 8, textAlign: align }}>{language === "ar" ? "الفترات المتاحة" : "Available shifts"}</Text>{availableShifts.map((shift) => <AvailableSlot key={shift.id} shift={shift} shiftColor={shift.color} formatTime={formatTime} colors={colors} language={language} row={row} onBook={() => openSlot(shift)} />)}</> : <GlowGlassCard glowColor={colors.muted} intensity={12} style={styles.allBookedBadge} contentStyle={styles.allBookedBadgeContent}><MaterialIcons name="event-busy" size={17} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "لا توجد فترة متاحة" : "No available shift"}</Text></GlowGlassCard> : <GlowGlassCard glowColor={colors.muted} intensity={12} style={styles.allBookedBadge} contentStyle={styles.allBookedBadgeContent}><MaterialIcons name="info-outline" size={17} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "اختر شاليهًا لعرض فتراته المتاحة" : "Select a chalet to view available shifts"}</Text></GlowGlassCard>}{anyBlocked ? <GlowGlassCard glowColor="#E8590C" intensity={14} style={styles.maintenanceSection} contentStyle={styles.maintenanceSectionContent}><Text style={{ color: "#E8590C", fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "صيانة مجدولة" : "Scheduled maintenance"}</Text>{shifts.filter((shift) => isBlockedShift(shift)).map((shift) => <View key={shift.id} style={[styles.maintenanceRow, { flexDirection: row }]}><MaterialIcons name="build" size={16} color="#E8590C" /><Text style={[styles.flex, { color: colors.foreground, fontSize: 12, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "صيانة: " : "Maintenance: "}{shift.name}</Text></View>)}</GlowGlassCard> : null}{waiting.length ? <GlowGlassCard glowColor={PERIOD_COLORS.waitlist} intensity={14} style={styles.waitlistSection} contentStyle={styles.waitlistSectionContent}><Text style={{ color: PERIOD_COLORS.waitlist, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "طلبات الانتظار" : "Waitlist requests"}</Text>{waiting.map((entry) => <WaitlistQuickRow key={entry.id} entry={entry} settings={settings} colors={colors} language={language} row={row} />)}</GlowGlassCard> : null}</>;
   return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><GlowGlassCard radius={28} intensity={22} style={styles.dayModal} contentStyle={styles.dayModalContent}><View style={[styles.modalHeader, { flexDirection: row }]}><Text style={[styles.modalDate, { color: colors.foreground }]}>{compactDate}</Text><Pressable accessibilityLabel={language === "ar" ? "إغلاق تفاصيل اليوم" : "Close day details"} onPress={onClose} style={({ pressed }) => [styles.modalCloseIcon, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.68 : 1 }]}><MaterialIcons name="close" size={20} color={colors.primary} /></Pressable></View><FlatList data={bookings} keyExtractor={(booking) => booking.id} renderItem={({ item }) => <DayBookingCard booking={item} chalets={chalets} settings={settings} formatDate={formatDate} formatTime={formatTime} colors={colors} language={language} isRTL={isRTL} onViewDetails={() => openDetails(item.id)} />} initialNumToRender={6} maxToRenderPerBatch={6} windowSize={5} removeClippedSubviews contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false} ListHeaderComponent={bookings.length ? <Text style={{ color: colors.muted, fontSize: 12, marginBottom: 8, textAlign: align }}>{language === "ar" ? "الحجوزات المشغولة" : "Occupied bookings"}</Text> : null} ListFooterComponent={dayFooter} /></GlowGlassCard></View></Modal>;
 }
 
-function CalendarDay({ date, bookings, arrivals, departures, waiting, selected, today, todayDate, colors, accentColor, chaletMarkers, tintActiveUnit, holiday, onPress }: { date: string; bookings: Booking[]; arrivals: number; departures: number; waiting: boolean; selected: boolean; today: boolean; todayDate: string; colors: ReturnType<typeof useColors>; accentColor: string; chaletMarkers: Record<string, { color: string; icon: ReturnType<typeof propertyTypeIcon> }>; tintActiveUnit: boolean; holiday: JordanianHoliday | null; onPress: () => void }) {
+function CalendarDay({ date, bookings, arrivals, departures, waiting, selected, today, todayDate, colors, accentColor, chaletMarkers, tintActiveUnit, holiday, hasMaintenance, onPress }: { date: string; bookings: Booking[]; arrivals: number; departures: number; waiting: boolean; selected: boolean; today: boolean; todayDate: string; colors: ReturnType<typeof useColors>; accentColor: string; chaletMarkers: Record<string, { color: string; icon: ReturnType<typeof propertyTypeIcon> }>; tintActiveUnit: boolean; holiday: JordanianHoliday | null; hasMaintenance: boolean; onPress: () => void }) {
   const overflowCount = bookings.length - 3;
   const tinted = !selected && !today && tintActiveUnit;
   const highlighted = selected || today;
@@ -219,8 +233,9 @@ function CalendarDay({ date, bookings, arrivals, departures, waiting, selected, 
   const textGlow = highlighted ? { textShadowColor: highlightColor, textShadowRadius: 8, textShadowOffset: { width: 0, height: 0 } } : {};
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.dayCell, { opacity: pressed ? 0.88 : passed ? 0.35 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] }]} accessibilityLabel={`${date}${bookings.length ? `, ${bookings.length} bookings` : ""}`}>
-      <View style={[styles.dayTile, highlighted && { borderWidth: 1 }, tinted && { backgroundColor: accentColor + "25" }, glow]}>
+      <View style={[styles.dayTile, highlighted && { borderWidth: 1 }, tinted && { backgroundColor: accentColor + "25" }, hasMaintenance && { borderColor: hasMaintenance ? "#E8590C" : undefined }, glow]}>
         <Text style={[{ color: highlighted ? highlightColor : colors.foreground, fontWeight: highlighted ? "900" : "700", fontSize: 13 }, textGlow]}>{dateObjectUTC(date).getUTCDate()}</Text>
+        {hasMaintenance ? <View style={styles.maintenanceBadge}><MaterialIcons name="build" size={8} color="#FFFFFF" /></View> : null}
         {showArrows ? <View style={styles.operationDots}>{arrivals ? <MaterialIcons name="login" size={9} color={colors.success} /> : null}{departures ? <MaterialIcons name="logout" size={9} color={colors.primary} /> : null}</View> : null}
         {vacant ? <View style={styles.vacantDash} /> : <View style={styles.dayDots}>{bookings.slice(0, 3).map((booking) => { const marker = chaletMarkers[booking.chaletId ?? ""]; return <View key={booking.id} style={[styles.dot, { backgroundColor: marker?.color ?? reservedPeriodColorForBookingType(booking.bookingType) }]} />; })}{waiting ? <View style={[styles.dot, { backgroundColor: PERIOD_COLORS.waitlist }]} /> : null}</View>}
         {overflowCount > 0 ? <View style={[styles.overflowBadge, { backgroundColor: colors.surfaceMuted }]}><Text style={[styles.overflowText, { color: colors.muted }]}>+{overflowCount}</Text></View> : null}
@@ -284,6 +299,10 @@ const styles = StyleSheet.create({
   overflowBadge: { minWidth: 16, minHeight: 13, borderRadius: 7, paddingHorizontal: 3, alignItems: "center", justifyContent: "center" },
   overflowText: { fontSize: 8, fontWeight: "800", textAlign: "center" },
   holidayStarBadge: { position: "absolute", top: 3, right: 3, width: 13, height: 13, borderRadius: 6.5, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255, 213, 79, 0.16)" },
+  maintenanceBadge: { position: "absolute", top: 2, left: 2, width: 13, height: 13, borderRadius: 6.5, alignItems: "center", justifyContent: "center", backgroundColor: "#E8590C" },
+  maintenanceSection: { borderRadius: 18, marginTop: 10, borderWidth: 0.5, borderColor: "#E8590C55" },
+  maintenanceSectionContent: { padding: 12 },
+  maintenanceRow: { alignItems: "center", gap: 8, marginTop: 8 },
   holidaysCard: { borderRadius: 20, marginTop: 12 },
   holidaysCardContent: { padding: 13, gap: 8 },
   holidaysCardHeader: { alignItems: "center", gap: 9 },

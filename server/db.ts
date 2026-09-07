@@ -1,14 +1,15 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { accountDeletionRequests, activeWorkspaces, globalFeatureFlags, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceFeatureSettings, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
+import { accountDeletionRequests, activeWorkspaces, globalFeatureFlags, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, systemErrorLogs, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceFeatureSettings, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { matchesSuperAdminIdentity } from "./_core/identity";
+import { matchesRootAccountCode, matchesSuperAdminIdentity, ROOT_IMMUNITY_VIOLATION } from "./_core/identity";
 import { nextCodeForRole, resolveIdentityRole } from "../lib/user-code";
 import { getSupabaseClient } from "./_core/supabase";
 import { MANAGER_PERMISSIONS, normalizeWorkspacePermissions, permissionsForWorkspaceRole, type WorkspacePermissions } from "../shared/workspace-permissions";
 import { DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, isValidWorkspaceCode, normalizeAppData, normalizeWorkspaceCode, suggestWorkspaceCode } from "../lib/booking-model";
 import { DEFAULT_GLOBAL_FEATURE_FLAGS, DEFAULT_WORKSPACE_FEATURE_PREFERENCES, mergeGlobalOverPreference, type GlobalFeatureFlagKey, type WorkspaceFeaturePreferenceKey } from "../shared/feature-flags";
+import { SESSION_TTL_MS } from "../shared/const";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -184,6 +185,28 @@ export async function ensureUserCodeColumn(): Promise<void> {
   }
 }
 
+/** إضافة عمود alwaysPromptWorkspaceSelection للجدول في قواعد البيانات القائمة (idempotent). */
+export async function ensureAlwaysPromptColumn(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.execute(sql`ALTER TABLE stayInUsers ADD COLUMN alwaysPromptWorkspaceSelection boolean NOT NULL DEFAULT FALSE`);
+    console.log("[Database] Added alwaysPromptWorkspaceSelection column");
+  } catch (error) {
+    if (error instanceof Error && /Duplicate column|already exists/i.test(error.message)) {
+      return;
+    }
+    console.warn("[Database] Could not add alwaysPromptWorkspaceSelection column:", error);
+  }
+}
+
+/** حفظ تفضيل "اعرض شاشة اختيار المنشآت دائماً عند تسجيل الدخول" للمستخدم الحالي (idempotent). */
+export async function setWorkspaceSelectionPreference(userId: number, enabled: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(users).set({ alwaysPromptWorkspaceSelection: enabled }).where(eq(users.id, userId));
+}
+
 /** منح معرّف ذكي حسب الدور لكل مستخدم ناقصه: السوبر أدمن #U1000، والملاك #U1011+،
  *  والموظفون #S2001+، والحراس #G5001+، مع تجاهل النطاق المحجوز U1001–U1010.
  *  مدعوم بالتكرار (idempotent). */
@@ -323,7 +346,45 @@ type ContactUser = {
   loginMethod: string | null;
   role: "user" | "admin";
   createdAt: Date;
+  userCode: string | null;
 };
+
+/**
+ * Hard immunity lock for the root Super Admin account (#U1000). Matches by the
+ * official master identity (openId / phone / email), by the `super_admin` role,
+ * or by the user code #U1000 / database id 1000 — so even the literal
+ * `role === 'super_admin'` check (which misses the live DB's id=1) is covered.
+ */
+export function isImmutableRootAccount(user: { openId?: string | null; email?: string | null; phone?: string | null; userCode?: string | null; role?: string | null } | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === "super_admin") return true;
+  if (matchesRootAccountCode(user.userCode)) return true;
+  return matchesSuperAdminIdentity({ openId: user.openId, email: user.email, phone: user.phone }, ENV.ownerOpenId);
+}
+
+/** Does a given user-id belong to the immune root account? */
+export async function isImmutableRootUserId(userId: number): Promise<boolean> {
+  const database = await getDb();
+  if (!database) return false;
+  const row = (await database.select({ openId: users.openId, email: users.email, phone: users.phone, userCode: users.userCode, role: users.role }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  if (!row) return false;
+  return isImmutableRootAccount(row);
+}
+
+/**
+ * Resolves a contact term (email / phone / numeric id) and reports whether it
+ * unambiguously points at the immune root account. Used by admin endpoints so a
+ * purge / preview of the root account fails fast with a 403 FORBIDDEN instead of
+ * touching any data.
+ */
+export async function findImmutableRootByContact(contact: string): Promise<{ id: number } | null> {
+  const database = await getDb();
+  if (!database) return null;
+  const matches = await resolveUsersByContact(database, contact);
+  if (matches.length !== 1) return null;
+  const user = matches[0];
+  return isImmutableRootAccount(user) ? { id: user.id } : null;
+}
 
 /** Resolve a user by email, phone, or numeric id (in that preference order). */
 async function resolveUsersByContact(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, contact: string): Promise<ContactUser[]> {
@@ -337,7 +398,7 @@ async function resolveUsersByContact(db: NonNullable<Awaited<ReturnType<typeof g
     conditions.push(eq(users.id, Number(term)));
   }
   if (!conditions.length) return [];
-  const rows = await db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, phone: users.phone, loginMethod: users.loginMethod, role: users.role, createdAt: users.createdAt }).from(users).where(or(...conditions)).limit(20);
+  const rows = await db.select({ id: users.id, openId: users.openId, name: users.name, email: users.email, phone: users.phone, loginMethod: users.loginMethod, role: users.role, createdAt: users.createdAt, userCode: users.userCode }).from(users).where(or(...conditions)).limit(20);
   return rows.map((row) => ({ ...row, name: row.name, email: row.email, phone: row.phone, loginMethod: row.loginMethod }));
 }
 
@@ -358,6 +419,9 @@ export async function previewPurgeByContact(contact: string): Promise<PreviewPur
   if (!matches.length) return { ok: false, error: "لم يتم العثور على مستخدم بهذا البريد أو الهاتف أو المعرّف." };
   if (matches.length > 1) return { ok: false, error: `تطابقت ${matches.length} حسابات. حدّد بمعرّف رقمي دقيق.`, suggestions: matches.map((m) => `#${m.id} — ${m.email ?? ""} ${m.phone ?? ""} ${m.name ?? ""}`.trim()) };
   const user = matches[0];
+  // Hard immunity: the root Super Admin account is never purged, previewed as a
+  // deletion candidate, or removed from any grace-period queue.
+  if (isImmutableRootAccount(user)) return { ok: false as const, error: ROOT_IMMUNITY_VIOLATION };
   const counts: Record<string, number> = {};
   await Promise.all([
     db.select({ c: sql`count(*)` }).from(accountDeletionRequests).where(eq(accountDeletionRequests.userId, user.id)).then((r) => { counts.deletionRequests = Number(r[0]?.c ?? 0); }),
@@ -406,6 +470,11 @@ export async function purgeUserByContact(actorUserId: number, contact: string, t
   if (!matches.length) return { ok: false as const, error: "لم يتم العثور على مستخدم بهذا البريد أو الهاتف أو المعرّف." };
   if (matches.length > 1) return { ok: false as const, error: `تطابقت ${matches.length} حسابات. حدّد بمعرّف رقمي دقيق.` };
   const user = matches[0];
+
+  // Hard immunity (defense in depth): the router already short-circuits with a
+  // 403 FORBIDDEN, but the destructive core must never be able to purge #U1000
+  // even if a new caller forgets the guard.
+  if (isImmutableRootAccount(user)) return { ok: false as const, error: ROOT_IMMUNITY_VIOLATION };
 
   const removed: Record<string, number> = {};
   await Promise.all([
@@ -460,7 +529,7 @@ export async function listPendingDeletionAccounts(): Promise<PendingDeletionAcco
     .where(eq(accountDeletionRequests.status, "pending"))
     .orderBy(asc(accountDeletionRequests.scheduledFor));
   return rows
-    .filter((row) => row.request.scheduledFor > now)
+    .filter((row) => row.request.scheduledFor > now && !isImmutableRootAccount(row.user))
     .map((row) => ({
       userId: row.request.userId,
       email: row.user.email,
@@ -906,17 +975,36 @@ export async function createWorkspace(input: { user: { id: number; name: string 
   if (!workspaceName) throw new Error("workspace-name-required");
   if (workspaceName.length > 255) throw new Error("workspace-name-too-long");
   const currency = input.currency?.trim().slice(0, 8) || null;
-  const workspaceResult = await database.insert(workspaces).values({ name: workspaceName, ownerUserId: input.user.id, currency });
-  const workspaceId = Number(workspaceResult[0].insertId);
-  await database.insert(workspaceMembers).values({ workspaceId, userId: input.user.id, displayName: input.user.name?.trim() || "المالك", phone: input.phone?.trim() || "—", role: "owner", permissions: JSON.stringify(MANAGER_PERMISSIONS), status: "active" });
-  await database.insert(workspaceActivity).values({ workspaceId, actorUserId: input.user.id, action: "workspace-created", subject: workspaceName, details: "تم إنشاء مجموعة المنشآت" });
-  // Seed a real initial payload so the freshly-created workspace renders a
-  // healthy dashboard immediately (settings/business identity included) instead
-  // of relying on a later empty-hydration path.
-  const seeded = normalizeAppData({ settings: { ...DEFAULT_SETTINGS, businessName: workspaceName, businessPhone: input.phone?.trim() || "", currency: currency ?? DEFAULT_SETTINGS.currency } });
-  await database.insert(workspaceData).values({ workspaceId, payload: JSON.stringify(seeded), version: 0, updatedByUserId: input.user.id }).onDuplicateKeyUpdate({ set: {} });
-  await setActiveWorkspace(input.user.id, workspaceId);
-  return (await getActiveWorkspaceMember(input.user.id))!;
+
+  // ZERO-UNITS POLICY: a new workspace is born completely clean — no seeded,
+  // fabricated or template units ("كوخ 1" / "شاليه 2"). The owner must add every
+  // unit intentionally through "إضافة وحدة جديدة". The write is atomic: if any
+  // critical row (workspace, membership, activation, data payload) fails, nothing
+  // is committed, so an HTTP success can never hide a half-created record and a
+  // failure can never appear after a real commit.
+  const created = await database.transaction(async (tx) => {
+    const existingByName = (await tx.select().from(workspaces).where(and(eq(workspaces.ownerUserId, input.user.id), eq(workspaces.name, workspaceName))).limit(1))[0];
+    if (existingByName) throw new Error("duplicate-workspace-name");
+    const workspaceResult = await tx.insert(workspaces).values({ name: workspaceName, ownerUserId: input.user.id, currency });
+    const workspaceId = Number(workspaceResult[0].insertId);
+    await tx.insert(workspaceMembers).values({ workspaceId, userId: input.user.id, displayName: input.user.name?.trim() || "المالك", phone: input.phone?.trim() || "—", role: "owner", permissions: JSON.stringify(MANAGER_PERMISSIONS), status: "active" });
+    await tx.insert(activeWorkspaces).values({ userId: input.user.id, workspaceId }).onDuplicateKeyUpdate({ set: { workspaceId } });
+    const seeded = normalizeAppData({ settings: { ...DEFAULT_SETTINGS, businessName: workspaceName, businessPhone: input.phone?.trim() || "", currency: currency ?? DEFAULT_SETTINGS.currency }, chalets: [], bookings: [], waitlist: [], turnoverTasks: [], expenses: [], specialPriceRules: [], auditLog: [] });
+    await tx.insert(workspaceData).values({ workspaceId, payload: JSON.stringify(seeded), version: 0, updatedByUserId: input.user.id }).onDuplicateKeyUpdate({ set: { workspaceId } });
+    const memberRow = (await tx.select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, input.user.id))).limit(1))[0];
+    if (!memberRow) throw new Error("workspace-member-not-found");
+    return { workspaceId, member: withPermissions(memberRow) };
+  });
+
+  // Best-effort audit log: a missing or drifted activity table must NEVER turn a
+  // committed successful creation into a false failure response.
+  try {
+    await database.insert(workspaceActivity).values({ workspaceId: created.workspaceId, actorUserId: input.user.id, action: "workspace-created", subject: workspaceName, details: "تم إنشاء مجموعة المنشآت" });
+  } catch (error) {
+    console.warn("[Workspace] Activity log skipped after creation (non-fatal):", error);
+  }
+
+  return created.member;
 }
 
 export async function getWorkspaceSummary(user: { id: number; name: string | null }) {
@@ -928,24 +1016,144 @@ export async function getWorkspaceSummary(user: { id: number; name: string | nul
   return { workspace, member };
 }
 
-export async function getWorkspaceRouting(user: { id: number; name: string | null }) {
+/**
+ * Safe workspace deletion for the OWNING user only. Enforces the single-owner
+ * constraint (an owner must always keep at least one owned workspace), requires
+ * an explicit typing challenge upstream, and removes the full workspace family
+ * (snapshot, backups, activity, invitations, pins, feature settings, members,
+ * and every user's active-pointer) before the workspace row itself. If the
+ * deleted workspace was the caller's active one, the active pointer is moved to
+ * another remaining workspace.
+ */
+export async function deleteWorkspaceIfOwner(user: { id: number; name: string | null }, workspaceId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const workspace = (await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+  if (!workspace) throw new Error("workspace-not-found");
+  if (workspace.ownerUserId !== user.id) throw new Error("owner-required");
+  const ownedCount = Number((await database.select({ c: sql`count(*)` }).from(workspaces).where(eq(workspaces.ownerUserId, user.id)))[0]?.c ?? 0);
+  if (ownedCount <= 1) throw new Error("owner-must-keep-one");
+  const wasActive = (await getActiveWorkspaceId(user.id)) === workspaceId;
+  await Promise.all([
+    database.delete(workspaceData).where(eq(workspaceData.workspaceId, workspaceId)),
+    database.delete(workspaceDataBackups).where(eq(workspaceDataBackups.workspaceId, workspaceId)),
+    database.delete(workspaceActivity).where(eq(workspaceActivity.workspaceId, workspaceId)),
+    database.delete(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, workspaceId)),
+    database.delete(workspaceOwnerPins).where(eq(workspaceOwnerPins.workspaceId, workspaceId)),
+    database.delete(workspaceFeatureSettings).where(eq(workspaceFeatureSettings.workspaceId, workspaceId)),
+    database.delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId)),
+    database.delete(activeWorkspaces).where(eq(activeWorkspaces.workspaceId, workspaceId)),
+    database.delete(workspaces).where(eq(workspaces.id, workspaceId)),
+  ]);
+  let nextActiveWorkspaceId: number | null = wasActive ? null : (await getActiveWorkspaceId(user.id)) ?? null;
+  if (wasActive) {
+    const memberships = await listWorkspaceMemberships(user.id);
+    const next = memberships.find((entry) => entry.member.role === "owner") ?? memberships[0];
+    if (next) await setActiveWorkspace(user.id, next.workspace.id);
+    nextActiveWorkspaceId = next?.workspace.id ?? null;
+  }
+  return { ok: true as const, deletedWorkspaceId: workspaceId, deletedWorkspaceName: workspace.name, nextActiveWorkspaceId };
+}
+
+/** Categories the granular purge engine can wipe inside a single workspace. */
+export const PURGE_RECORD_CATEGORIES = ["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "units", "workspace"] as const;
+export type PurgeRecordCategory = (typeof PURGE_RECORD_CATEGORIES)[number];
+
+/**
+ * Granular, strictly per-workspace purge for the Account Security sensitive area.
+ *
+ * Isolation contract (cross-tenant protection): every category mutates only the
+ * workspaceData JSON document whose PRIMARY KEY is `input.workspaceId`, and the
+ * structural "workspace" path runs through `deleteWorkspaceIfOwner`, which
+ * deletes the full tenant family scoped to that single id. No record outside
+ * `workspaceId` can ever be touched — there is intentionally no "global" branch.
+ *
+ * Guard rails:
+ * - A typed challenge must match before ANY write: "تصفير" for record purges,
+ *   "حذف" (or "DELETE") for the structural workspace deletion.
+ * - Workspace deletion enforces the owner-must-keep-one rule (an owner always
+ *   keeps at least one owned workspace) and is owner-only at the row level.
+ * - A recovery point (pre-purge snapshot) is always written first via
+ *   `saveOwnerEmergencySnapshot`, mirroring the legacy operations-reset.
+ */
+export async function purgeWorkspaceRecords(actor: { id: number; name: string | null }, workspaceId: number, categories: string[], challenge: string) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const workspace = (await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+  if (!workspace) throw new Error("workspace-not-found");
+  const selected = [...new Set(categories)].filter((category): category is PurgeRecordCategory => (PURGE_RECORD_CATEGORIES as readonly string[]).includes(category));
+
+  if (selected.includes("workspace")) {
+    if (challenge !== "حذف" && challenge !== "DELETE") throw new Error("purge-challenge-not-matched");
+    return await deleteWorkspaceIfOwner(actor, workspaceId);
+  }
+
+  if (challenge !== "تصفير" && challenge !== "DELETE") throw new Error("purge-challenge-not-matched");
+  if (!selected.length) throw new Error("purge-nothing-selected");
+  const stored = await getWorkspaceData(workspaceId);
+  if (!stored) return { version: 0, payload: null, removed: {} };
+  let data: ReturnType<typeof normalizeAppData>;
+  try {
+    data = normalizeAppData(JSON.parse(stored.payload));
+  } catch {
+    throw new Error("workspace-data-invalid");
+  }
+  const removed: Record<string, number> = {};
+  if (selected.includes("bookings")) { removed.bookings = data.bookings.length; data.bookings = []; }
+  if (selected.includes("waitlist")) { removed.waitlist = data.waitlist.length; data.waitlist = []; }
+  if (selected.includes("maintenance")) { removed.maintenanceTasks = (data.maintenanceTasks ?? []).length; removed.assets = (data.assets ?? []).length; data.maintenanceTasks = []; data.assets = []; }
+  if (selected.includes("notifications")) { removed.notifications = (data.notifications ?? []).length; data.notifications = []; }
+  if (selected.includes("customers")) { removed.customers = (data.customers ?? []).length; removed.contracts = (data.contracts ?? []).length; data.customers = []; data.contracts = []; }
+  if (selected.includes("loyalty")) { removed.loyaltyAccounts = (data.loyaltyAccounts ?? []).length; removed.loyaltyTransactions = (data.loyaltyTransactions ?? []).length; data.loyaltyAccounts = []; data.loyaltyTransactions = []; }
+  if (selected.includes("financials")) { removed.expenses = (data.expenses ?? []).length; removed.floatSettlements = (data.staffFloatSettlements ?? []).length; data.expenses = []; data.staffFloatSettlements = []; }
+  if (selected.includes("analytics")) { removed.auditLog = data.auditLog.length; removed.weatherLogs = (data.weatherLogs ?? []).length; removed.utilityReadings = (data.utilityReadings ?? []).length; data.auditLog = []; data.weatherLogs = []; data.utilityReadings = []; }
+  if (selected.includes("units")) { removed.chalets = data.chalets.length; removed.turnoverTasks = data.turnoverTasks.length; removed.specialPriceRules = data.specialPriceRules.length; data.chalets = []; data.turnoverTasks = []; data.specialPriceRules = []; }
+  const payload = JSON.stringify(normalizeAppData({ ...data }));
+  const result = await saveOwnerEmergencySnapshot({ workspaceId, payload, actorUserId: actor.id, action: "workspace-purge", subject: "تصفير بيانات المنشأة", details: JSON.stringify(removed) });
+  return { ...result, payload, removed };
+}
+
+export type RouteDestination = "restore" | "admin" | "onboarding" | "dashboard" | "selector";
+
+export async function getWorkspaceRouting(user: { id: number; name: string | null; openId?: string | null; email?: string | null; phone?: string | null; alwaysPromptWorkspaceSelection?: boolean | null }) {
   // An account inside its 14-day deletion grace period is locked to the restore
   // gateway: every internal route must bounce the user back until they cancel
-  // the deletion request (or it expires and the account is purged).
-  const deletion = await getAccountDeletionRequest(user.id);
+  // the deletion request (or it expires and the account is purged). The lookup
+  // is non-fatal so a transient DB hiccup can never 500 the login itself.
+  const deletion = await getAccountDeletionRequest(user.id).catch(() => null);
   const pendingDeletion = deletion && deletion.status === "pending" && deletion.scheduledFor && deletion.scheduledFor > new Date() ? { scheduledFor: deletion.scheduledFor.toISOString() } : null;
-  if (pendingDeletion) return { destination: "restore" as const, activeWorkspace: null, memberships: [], deletion: pendingDeletion };
+  if (pendingDeletion) return { destination: "restore" as const, activeWorkspace: null, memberships: [], deletion: pendingDeletion, alwaysPrompt: false };
   const memberships = await listWorkspaceMemberships(user.id);
-  if (!memberships.length) return { destination: "onboarding" as const, activeWorkspace: null, memberships, deletion: pendingDeletion };
+  // Super Admin enters the command center directly and is never trapped in the
+  // entry/onboarding hub (unless inside the deletion grace period above).
+  const isSuperAdmin = matchesSuperAdminIdentity({ openId: user.openId ?? null, email: user.email ?? null, phone: user.phone ?? null }, ENV.ownerOpenId);
+  if (isSuperAdmin) return { destination: "admin" as const, activeWorkspace: null, memberships, deletion: pendingDeletion, alwaysPrompt: false };
+  const alwaysPrompt = Boolean(user.alwaysPromptWorkspaceSelection);
+  if (!memberships.length) return { destination: "onboarding" as const, activeWorkspace: null, memberships, deletion: pendingDeletion, alwaysPrompt };
   const activeId = await getActiveWorkspaceId(user.id);
   const active = memberships.find((entry) => entry.workspace.id === activeId);
-  if (active) return { destination: "dashboard" as const, activeWorkspace: active, memberships, deletion: pendingDeletion };
-  if (memberships.length === 1) {
+  if (!alwaysPrompt && active) return { destination: "dashboard" as const, activeWorkspace: active, memberships, deletion: pendingDeletion, alwaysPrompt };
+  if (!alwaysPrompt && memberships.length === 1) {
     const single = memberships[0];
     await setActiveWorkspace(user.id, single.workspace.id);
-    return { destination: "dashboard" as const, activeWorkspace: single, memberships, deletion: pendingDeletion };
+    return { destination: "dashboard" as const, activeWorkspace: single, memberships, deletion: pendingDeletion, alwaysPrompt };
   }
-  return { destination: "selector" as const, activeWorkspace: null, memberships, deletion: pendingDeletion };
+  return { destination: "selector" as const, activeWorkspace: active ?? null, memberships, deletion: pendingDeletion, alwaysPrompt };
+}
+
+/**
+ * Single decision point for where a session should LAND right after login. It is
+ * embedded in the login responses so the client never guesses and never needs a
+ * second round-trip to /workspace-hub before routing.
+ *
+ * The Super Admin is evaluated FIRST and exits immediately WITHOUT any
+ * workspace-membership / tenant / onboarding query at all — the login response
+ * then carries `destination: "admin"` straight to /admin/master-control.
+ */
+export async function getLoginDestination(user: { id: number; name: string | null; openId?: string | null; email?: string | null; phone?: string | null; alwaysPromptWorkspaceSelection?: boolean | null }): Promise<RouteDestination> {
+  if (matchesSuperAdminIdentity({ openId: user.openId ?? null, email: user.email ?? null, phone: user.phone ?? null }, ENV.ownerOpenId)) return "admin";
+  const routing = await getWorkspaceRouting(user);
+  return routing.destination;
 }
 
 /**
@@ -1185,6 +1393,31 @@ export async function updateWorkspaceFeatureFlags(workspaceId: number, flags: Re
 }
 
 /** إنشاء جدول مفاتيح الحجب المركزي للإدارة العليا (idempotent) بلا ترحيلات. */
+export async function ensureSuperAdminAuditTable(): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot ensure super admin audit table: database not available");
+    return;
+  }
+  try {
+    await database.execute(sql`
+      CREATE TABLE IF NOT EXISTS stayInSuperAdminAudit (
+        id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        actorUserId int NOT NULL,
+        action varchar(80) NOT NULL,
+        targetWorkspaceId int NULL,
+        targetMemberId int NULL,
+        details text NULL,
+        createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX stayInSuperAdminAudit_actorUserId_idx (actorUserId),
+        INDEX stayInSuperAdminAudit_targetWorkspaceId_idx (targetWorkspaceId)
+      )
+    `);
+  } catch (error) {
+    console.error("[Database] Failed to ensure super admin audit table:", error);
+  }
+}
+
 export async function ensureGlobalFeatureFlagsTable(): Promise<void> {
   const database = await getDb();
   if (!database) {
@@ -1365,6 +1598,7 @@ export async function assignMasterWorkspaceMembership(input: { workspaceId: numb
     database.select().from(users).where(eq(users.id, input.userId)).limit(1),
   ]);
   if (!workspace[0] || !user[0]) throw new Error("Workspace or user not found");
+  if (isImmutableRootAccount(user[0])) throw new Error(ROOT_IMMUNITY_VIOLATION);
   const existing = (await database.select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.userId, input.userId))).limit(1))[0];
   if (existing?.role === "owner") throw new Error("Owner membership cannot be changed through master assignment");
   const fields = { displayName: input.displayName, phone: input.phone, role: input.role, permissions: JSON.stringify(input.permissions), status: input.status };
@@ -1802,4 +2036,246 @@ export async function seedDemoData(): Promise<void> {
 
   await setActiveWorkspace(owner.id, workspace.id);
   console.log("[Seed] Demo data seeded successfully");
+}
+
+/** إنشاء جدول سجل أخطاء النظام (idempotent) بلا ترحيلات. */
+export async function ensureSystemErrorLogsTable(): Promise<void> {
+  const database = await getDb();
+  if (!database) {
+    console.warn("[Database] Cannot ensure system error logs table: database not available");
+    return;
+  }
+  try {
+    await database.execute(sql`
+      CREATE TABLE IF NOT EXISTS stayInSystemErrorLogs (
+        id int NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        endpoint varchar(255) NOT NULL,
+        userId int NULL,
+        statusCode int NOT NULL,
+        errorMessage text NOT NULL,
+        stackTrace text NULL,
+        occurrenceCount int NOT NULL DEFAULT 1,
+        firstSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        lastSeenAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        status varchar(16) NOT NULL DEFAULT 'unresolved'
+      )
+    `);
+  } catch (error) {
+    console.error("[Database] Failed to ensure system error logs table:", error);
+  }
+}
+
+/** قياس جاهزية قاعدة البيانات برحلة ذهاب وعودة على SELECT 1. */
+export async function pingDatabase(): Promise<{ ok: boolean; latencyMs: number }> {
+  const database = await getDb();
+  if (!database) return { ok: false, latencyMs: 0 };
+  const startedAt = Date.now();
+  try {
+    await database.execute(sql`SELECT 1`);
+    return { ok: true, latencyMs: Date.now() - startedAt };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - startedAt };
+  }
+}
+
+/** عدد إجمالي الجلسات المنتهية غير المسبوقة (تغذية بطاقة التنظيف التلقائي). */
+export async function countExpiredSessions(): Promise<number> {
+  const database = await getDb();
+  if (!database) return 0;
+  try {
+    const rows = await database.select({ count: sql<number>`COUNT(*)` }).from(sessions).where(and(lt(sessions.expiresAt, new Date()), isNull(sessions.revokedAt)));
+    return Number(rows[0]?.count ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** عدد الجلسات الحية للمستخدم (غير ملغاة وغير منتهية). */
+export async function countUserLiveSessions(openId: string): Promise<number> {
+  const database = await getDb();
+  if (!database) return 0;
+  try {
+    const rows = await database.select({ count: sql<number>`COUNT(*)` }).from(sessions).where(and(eq(sessions.openId, openId), isNull(sessions.revokedAt), gt(sessions.expiresAt, new Date())));
+    return Number(rows[0]?.count ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** تسجيل خطأ نظام مع دمج التكرارات عبر (endpoint + statusCode) غير المُحلّين. */
+export async function recordSystemError(input: { endpoint: string; userId?: number | null; statusCode: number; errorMessage: string; stackTrace?: string | null }): Promise<void> {
+  const database = await getDb();
+  if (!database) return;
+  try {
+    const existing = await database.select({ id: systemErrorLogs.id }).from(systemErrorLogs).where(and(eq(systemErrorLogs.endpoint, input.endpoint), eq(systemErrorLogs.statusCode, input.statusCode), eq(systemErrorLogs.status, "unresolved"))).orderBy(asc(systemErrorLogs.firstSeenAt)).limit(1);
+    if (existing[0]) {
+      await database.update(systemErrorLogs).set({ occurrenceCount: sql`${systemErrorLogs.occurrenceCount} + 1`, lastSeenAt: new Date() }).where(eq(systemErrorLogs.id, existing[0].id));
+      return;
+    }
+    await database.insert(systemErrorLogs).values({ endpoint: input.endpoint, userId: input.userId ?? null, statusCode: input.statusCode, errorMessage: input.errorMessage, stackTrace: input.stackTrace ?? null });
+  } catch (error) {
+    console.error("[Database] Failed to record system error:", error);
+  }
+}
+
+/** سرد الأخطاء غير المُحلّلة الأحدث أولًا. */
+export async function listUnresolvedSystemErrors(limit = 100) {
+  const database = await getDb();
+  if (!database) return [];
+  try {
+    return await database.select().from(systemErrorLogs).where(eq(systemErrorLogs.status, "unresolved")).orderBy(desc(systemErrorLogs.lastSeenAt)).limit(limit);
+  } catch (error) {
+    console.error("[Database] Failed to list unresolved system errors:", error);
+    return [];
+  }
+}
+
+/** وضع علامة «تم الحل» على سجل خطأ معيّن. */
+export async function resolveSystemError(id: number): Promise<boolean> {
+  const database = await getDb();
+  if (!database) return false;
+  try {
+    const result = await database.update(systemErrorLogs).set({ status: "resolved", lastSeenAt: new Date() }).where(eq(systemErrorLogs.id, id));
+    return (result?.[0]?.affectedRows ?? 0) > 0;
+  } catch (error) {
+    console.error("[Database] Failed to resolve system error:", error);
+    return false;
+  }
+}
+
+export async function getUserById(userId: number) {
+  const database = await getDb();
+  if (!database) return undefined;
+  const rows = await database.select().from(users).where(eq(users.id, userId)).limit(1);
+  return rows[0];
+}
+
+/** فحص عام لحساب: الحالة، الرتبة، المنشآت والوحدات، الجلسات، وآخر رمز تحقق. */
+/** نتيجة فحص توثيق البريد لدى مزود الهوية (Supabase Auth) عبر مفتاح الخدمة.
+ *  "confirmed" تعني ضبط email_confirmed_at؛ بقية الحالات تصف سبب عدم التمكن من
+ *  الجزم، لتمكين التشخيص من المصالحة بين السجل المحلي وحالة مزود الهوية. */
+export type SupabaseEmailConfirmation =
+  | { status: "confirmed"; emailConfirmedAt: string }
+  | { status: "unconfirmed"; emailConfirmedAt: null }
+  | { status: "not_found"; emailConfirmedAt: null }
+  | { status: "unconfigured"; emailConfirmedAt: null }
+  | { status: "error"; emailConfirmedAt: null };
+
+/** استعلام حالة توثيق البريد في Supabase Auth عبر Admin API (service role key).
+ *  غياب المفتاح أو أي فشل شبكي لا يُسقط التشخيص بل يعيد unconfigured/error
+ *  كي يقع الاحتكام للسجل المحلي بدل تقرير سلبي كاذب. */
+export async function getSupabaseEmailConfirmation(email: string): Promise<SupabaseEmailConfirmation> {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!supabaseUrl || !serviceRole) return { status: "unconfigured", emailConfirmedAt: null };
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const admin = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false, autoRefreshToken: false } });
+    const needle = email.toLowerCase().trim();
+    for (let page = 1; page <= 5; page += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (error) return { status: "error", emailConfirmedAt: null };
+      const match = data?.users?.find((u) => u.email?.toLowerCase() === needle);
+      if (match) return match.email_confirmed_at ? { status: "confirmed", emailConfirmedAt: match.email_confirmed_at } : { status: "unconfirmed", emailConfirmedAt: null };
+      if (!data?.users?.length || data.users.length < 1000) return { status: "not_found", emailConfirmedAt: null };
+    }
+    return { status: "not_found", emailConfirmedAt: null };
+  } catch (error) {
+    console.warn("[Diagnostics] Supabase Auth email-confirmation lookup failed:", error);
+    return { status: "error", emailConfirmedAt: null };
+  }
+}
+
+export async function getUserDiagnosticRecord(identifier: string) {
+  const database = await getDb();
+  if (!database) return null;
+  const matches = await resolveUsersByContact(database, identifier.trim());
+  const user = matches[0];
+  if (!user) return null;
+
+  const userRow = await database.select().from(users).where(eq(users.id, user.id)).limit(1).then((rows) => rows[0]);
+  if (!userRow) return null;
+
+  const isSuperAdmin = matchesSuperAdminIdentity({ openId: userRow.openId, email: userRow.email, phone: userRow.phone }, ENV.ownerOpenId);
+
+  const isProviderManaged = userRow.loginMethod === "supabase" || userRow.loginMethod === "super-admin" || (userRow.openId ?? "").startsWith("supabase:");
+  let supabaseState: SupabaseEmailConfirmation = { status: "unconfigured", emailConfirmedAt: null };
+  if (isProviderManaged && userRow.email) {
+    supabaseState = await getSupabaseEmailConfirmation(userRow.email);
+  }
+
+  const [membershipRows, deletionRow, activeRow, sessionCount] = await Promise.all([
+    database
+      .select({ workspaceId: workspaceMembers.workspaceId, workspaceName: workspaces.name, role: workspaceMembers.role, status: workspaceMembers.status })
+      .from(workspaceMembers)
+      .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+      .where(eq(workspaceMembers.userId, user.id)),
+    database.select({ status: accountDeletionRequests.status }).from(accountDeletionRequests).where(eq(accountDeletionRequests.userId, user.id)).limit(1),
+    database.select({ workspaceId: activeWorkspaces.workspaceId }).from(activeWorkspaces).where(eq(activeWorkspaces.userId, user.id)).limit(1),
+    countUserLiveSessions(userRow.openId),
+  ]);
+
+  const memberships = membershipRows.map((m) => ({ workspaceId: m.workspaceId, workspaceName: m.workspaceName, role: m.role, status: m.status }));
+  const identityRole = resolveIdentityRole({ isSuperAdmin, memberRoles: memberships.map((m) => m.role) });
+
+  const activeWorkspaceId = activeRow?.[0]?.workspaceId ?? null;
+  const activeWorkspace = activeWorkspaceId
+    ? { id: activeWorkspaceId, name: memberships.find((m) => m.workspaceId === activeWorkspaceId)?.workspaceName ?? `منشأة #${activeWorkspaceId}` }
+    : null;
+
+  let otp: { workspaceId: number; present: boolean; expired: boolean; verifiedAt: string | null } | null = null;
+  const ownerWorkspaceIds = memberships.filter((m) => m.role === "owner").map((m) => m.workspaceId);
+  if (ownerWorkspaceIds.length) {
+    const pins = await database
+      .select({ workspaceId: workspaceOwnerPins.workspaceId, otpExpiresAt: workspaceOwnerPins.otpExpiresAt, otpVerifiedAt: workspaceOwnerPins.otpVerifiedAt })
+      .from(workspaceOwnerPins)
+      .where(inArray(workspaceOwnerPins.workspaceId, ownerWorkspaceIds))
+      .orderBy(desc(workspaceOwnerPins.createdAt))
+      .limit(1);
+    const pin = pins[0];
+    if (pin) {
+      otp = { workspaceId: pin.workspaceId, present: Boolean(pin.otpExpiresAt), expired: Boolean(pin.otpExpiresAt && pin.otpExpiresAt.getTime() < Date.now()), verifiedAt: pin.otpVerifiedAt ? pin.otpVerifiedAt.toISOString() : null };
+    }
+  }
+
+  let unitCount = 0;
+  if (activeWorkspaceId) {
+    const stored = await getWorkspaceData(activeWorkspaceId);
+    if (stored) {
+      try {
+        const data = normalizeAppData(JSON.parse(stored.payload));
+        unitCount = data.chalets.length;
+      } catch {
+        unitCount = 0;
+      }
+    }
+  }
+
+  const supabaseConfirmed = supabaseState.status === "confirmed";
+  const authCheckAvailable = supabaseState.status === "confirmed" || supabaseState.status === "unconfirmed" || supabaseState.status === "not_found";
+  const localVerified = Boolean(userRow.email && userRow.legalAcceptedAt);
+  const verified = isSuperAdmin || supabaseConfirmed || (!authCheckAvailable && localVerified);
+  const recentSignInActive = Boolean(userRow.lastSignedIn && Date.now() - userRow.lastSignedIn.getTime() < SESSION_TTL_MS);
+  const liveSessionCount = sessionCount > 0 ? sessionCount : recentSignInActive ? 1 : 0;
+
+  return {
+    user: { id: userRow.id, openId: userRow.openId, name: userRow.name ?? null, email: userRow.email ?? null, phone: userRow.phone ?? null, loginMethod: userRow.loginMethod ?? null, role: userRow.role, createdAt: userRow.createdAt, legalAcceptedAt: userRow.legalAcceptedAt ?? null, termsVersion: userRow.termsVersion ?? null, lastSignedIn: userRow.lastSignedIn ?? null },
+    account: {
+      verified,
+      authProvider: isProviderManaged ? "supabase" : "local",
+      supabaseLookup: supabaseState.status,
+      emailConfirmedAt: supabaseConfirmed ? supabaseState.emailConfirmedAt : null,
+      deletionRequested: deletionRow?.[0]?.status === "pending",
+      deletionStatus: deletionRow?.[0]?.status ?? null,
+      suspendedWorkspaceCount: memberships.filter((m) => m.status === "disabled").length,
+    },
+    isSuperAdmin,
+    identityRole,
+    memberships,
+    workspaceCount: memberships.length,
+    activeWorkspace,
+    unitCount,
+    sessions: { count: liveSessionCount, liveRefreshTokens: sessionCount, recentSignInActive, lastSignedIn: userRow.lastSignedIn ?? null },
+    otp,
+  };
 }

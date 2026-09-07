@@ -236,10 +236,16 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
   })();
 
   const resetFeedback = () => { setError(null); setMessage(null); setPendingUnverified(null); };
-  const goAfterAuth = () => {
+  const goAfterAuth = (destination?: string) => {
+    // Super Admin lands on the home screen (الرئيسية) — the command center stays
+    // one tap away via the dedicated top-navigation button.
+    if (destination === "admin") {
+      router.replace("/(tabs)");
+      return;
+    }
     const pendingDeletion = consumePendingDeletion();
     if (pendingDeletion) { router.replace({ pathname: "/account-recovery", params: { scheduledFor: pendingDeletion.scheduledFor } }); return; }
-    router.replace("/workspace-gate");
+    router.replace("/workspace-hub");
   };
   const toggleLanguage = () => {
     const next: "ar" | "en" = language === "ar" ? "en" : "ar";
@@ -290,7 +296,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     setBusy("login"); setError(null); setMessage(null);
     try {
       const result = await signInSuperAdmin({ identifier, password, refresh });
-      if (result.ok) { goAfterAuth(); return; }
+      if (result.ok) { goAfterAuth(result.destination); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
@@ -339,7 +345,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     setBusy("login"); setError(null); setMessage(null);
     try {
     const result = await signInWithPasswordFlow({ email, password: loginPassword, refresh });
-    if (result.ok) { goAfterAuth(); return; }
+    if (result.ok) { goAfterAuth(result.destination); return; }
     if (result.error === "email-not-confirmed") {
       // The account exists but is not verified yet. Do not show "الحساب غير
       // مسجل"; instead resend the sign-up code, inform the user, and route them
@@ -456,7 +462,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
   const biometricLogin = async () => {
     if (!biometricAvailable || !isAuthenticated || !activeSession.biometricsEnabled) { setMessage("الدخول السريع بالبصمة غير مفعّل بعد. سجّل دخولًا مرة واحدة، ثم فعّله من أمان الحساب."); return; }
     setBusy("biometric");
-    try { if (await unlockWithBiometrics()) { router.replace("/workspace-gate"); return; } setMessage("لم يكتمل التحقق بالبصمة. يمكنك المحاولة مجددًا أو المتابعة عبر بوابة الهوية."); }
+    try { if (await unlockWithBiometrics()) { router.replace("/workspace-hub"); return; } setMessage("لم يكتمل التحقق بالبصمة. يمكنك المحاولة مجددًا أو المتابعة عبر بوابة الهوية."); }
     catch { setMessage("تعذر الوصول إلى البصمة أو بصمة الوجه على هذا الجهاز حاليًا."); }
     finally { setBusy(null); }
   };
@@ -465,7 +471,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     resetFeedback(); setBusy(provider);
     try {
       const result = await socialSignIn({ provider, refresh });
-      if (result.ok) { goAfterAuth(); return; }
+      if (result.ok) { goAfterAuth(result.destination); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
       console.error("[CRITICAL LOGIN ERROR]:", err);
@@ -729,7 +735,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
             <Pressable accessibilityRole="link" onPress={() => changeTab(tab === "login" ? "register" : "login")}><ThemedText variant="label" color={colors.primary} style={styles.footerLink}>{tab === "login" ? "أنشئ حساباً جديداً" : "تسجيل الدخول"}</ThemedText></Pressable>
           </View>
           {isAuthenticated && tab === "login" ? (
-            <Pressable onPress={() => router.replace("/workspace-gate")} style={styles.workspace}><ThemedText variant="label" color={colors.primary} style={styles.footerLink}>الانتقال إلى منشآتي</ThemedText></Pressable>
+            <Pressable onPress={() => router.replace("/workspace-hub")} style={styles.workspace}><ThemedText variant="label" color={colors.primary} style={styles.footerLink}>الانتقال إلى منشآتي</ThemedText></Pressable>
           ) : null}
         </View>
       </ScrollView>

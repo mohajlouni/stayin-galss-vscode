@@ -8,7 +8,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuthSession } from "@/lib/auth-session";
 import * as Auth from "@/lib/_core/auth";
 
 const OTP_LENGTH = 6;
@@ -29,9 +29,10 @@ function formatRemaining(scheduledFor: string, language: string): string {
 export default function AccountRecoveryScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
-  const { refresh } = useAuth();
+  const { routing, refresh } = useAuthSession();
   const params = useLocalSearchParams<{ scheduledFor?: string }>();
   const scheduledFor = typeof params.scheduledFor === "string" ? params.scheduledFor : "";
+  const activeScheduledFor = scheduledFor || routing.data?.deletion?.scheduledFor || "";
   const [email, setEmail] = useState("");
   const [step, setStep] = useState<"decision" | "recovery" | "otp">("decision");
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(""));
@@ -48,16 +49,13 @@ export default function AccountRecoveryScreen() {
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   useEffect(() => {
-    if (!scheduledFor) {
-      void refresh();
-      const pending = async () => {
-        try { await Auth.clearUserInfo(); await Auth.removeSessionToken(); } catch { /* noop */ }
-      };
-      void pending();
-      router.replace("/auth/login");
-    }
+    if (activeScheduledFor) return;
+    if (routing.isLoading) return;
+    if (routing.data?.destination === "restore") return;
+    void refresh();
+    router.replace("/workspace-hub");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduledFor]);
+  }, [routing.isLoading, routing.data?.destination, activeScheduledFor]);
 
   useEffect(() => {
     if (step === "otp") requestAnimationFrame(() => inputRef.current?.focus());
@@ -90,7 +88,7 @@ export default function AccountRecoveryScreen() {
       setSuccess(true);
       try { await Auth.removeSessionToken(); await Auth.clearUserInfo(); } catch { /* noop */ }
       await refresh();
-      router.replace("/onboarding");
+      router.replace("/workspace-hub");
     } catch {
       setError(language === "ar" ? "تعذر التحقق. تحقق من اتصالك بالإنترنت ثم أعد المحاولة." : "Could not verify. Check your connection and retry.");
     } finally {
@@ -116,7 +114,7 @@ export default function AccountRecoveryScreen() {
   }
 
   return <ScreenContainer edges={["top", "bottom", "left", "right"]}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.error + "80" }]}>
-    <View style={[styles.warningRow, { flexDirection: row }]}><MaterialIcons name="warning-amber" size={26} color={colors.error} /><View style={styles.flex}><Text style={{ color: colors.error, fontSize: 15, fontWeight: "900", textAlign: align }}>{language === "ar" ? "تنبيه: هذا الحساب معطّل وقيد الحذف النهائي" : "Alert: this account is disabled and pending permanent deletion"}</Text>{scheduledFor ? <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: align }}>{language === "ar" ? `المدة المتبقية قبل الحذف النهائي: ` : `Time remaining before permanent deletion: `}<Text style={{ color: colors.error, fontWeight: "900" }}>{formatRemaining(scheduledFor, language)}</Text></Text> : null}</View></View>
+    <View style={[styles.warningRow, { flexDirection: row }]}><MaterialIcons name="warning-amber" size={26} color={colors.error} /><View style={styles.flex}><Text style={{ color: colors.error, fontSize: 15, fontWeight: "900", textAlign: align }}>{language === "ar" ? "تنبيه: هذا الحساب معطّل وقيد الحذف النهائي" : "Alert: this account is disabled and pending permanent deletion"}</Text>{activeScheduledFor ? <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 6, textAlign: align }}>{language === "ar" ? `المدة المتبقية قبل الحذف النهائي: ` : `Time remaining before permanent deletion: `}<Text style={{ color: colors.error, fontWeight: "900" }}>{formatRemaining(activeScheduledFor, language)}</Text></Text> : null}</View></View>
 
     {step === "decision" ? <View>
       <Text style={[styles.body, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "هل تريد إلغاء طلب الحذف والحفاظ على حسابك وبياناتك؟" : "Do you want to cancel the deletion request and keep your account and data?"}</Text>

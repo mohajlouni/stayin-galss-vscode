@@ -33,7 +33,14 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || !matchesSuperAdminIdentity(ctx.user, ENV.ownerOpenId)) {
+    // A missing/invalid session is an authentication failure, not an admin
+    // denial: it must surface as UNAUTHORIZED so admin screens can offer a
+    // fresh sign-in instead of a dead-end "admins only" page.
+    if (!ctx.user) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+    }
+
+    if (!matchesSuperAdminIdentity(ctx.user, ENV.ownerOpenId)) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

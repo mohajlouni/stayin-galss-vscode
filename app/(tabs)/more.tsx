@@ -22,7 +22,7 @@ type MenuRoute =
   | "/(tabs)/waitlist"
   | "/suggestions"
   | "/audit-log"
-  | "/chalet-management"
+  | "/workspaces"
   | "/properties-hub"
   | "/user-management"
   | "/workspace-hub"
@@ -115,8 +115,7 @@ export default function MoreScreen() {
   const showCustomers = flags.crm ?? true;
 
   const propertyOpsItems: MenuEntry[] = useMemo(() => [
-    ...(isManager ? [{ title: language === "ar" ? "منشآتي وإدارة المنشآت" : "My properties hub", description: language === "ar" ? "منشآتك وبياناتها ووحداتها وطرق دفعها وعداداتها" : "Your properties: profile, units, payment methods, and meters", icon: "business" as const, route: "/properties-hub" as const }] : []),
-    ...(isManager ? [{ title: language === "ar" ? "إدارة الوحدات / العقارات" : "Property management", description: language === "ar" ? "ملف كل وحدة وأسعارها وحارسها وأوقاتها" : "Each property profile, pricing, guardian, and hours", icon: "home-work" as const, route: "/chalet-management" as const }] : []),
+    ...(isManager ? [{ title: language === "ar" ? "إدارة المنشآت والعقارات" : "Properties & units hub", description: language === "ar" ? "تبديل المنشأة النشطة، تعديل البيانات، وإدارة الوحدات التابعة" : "Switch the active property, edit its data, and manage its units", icon: "business" as const, route: "/workspaces" as const }] : []),
     { title: t("waitlist"), description: language === "ar" ? "طلبات العملاء بانتظار توفر الموعد" : "Customer requests waiting for availability", icon: "format-list-bulleted", route: "/(tabs)/waitlist" },
     ...(isManager && flags.maintenance ? [{ title: language === "ar" ? "الصيانة الوقائية والأصول" : "Preventive maintenance & assets", description: language === "ar" ? "جرد الأصول وجدولة أعمال الصيانة الدورية" : "Asset inventory and recurring maintenance scheduling", icon: "build" as const, route: "/maintenance-dashboard" as const }] : []),
     ...(flags.notifications ? [{ title: language === "ar" ? "مركز الإشعارات" : "Notifications center", description: language === "ar" ? "الإشعارات الداخلية والفلاتر وحالة القراءة" : "In-app notifications, filters, and read status", icon: "notifications" as const, route: "/notifications" as const }] : []),

@@ -58,7 +58,8 @@ describe("super admin modular launcher architecture", () => {
     expect(screen).toContain("masterControl.overview.useQuery");
     expect(screen).toContain("masterControl.directory.useQuery");
     expect(screen).toContain("masterControl.workspaceOptions.useQuery");
-    expect(screen).toContain("إدارة المنشأة");
+    expect(screen).toContain("العمل على هذه المنشأة");
+    expect(screen).toContain("إدارة وتعديل");
     expect(screen).toContain("عرض الوحدات");
     expect(screen).toContain("إخفاء الوحدات");
     expect(screen).toContain('backHref="/admin/master-control"');
@@ -71,5 +72,23 @@ describe("super admin modular launcher architecture", () => {
     expect(router).toContain("workspaceOptions: adminProcedure");
     expect(screen).toContain("هذه اللوحة مخصصة لمدير النظام فقط");
     expect(screen).toContain("تُفرض صلاحية الإدارة العليا من الخادم");
+  });
+
+  it("adopts the dark-luxury 2-pole maintenance card-row design on the directory workspace cards", () => {
+    const screen = source("app/admin/workspaces-directory.tsx");
+    expect(screen).toContain("cardRow: { flexDirection: \"row\"");
+    expect(screen).toContain("borderRadius: 17");
+    expect(screen).toContain("entityIcon");
+    expect(screen).toContain("badgePill");
+    expect(screen).toContain("statusPill");
+    expect(screen).toContain("liveDot");
+    expect(screen).toContain("more-vert");
+    expect(screen).toContain("menuAnchor");
+    expect(screen).toContain("floatMenu");
+    expect(screen).toContain("العمل على هذه المنشأة");
+    expect(screen).toContain("isActive ? colors.success + \"44\" : colors.border");
+    expect(screen).toContain("shadowColor: colors.success");
+    expect(screen).toContain("useI18n()");
+    expect(screen).toContain("const { isRTL } = useI18n();");
   });
 });

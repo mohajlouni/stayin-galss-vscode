@@ -14,7 +14,11 @@ describe("more screen layout", () => {
     expect(source).toContain("الدعم والمساعدة");
     expect(source).toContain('route: "/(tabs)/waitlist"');
     expect(source).not.toContain('route: "/booking-history"');
-    expect(source).toContain('route: "/chalet-management"');
+    expect(source).toContain('route: "/workspaces"');
+    expect(source).toContain("إدارة المنشآت والعقارات");
+    expect(source).toContain("تبديل المنشأة النشطة، تعديل البيانات، وإدارة الوحدات التابعة");
+    expect(source).not.toContain('route: "/properties-hub"');
+    expect(source).not.toContain('route: "/chalet-management"');
     expect(source).toContain('route: "/audit-log"');
     expect(source).toContain('route: "/(tabs)/settings"');
     expect(source).toContain('route: "/whatsapp-templates"');

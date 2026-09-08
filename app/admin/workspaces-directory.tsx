@@ -8,6 +8,7 @@ import { CompactScreenHeader } from "@/components/compact-screen-header";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
+import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
 
 type Filter = "all" | "active" | "empty";
@@ -58,20 +59,65 @@ export default function WorkspacesDirectoryScreen() {
 
 const FILTER_PILLS: Record<Filter, string> = { all: "الكل", active: "المنشآت النشطة", empty: "المنشآت الفارغة (0 أعضاء)" };
 
-function WorkspaceCard({ entry, expanded, units, unitsLoading, colors, onToggle }: { entry: { workspace: { id: number; name: string }; memberCount: number; snapshot: { version: number } | null }; expanded: boolean; units: Array<{ id: string; name: string; color: string }>; unitsLoading: boolean; colors: ReturnType<typeof useColors>; onToggle: () => void }) {
-  const open = () => { router.push({ pathname: "/admin/master-control", params: { workspace: String(entry.workspace.id) } }); };
-  return <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <View style={styles.cardTop}><View style={styles.flex}><Text style={[styles.cardTitle, { color: colors.foreground }]}>{entry.workspace.name}</Text><Text style={[styles.cardSub, { color: colors.muted }]}>{entry.memberCount > 0 ? `${entry.memberCount} عضو نشط · ${entry.snapshot ? `إصدار ${entry.snapshot.version}` : "لا توجد لقطة متزامنة"}` : "منشأة فارغة (0 أعضاء)"}</Text></View><Pressable style={({ pressed }) => [styles.switchButton, { borderColor: colors.primary, backgroundColor: colors.primary + "10", opacity: pressed ? 0.6 : 1 }]} onPress={open}><MaterialIcons name="tune" size={15} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 10 }}>إدارة المنشأة</Text></Pressable></View>
-    <Pressable onPress={onToggle} style={[styles.expandToggle, { borderColor: colors.border, backgroundColor: colors.surfaceMuted }]}><MaterialIcons name={expanded ? "expand-less" : "expand-more"} size={16} color={colors.primary} /><Text style={{ color: colors.foreground, fontWeight: "900", fontSize: 11 }}>{expanded ? "إخفاء الوحدات" : "عرض الوحدات"}</Text></Pressable>
-    {expanded ? <View style={styles.units}>{unitsLoading ? <Text style={[styles.hint, { color: colors.muted }]}>جارٍ تحميل الوحدات…</Text> : units.length ? units.map((unit) => <View key={unit.id} style={styles.unitRow}><View style={[styles.unitDot, { backgroundColor: unit.color || colors.primary }]} /><Text style={[styles.unitName, { color: colors.foreground }]}>{unit.name}</Text></View>) : <Text style={[styles.hint, { color: colors.muted }]}>لا توجد وحدات مسجلة لهذه المنشأة.</Text>}</View> : null}
+function WorkspaceCard({ entry, expanded, units, unitsLoading, colors, onToggle }: { entry: { workspace: { id: number; name: string }; memberCount: number; snapshot: { version: number } | null }; expanded: boolean; units: Array<{ id: string; name: string; color: string }>; unitsLoading: boolean;   colors: ReturnType<typeof useColors>; onToggle: () => void }) {
+  const { isRTL } = useI18n();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isActive = entry.memberCount > 0;
+  const accent = isActive ? colors.success : colors.muted;
+  const open = () => { setMenuOpen(false); router.push({ pathname: "/admin/master-control", params: { workspace: String(entry.workspace.id) } }); };
+  return <View style={[styles.card, { borderColor: isActive ? colors.success + "44" : colors.border, backgroundColor: colors.surface }, isActive && { shadowColor: colors.success, shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }, elevation: 2 }]}>
+    <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
+      <View style={[styles.entityIcon, { backgroundColor: (isActive ? colors.success : colors.muted) + "18" }]}><MaterialIcons name="domain" size={20} color={isActive ? colors.success : colors.muted} /></View>
+      <View style={styles.flex}>
+        <Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: isRTL ? "right" : "left" }]}>{entry.workspace.name}</Text>
+        <View style={[styles.badgeRow, { flexDirection: "row" }]}>
+          <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="people-outline" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{entry.memberCount > 0 ? `${entry.memberCount} عضو نشط` : "0 أعضاء"}</Text></View>
+          <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="hub" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{entry.snapshot ? `الإصدار ${entry.snapshot.version}` : "لا توجد لقطة"}</Text></View>
+          <View style={[styles.badgePill, { backgroundColor: isActive ? colors.success + "18" : colors.warning + "18", borderColor: isActive ? colors.success + "44" : colors.warning + "55" }]}><MaterialIcons name={isActive ? "check-circle" : "error-outline"} size={11} color={isActive ? colors.success : colors.warning} /><Text numberOfLines={1} style={{ color: isActive ? colors.success : colors.warning, fontSize: 9, fontWeight: "800" }}>{isActive ? "نشطة" : "فارغة"}</Text></View>
+        </View>
+      </View>
+      <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
+        <View style={[styles.statusPill, { backgroundColor: (isActive ? colors.success : colors.muted) + "18" }]}><View style={[styles.liveDot, { backgroundColor: accent }]} /><Text style={{ color: accent, fontSize: 9, fontWeight: "900" }}>{isActive ? "نشطة" : "فارغة"}</Text></View>
+        <Pressable accessibilityRole="button" onPress={open} style={({ pressed }) => [styles.switchButton, { backgroundColor: colors.primary, borderColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="open-in-new" size={15} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 11 }}>العمل على هذه المنشأة</Text></Pressable>
+      </View>
+      <View style={[styles.menuAnchor, { alignSelf: "center" }]}>
+        <Pressable accessibilityRole="button" onPress={() => setMenuOpen((current) => !current)} style={({ pressed }) => [styles.moreBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={menuOpen ? "close" : "more-vert"} size={18} color={colors.muted} /></Pressable>
+        {menuOpen ? <View style={[styles.floatMenu, { backgroundColor: colors.surface, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+          <Pressable accessibilityRole="button" onPress={open} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="tune" size={16} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", flex: 1, textAlign: "right" }}>إدارة وتعديل</Text></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => { setMenuOpen(false); onToggle(); }} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={expanded ? "expand-less" : "expand-more"} size={16} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", flex: 1, textAlign: "right" }}>{expanded ? "إخفاء الوحدات" : "عرض الوحدات"}</Text></Pressable>
+        </View> : null}
+      </View>
+    </View>
+    {expanded ? <View style={styles.units}>{unitsLoading ? <Text style={[styles.hint, { color: colors.muted }]}>جارٍ تحميل الوحدات…</Text> : units.length ? units.map((unit) => <View key={unit.id} style={[styles.unitRow, { backgroundColor: colors.surfaceMuted }]}><View style={[styles.unitDot, { backgroundColor: unit.color || colors.primary }]} /><Text style={[styles.unitName, { color: colors.foreground }]}>{unit.name}</Text></View>) : <Text style={[styles.hint, { color: colors.muted }]}>لا توجد وحدات مسجلة لهذه المنشأة.</Text>}</View> : null}
   </View>;
 }
 
-function DirectoryRow({ entry, colors }: { entry: { workspace: { id: number; name: string }; matchingMembers: Array<{ displayName: string; phone: string | null; role: string }> }; colors: ReturnType<typeof useColors> }) {
-  const open = () => { router.push({ pathname: "/admin/master-control", params: { workspace: String(entry.workspace.id) } }); };
+function DirectoryRow({ entry, colors }: { entry: { workspace: { id: number; name: string }; matchingMembers: Array<{ displayName: string; phone: string | null; role: string }> };   colors: ReturnType<typeof useColors> }) {
+  const { isRTL } = useI18n();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const open = () => { setMenuOpen(false); router.push({ pathname: "/admin/master-control", params: { workspace: String(entry.workspace.id) } }); };
   return <View style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-    <View style={styles.cardTop}><View style={styles.flex}><Text style={[styles.cardTitle, { color: colors.foreground }]}>{entry.workspace.name}</Text><Text style={[styles.cardSub, { color: colors.muted }]}>المنشأة #{entry.workspace.id} · نتيجة بحث مطابقة</Text></View><Pressable style={({ pressed }) => [styles.switchButton, { borderColor: colors.primary, backgroundColor: colors.primary + "10", opacity: pressed ? 0.6 : 1 }]} onPress={open}><MaterialIcons name="tune" size={15} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 10 }}>إدارة المنشأة</Text></Pressable></View>
-    {entry.matchingMembers.length ? entry.matchingMembers.map((member, i) => <View key={i} style={styles.memberMatch}><MaterialIcons name="person" size={15} color={colors.success} /><Text style={[styles.memberMatchText, { color: colors.foreground }]}>{member.displayName}{member.phone ? ` (${member.phone})` : ""} · {member.role}</Text></View>) : null}
+    <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
+      <View style={[styles.entityIcon, { backgroundColor: colors.primary + "18" }]}><MaterialIcons name="domain" size={20} color={colors.primary} /></View>
+      <View style={styles.flex}>
+        <Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: isRTL ? "right" : "left" }]}>{entry.workspace.name}</Text>
+        <View style={[styles.badgeRow, { flexDirection: "row" }]}>
+          <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="tag" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>المنشأة #{entry.workspace.id}</Text></View>
+          <View style={[styles.badgePill, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "44" }]}><MaterialIcons name="search" size={11} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.primary, fontSize: 9, fontWeight: "800" }}>{entry.matchingMembers.length ? `نتيجة بحث (${entry.matchingMembers.length})` : "نتيجة بحث"}</Text></View>
+        </View>
+      </View>
+      <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
+        <View style={[styles.statusPill, { backgroundColor: colors.primary + "18" }]}><View style={[styles.liveDot, { backgroundColor: colors.primary }]} /><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>نتيجة</Text></View>
+        <Pressable accessibilityRole="button" onPress={open} style={({ pressed }) => [styles.switchButton, { backgroundColor: colors.primary, borderColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="open-in-new" size={15} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 11 }}>العمل على هذه المنشأة</Text></Pressable>
+      </View>
+      <View style={[styles.menuAnchor, { alignSelf: "center" }]}>
+        <Pressable accessibilityRole="button" onPress={() => setMenuOpen((current) => !current)} style={({ pressed }) => [styles.moreBtn, { borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={menuOpen ? "close" : "more-vert"} size={18} color={colors.muted} /></Pressable>
+        {menuOpen ? <View style={[styles.floatMenu, { backgroundColor: colors.surface, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
+          <Pressable accessibilityRole="button" onPress={open} style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="tune" size={16} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", flex: 1, textAlign: "right" }}>إدارة وتعديل</Text></Pressable>
+        </View> : null}
+      </View>
+    </View>
+    {entry.matchingMembers.length ? entry.matchingMembers.map((member, i) => <View key={i} style={[styles.memberMatch, { backgroundColor: colors.surfaceMuted }]}><MaterialIcons name="person" size={15} color={colors.success} /><Text style={[styles.memberMatchText, { color: colors.foreground }]}>{member.displayName}{member.phone ? ` (${member.phone})` : ""} · {member.role}</Text></View>) : null}
   </View>;
 }
 
@@ -84,9 +130,15 @@ const styles = StyleSheet.create({
   searchBox: { minHeight: 47, marginTop: 14, borderWidth: 1, borderRadius: 13, paddingHorizontal: 11, flexDirection: "row-reverse", alignItems: "center", gap: 8 }, searchInput: { flex: 1, fontSize: 12, textAlign: "right" },
   pills: { flexDirection: "row-reverse", gap: 7, marginTop: 12, flexWrap: "wrap" }, pill: { minHeight: 34, borderRadius: 11, borderWidth: 1, paddingHorizontal: 12, justifyContent: "center", alignItems: "center" },
   searchState: { marginTop: 16, alignItems: "center", gap: 8 }, hint: { fontSize: 11, lineHeight: 17, textAlign: "right" },
-  card: { marginTop: 12, borderWidth: 1, borderRadius: 15, padding: 11, gap: 8 }, cardTop: { flexDirection: "row-reverse", alignItems: "center", gap: 8 }, flex: { flex: 1, minWidth: 0 }, cardTitle: { fontSize: 13, fontWeight: "900", textAlign: "right" }, cardSub: { fontSize: 10, marginTop: 3, textAlign: "right" },
-  switchButton: { minHeight: 32, borderRadius: 10, borderWidth: 1, paddingHorizontal: 9, flexDirection: "row-reverse", alignItems: "center", gap: 4 },
-  expandToggle: { minHeight: 36, borderRadius: 11, borderWidth: 1, paddingHorizontal: 10, flexDirection: "row-reverse", alignItems: "center", justifyContent: "center", gap: 5 }, units: { gap: 6 }, unitRow: { flexDirection: "row-reverse", alignItems: "center", gap: 7 }, unitDot: { width: 10, height: 10, borderRadius: 5 }, unitName: { fontSize: 11, fontWeight: "800", textAlign: "right" },
-  memberMatch: { flexDirection: "row-reverse", alignItems: "center", gap: 6 }, memberMatchText: { fontSize: 11, fontWeight: "800", textAlign: "right" },
+  card: { marginTop: 12, borderWidth: 1, borderRadius: 17, padding: 12, gap: 8 }, cardRow: { flexDirection: "row", alignItems: "center", gap: 10 }, cardTop: { flexDirection: "row-reverse", alignItems: "center", gap: 8 }, flex: { flex: 1, minWidth: 0 }, cardTitle: { fontSize: 14, fontWeight: "900" }, cardSub: { fontSize: 10, marginTop: 3, textAlign: "right" },
+  entityIcon: { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  badgeRow: { flexWrap: "wrap", gap: 6, marginTop: 5 }, badgePill: { minHeight: 20, borderRadius: 10, paddingHorizontal: 7, alignItems: "center", justifyContent: "center" },
+  cardSide: { gap: 6, flexShrink: 0 }, statusPill: { minHeight: 22, borderRadius: 11, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 }, liveDot: { width: 7, height: 7, borderRadius: 3.5 },
+  switchButton: { minHeight: 32, borderRadius: 10, borderWidth: 1, paddingHorizontal: 9, flexDirection: "row", alignItems: "center", gap: 4 },
+  menuAnchor: { position: "relative", zIndex: 20 }, moreBtn: { width: 34, height: 36, borderRadius: 11, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  floatMenu: { position: "absolute", top: "100%", marginTop: 4, minWidth: 180, borderRadius: 12, borderWidth: 1, padding: 6, gap: 4, zIndex: 50, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  menuItem: { minHeight: 42, paddingHorizontal: 12, alignItems: "center", flexDirection: "row", gap: 9, borderRadius: 9 },
+  expandToggle: { minHeight: 36, borderRadius: 11, borderWidth: 1, paddingHorizontal: 10, flexDirection: "row-reverse", alignItems: "center", justifyContent: "center", gap: 5 }, units: { gap: 6 }, unitRow: { flexDirection: "row-reverse", alignItems: "center", gap: 7, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, minHeight: 32 }, unitDot: { width: 10, height: 10, borderRadius: 5 }, unitName: { fontSize: 11, fontWeight: "800", textAlign: "right" },
+  memberMatch: { flexDirection: "row-reverse", alignItems: "center", gap: 6, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, minHeight: 32 }, memberMatchText: { fontSize: 11, fontWeight: "800", textAlign: "right" },
   emptyRow: { marginTop: 16, minHeight: 96, borderRadius: 15, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 8, padding: 14 }, emptyRowText: { fontSize: 12, lineHeight: 19, textAlign: "center" },
 });

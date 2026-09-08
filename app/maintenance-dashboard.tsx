@@ -123,13 +123,6 @@ export default function MaintenanceDashboard() {
   const todayISO = localDateISO(new Date(now));
   const stats = useMemo(() => maintenanceStats(maintenanceTasks ?? [], now), [maintenanceTasks, now]);
 
-  /** عدد المهام النشطة (غير المغلقة) لكل تاريخ استحقاق تُستخدم لنقاط الشريط الزمني. */
-  const dueTaskCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    (maintenanceTasks ?? []).forEach((task) => { if (task.status === "scheduled" || task.status === "in_progress") counts.set(task.nextDueDate, (counts.get(task.nextDueDate) ?? 0) + 1); });
-    return counts;
-  }, [maintenanceTasks]);
-
   /** تواريخ الشريط الزمني الأفقي حسب الأفق المختار؛ الوضع "all" يغطي من أقدم استحقاق متأخر حتى أبعد استحقاق قادم. */
   /** الشريط الزمني مستمر دائماً: من اليوم حتى +59 يوماً (60 خلية). لا يتقلص أبداً عند تبديل أفاق الفلترة. */
   const timelineDates = useMemo(() => {
@@ -420,33 +413,29 @@ export default function MaintenanceDashboard() {
       <Pressable accessibilityRole="button" onPress={() => switchTab("archive")} style={[styles.tab, { backgroundColor: tab === "archive" ? colors.primary : "transparent" }]}><MaterialIcons name="archive" size={15} color={tab === "archive" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "archive" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `المهام المكتملة (${stats.completed})` : `Completed (${stats.completed})`}</Text></Pressable>
     </View>
 
-    <View style={[styles.rollerWrap, { marginTop: 13, zIndex: rangePanelOpen ? 30 : 0 }]}>
+    <View style={styles.rollerWrap}>
       <View style={[styles.rollerToolbar, { flexDirection: row }]}>
         <View style={styles.rollerChips}>{ROLLER_RANGE_OPTIONS.map((option) => { const active = horizon === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.label[language === "ar" ? 0 : 1]} onPress={() => selectHorizon(option.id)} style={[styles.rollerRangeChip, { backgroundColor: active ? colors.primary + "1F" : colors.surface, borderColor: active ? colors.primary : colors.border }]}><Text style={{ color: active ? colors.primary : colors.muted, fontSize: 12, fontWeight: active ? "900" : "700" }}>{option.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
-        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary + "1F" : colors.surface, borderColor: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.border }]}><MaterialIcons name="date-range" size={14} color={rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.muted} /><Text style={{ color: rangePanelOpen || rollerRange.kind === "custom" ? colors.primary : colors.muted, fontSize: 12, fontWeight: rangePanelOpen || rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable>
-          {rangePanelOpen ? <View style={[styles.rollerRangePanel, { backgroundColor: colors.surface, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
-            <View style={[styles.rollerRangeField, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "من" : "From"} value={rangeDraft.start} onChange={(value) => setRangeDraft({ ...rangeDraft, start: value })} /></View>
-            <View style={[styles.rollerRangeField, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "إلى" : "To"} value={rangeDraft.end} onChange={(value) => setRangeDraft({ ...rangeDraft, end: value })} /></View>
-            <View style={[styles.rollerRangeActions, { flexDirection: row }]}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تطبيق الفترة" : "Apply range"} onPress={applyCustomRange} style={[styles.rollerAction, { backgroundColor: colors.primary, borderColor: colors.primary }]}><MaterialIcons name="check" size={15} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "900" }}>{language === "ar" ? "تطبيق" : "Apply"}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setRangePanelOpen(false)} style={[styles.rollerActionGhost, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="close" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "800" }}>{language === "ar" ? "إغلاق" : "Close"}</Text></Pressable></View>
-          </View> : null}
-        </View>
+        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? colors.primary + "1F" : colors.surface, borderColor: rollerRange.kind === "custom" ? colors.primary : colors.border }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? colors.primary : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? colors.primary : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
         <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={() => nudgeRoller(320)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
-            const inWindow = dateFilter === null && ((horizon === "today" && date === todayISO) || (horizon === "7" && date >= todayISO && date <= addDays(todayISO, 6)) || (horizon === "30" && date >= todayISO && date <= addDays(todayISO, 29)));
-            const selected = singleSelected || inWindow;
             const isToday = date === todayISO;
-            const hasDue = dueTaskCounts.has(date);
-            const overdue = date < todayISO && hasDue;
-            const dot = hasDue ? (overdue ? colors.error : colors.warning) : null;
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(selected && singleSelected ? null : date)} style={[styles.rollerChip, { backgroundColor: selected ? colors.primary + "20" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border, borderWidth: selected ? 2 : 1 }, selected && { shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 3 } }]}>
-              <Text style={{ color: selected ? colors.primary : "#94A3B8", fontSize: 10, fontWeight: selected ? "800" : "500", textAlign: "center" }}>{ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()]}</Text>
-              <Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 14, fontWeight: selected ? "900" : "700", textAlign: "center" }}>{date.slice(8, 10)}</Text>
-              <View style={[styles.rollerDot, { backgroundColor: selected ? colors.primary : dot ?? "transparent" }]} />
-              {isToday && !selected ? <View style={[styles.rollerTodayBadge, { backgroundColor: colors.primary + "22" }]}><Text style={{ color: colors.primary, fontSize: 8, fontWeight: "900" }}>{language === "ar" ? "اليوم" : "Today"}</Text></View> : null}
+            const inWindow = dateFilter === null && ((horizon === "today" && isToday) || (horizon === "7" && date >= todayISO && date <= addDays(todayISO, 6)) || (horizon === "30" && date >= todayISO && date <= addDays(todayISO, 29)));
+            const framed = isToday || singleSelected;
+            const hasTaskOnDate = activeTasks.some((task) => task.nextDueDate === date);
+            const weekday = ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()];
+            const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;
+            const strong = framed || inWindow;
+            const topColor = strong ? colors.primary : "#94A3B8";
+            const dayColor = strong ? colors.primary : "#94A3B8";
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }]}>
+              <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
+              <Text style={{ color: dayColor, fontSize: 14, fontWeight: strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
+              <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent" }]} />
             </Pressable>;
           })}
         </ScrollView>
@@ -454,7 +443,7 @@ export default function MaintenanceDashboard() {
       </View>
     </View>
 
-    <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen || rangePanelOpen ? 2 : 0 }]}>
+    <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen ? 2 : 0 }]}>
       <View style={[styles.searchWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}>
         <MaterialIcons name="search" size={16} color={colors.muted} />
         <TextInput accessibilityLabel={language === "ar" ? "بحث سريع" : "Quick search"} value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث سريع باسم المهمة أو الأصل..." : "Quick search by task or asset name..."} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
@@ -473,7 +462,7 @@ export default function MaintenanceDashboard() {
       </View>
     </View>
 
-    {unitMenuOpen || cadenceMenuOpen || rangePanelOpen || menuFor ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => { setUnitMenuOpen(false); setCadenceMenuOpen(false); setRangePanelOpen(false); setMenuFor(null); }} style={[StyleSheet.absoluteFill, styles.clickAway]} /> : null}
+    {unitMenuOpen || cadenceMenuOpen || menuFor ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => { setUnitMenuOpen(false); setCadenceMenuOpen(false); setMenuFor(null); }} style={[StyleSheet.absoluteFill, styles.clickAway]} /> : null}
 
     {tab === "active" ? <>
       {visibleTasks.length ? visibleTasks.map((task) => {
@@ -686,11 +675,31 @@ export default function MaintenanceDashboard() {
       </View>
     </View> : null}
   </Modal>
+
+  <Modal visible={rangePanelOpen} transparent animationType="fade" onRequestClose={() => setRangePanelOpen(false)} statusBarTranslucent>
+    <View style={styles.rangeModalBackdrop}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => setRangePanelOpen(false)} />
+      <View style={[styles.rangeModalCard, { backgroundColor: "#0f172a", borderColor: "rgba(51, 65, 85, 0.9)" }]}>
+        <View style={[styles.rangeModalHeader, { flexDirection: row }]}>
+          <View style={[styles.rangeModalTitleIcon, { backgroundColor: colors.primary + "1A" }]}><MaterialIcons name="date-range" size={19} color={colors.primary} /></View>
+          <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align, flex: 1 }}>{language === "ar" ? "تحديد الفترة الزمنية" : "Set time range"}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setRangePanelOpen(false)} style={({ pressed }) => [styles.rangeModalClose, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={19} color={colors.foreground} /></Pressable>
+        </View>
+        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "من تاريخ" : "From date"} value={rangeDraft.start} onChange={(value) => setRangeDraft({ ...rangeDraft, start: value })} /></View>
+        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "إلى تاريخ" : "To date"} value={rangeDraft.end} onChange={(value) => setRangeDraft({ ...rangeDraft, end: value })} /></View>
+        <View style={[styles.rangeModalNote, { backgroundColor: colors.surfaceMuted + "80", borderColor: colors.border + "AA" }]}><MaterialIcons name="info-outline" size={15} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700", flex: 1, textAlign: align }}>{language === "ar" ? "تحصر الفلترة المهام ضمن هذا النطاق على الشريط وقائمة المهام." : "Filters the strip and task list within this range."}</Text></View>
+        <View style={[styles.rangeModalActions, { flexDirection: row }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} onPress={() => setRangePanelOpen(false)} style={({ pressed }) => [styles.rangeModalCancel, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "800" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تطبيق الفلترة" : "Apply filter"} onPress={applyCustomRange} style={({ pressed }) => [styles.rangeModalApply, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="filter-alt" size={17} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{language === "ar" ? "تطبيق الفلترة" : "Apply filter"}</Text></Pressable>
+        </View>
+      </View>
+    </View>
+  </Modal>
   </ScreenContainer>;
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16, paddingBottom: 120 },
+  content: { padding: 16, paddingBottom: 120, flexGrow: 1 },
   flex: { flex: 1, minWidth: 0 },
   subtitle: { fontSize: 11, fontWeight: "600" },
   header: { alignItems: "center", gap: 10, marginBottom: 12 },
@@ -723,23 +732,27 @@ const styles = StyleSheet.create({
   cancelChoice: { minHeight: 62, borderRadius: 14, borderWidth: 1, paddingHorizontal: 13, marginTop: 11, alignItems: "center", flexDirection: "row", gap: 10 },
   cancelDismiss: { minHeight: 46, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 12 },
   filterRow: { marginTop: 12 },
-  clickAway: { zIndex: 1 },
+  clickAway: { zIndex: 1, backgroundColor: "rgba(0, 0, 0, 0.2)" },
   rollerWrap: { marginTop: 13 },
   rollerToolbar: { alignItems: "center", gap: 7, marginBottom: 8 },
   rollerChips: { flex: 1, minWidth: 0, alignItems: "center", gap: 6, flexWrap: "wrap", flexDirection: "row" },
   rollerRangeChip: { minHeight: 30, paddingHorizontal: 10, borderRadius: 9, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4 },
   rollerRangeAnchor: { position: "relative", flexShrink: 0 },
-  rollerRangePanel: { position: "absolute", top: "100%", marginTop: 8, minWidth: 280, maxWidth: 320, borderRadius: 16, borderWidth: 1, padding: 12, gap: 8, zIndex: 50, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 16 },
-  rollerRangeField: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 4, overflow: "hidden" },
-  rollerRangeActions: { gap: 7, marginTop: 2 },
-  rollerAction: { flex: 1, minHeight: 40, borderRadius: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
-  rollerActionGhost: { flex: 1, minHeight: 40, borderRadius: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  rangeModalBackdrop: { flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)", alignItems: "center", justifyContent: "center", padding: 16 },
+  rangeModalCard: { width: "100%", maxWidth: 380, borderRadius: 16, borderWidth: 1, padding: 20, gap: 14, opacity: 1, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 26, shadowOffset: { width: 0, height: 14 }, elevation: 24 },
+  rangeModalHeader: { alignItems: "center", gap: 10 },
+  rangeModalTitleIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  rangeModalClose: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  rangeModalField: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 6, overflow: "hidden", backgroundColor: "#0f172a" },
+  rangeModalNote: { minHeight: 38, borderRadius: 11, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", flexDirection: "row", gap: 7 },
+  rangeModalActions: { gap: 9, marginTop: 2 },
+  rangeModalApply: { flex: 1, minHeight: 46, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
+  rangeModalCancel: { minWidth: 106, minHeight: 46, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
   rollerScroller: { alignItems: "center", gap: 6 },
   rollerArrow: { width: 34, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1, flexShrink: 0 },
   rollerStrip: { flexDirection: "row", gap: 6, paddingVertical: 3, paddingHorizontal: 2 },
   rollerChip: { minWidth: 50, maxWidth: 54, height: 60, borderRadius: 14, borderWidth: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center", gap: 2 },
-  rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 1 },
-  rollerTodayBadge: { position: "absolute", top: 3, right: 3, minWidth: 26, borderRadius: 6, paddingHorizontal: 4, alignItems: "center", justifyContent: "center" },
+  rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2 },
   filterDot: { width: 8, height: 8, borderRadius: 4 },
   searchWrap: { flex: 1, minWidth: 0, maxWidth: 480, alignItems: "center", gap: 6, minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700", padding: 0 },

@@ -100,9 +100,11 @@ describe("العُهد النقدية ومحاسبة التأمين", () => {
     expect(management).toContain("إضافة نقطة تحصيل موظف");
     expect(management).toContain("الموظف المرتبط");
     expect(management).toContain("الحد الأقصى المسموح للعهدة");
-    expect(management).toContain("accessibilityLabel=\"direct-cliq-toggle\"");
-    expect(management).toContain("accessibilityLabel=\"direct-bank-toggle\"");
-    expect(management).toContain("accessibilityLabel=\"direct-cash-toggle\"");
+    expect(management).toContain("ownerAccounts");
+    expect(management).toContain("حسابات الخزينة المركزية");
+    expect(management).toContain("افتراضي");
+    expect(management).toContain("حذف نقطة التحصيل");
+    expect(management).toContain("سقف العهدة");
     expect(form).toContain("recipientTargetId");
     expect(form).toContain("activeStaffFloatAccounts");
     expect(form).toContain("float-${account.id}");

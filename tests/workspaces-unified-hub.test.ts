@@ -136,8 +136,8 @@ describe("unified workspaces & properties hub", () => {
 
   it("anchors unit identity on the right: 40px icon, name, then unit number inline", () => {
     const screen = source("app/workspaces.tsx");
-    expect(screen).toContain('unitIcon: { width: 40, height: 40, borderRadius: 12, borderWidth: 1');
-    expect(screen).toContain('unitName: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: SLATE_100');
+    expect(screen).toContain('unitIcon: { width: 36, height: 36, borderRadius: 18, borderWidth: 1');
+    expect(screen).toContain('unitName: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: SLATE_50');
     expect(screen).toContain('unitCode: { fontSize: 11, lineHeight: 16, color: SLATE_300, fontWeight: "600"');
     expect(screen).toContain('writingDirection: "ltr"');
     expect(screen).toContain("chalet.referenceCode");
@@ -149,7 +149,7 @@ describe("unified workspaces & properties hub", () => {
 
   it("renders the metrics pill with generous spacing and explicit RTL so labels are never cut off", () => {
     const screen = source("app/workspaces.tsx");
-    expect(screen).toContain('unitStatsBar: { minHeight: 36, borderRadius: 12, borderWidth: 1, borderColor: SLATE_800_80, backgroundColor: SLATE_950_70, paddingHorizontal: 16, paddingVertical: 8, alignItems: "center", gap: 12');
+    expect(screen).toContain('unitStatsBar: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: SLATE_800_80, backgroundColor: SLATE_950_70, paddingHorizontal: 12, paddingVertical: 8, alignItems: "center", gap: 10');
     expect(screen).toContain("const textDirection = row === \"row-reverse\" ? \"rtl\" : \"ltr\";");
     expect(screen).toContain("statValue, { color: colors.success, writingDirection: textDirection }");
     expect(screen).toContain('<Text style={[styles.statDot, { color: SLATE_600 }]}>•</Text>');

@@ -52,13 +52,16 @@ export const ACCOUNT_TIERS = ["free", "private_saas"] as const;
 export type AccountTier = (typeof ACCOUNT_TIERS)[number];
 export type PaymentMethodOption = { id: string; label: string; isActive: boolean; icon: PaymentMethodIcon; isArchived?: boolean; defaultRecipientType?: PaymentRecipientType };
 export type MasterPaymentAccounts = { cliqAlias?: string; bankDetails?: string; cashHandlerLabel?: string; directCliqEnabled?: boolean; directBankEnabled?: boolean; directCashEnabled?: boolean };
+export type OwnerTreasuryKind = "cliq" | "bank" | "vault";
+/** حساب ملك للمنشأة مباشرة (قناة استلام للخزينة المركزية): CliQ أو IBAN بنكي أو خزينة كاش. */
+export type OwnerTreasuryAccount = { id: string; kind: OwnerTreasuryKind; label: string; detail: string; isActive?: boolean; isDefault?: boolean };
 /** نقطة تحصيل ميدانية مرتبطة بموظف: تستقبل عمليات على ذمة الموظف (عهدة) لحين التوريد للمالك. */
 export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; label: string; cliqAlias?: string; bankDetails?: string; maxFloatLimit?: number; isActive?: boolean };
 /** تسوية وتوريد عهدة: المالك يصفّر ذمة الموظف وينقل المبلغ لخزينته. */
 export type StaffFloatSettlement = { id: string; floatId: string; amount: number; settledAt: string; note?: string; settledByUserId?: number; settledByName?: string };
 /** خصم أضرار/غرامات من التأمين عند المغادرة: يُحوَّل لبند إيرادات تعويضات ويخصم من الاسترداد. */
 export type DepositCompensation = { amount: number; date: string; recordedAt?: string; note?: string; sourceFloatId?: string; returnedByUserId?: number; returnedByName?: string };
-export type PaymentRoutingSettings = { masterAccounts?: MasterPaymentAccounts; staffFloats?: StaffFloatAccount[] };
+export type PaymentRoutingSettings = { ownerAccounts?: OwnerTreasuryAccount[]; masterAccounts?: MasterPaymentAccounts; staffFloats?: StaffFloatAccount[] };
 export const DEFAULT_PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
   { id: "cash-owner", label: "نقدًا بيد المالك", isActive: true, icon: "💵" },
   { id: "cash-guardian", label: "نقدًا بيد الحارس", isActive: true, icon: "👨‍🌾" },
@@ -181,6 +184,61 @@ function normalizeMasterPaymentAccounts(value: unknown): MasterPaymentAccounts |
     base.directCashEnabled = true;
   }
   return Object.values(base).some((entry) => typeof entry === "boolean" || entry !== undefined) ? base : undefined;
+}
+function normalizeOwnerTreasuryAccount(value: unknown): OwnerTreasuryAccount | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<OwnerTreasuryAccount>;
+  const id = typeof candidate.id === "string" ? candidate.id.trim().slice(0, 72) : "";
+  const kind = candidate.kind === "cliq" || candidate.kind === "bank" || candidate.kind === "vault" ? candidate.kind : undefined;
+  const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 60) : "";
+  const detail = typeof candidate.detail === "string" ? candidate.detail.trim().slice(0, 200) : "";
+  if (!id || !kind || !label || !/^[a-z0-9-]{2,72}$/.test(id)) return undefined;
+  return { id, kind, label, detail, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined } satisfies OwnerTreasuryAccount;
+}
+/** يضمن علامة "افتراضي" واحدة على أول حساب مفعّل (أو أول حساب إن لم يكن أي مفعّل). */
+function ensureOwnerTreasuryDefault(accounts: OwnerTreasuryAccount[]): OwnerTreasuryAccount[] {
+  if (!accounts.length) return accounts;
+  const active = accounts.filter((account) => account.isActive !== false);
+  const preferred = accounts.find((account) => account.isDefault === true && account.isActive !== false);
+  const defaultAccount = preferred ?? (active.length ? active[0] : accounts[0]);
+  return accounts.map((account) => ({ ...account, isDefault: account.id === defaultAccount.id }));
+}
+/** هجرة الإعداد القديم (حساب مالك مفرد) إلى سجل حسابات الخزينة المتعددة. */
+function legacyOwnerTreasuryMigration(value: unknown): OwnerTreasuryAccount[] {
+  const legacy = normalizeMasterPaymentAccounts(value);
+  if (!legacy) return [];
+  const accounts: OwnerTreasuryAccount[] = [];
+  if (legacy.cliqAlias) accounts.push({ id: "owner-cliq", kind: "cliq", label: "CliQ المنشأة الرسمي", detail: legacy.cliqAlias, isActive: legacy.directCliqEnabled !== false });
+  if (legacy.bankDetails) accounts.push({ id: "owner-bank", kind: "bank", label: "الحساب البنكي الرئيسي", detail: legacy.bankDetails, isActive: legacy.directBankEnabled !== false });
+  if (legacy.cashHandlerLabel) accounts.push({ id: "owner-vault", kind: "vault", label: "خزينة الكاش المركزية", detail: legacy.cashHandlerLabel, isActive: legacy.directCashEnabled !== false });
+  return ensureOwnerTreasuryDefault(accounts);
+}
+export function normalizeOwnerTreasuryAccounts(value: unknown, legacy?: unknown): OwnerTreasuryAccount[] {
+  if (Array.isArray(value)) {
+    const ids = new Set<string>();
+    const accounts = value.flatMap((item) => {
+      const account = normalizeOwnerTreasuryAccount(item);
+      if (!account || ids.has(account.id)) return [];
+      ids.add(account.id);
+      return [account];
+    });
+    if (accounts.length) return ensureOwnerTreasuryDefault(accounts);
+  }
+  return legacyOwnerTreasuryMigration(legacy);
+}
+/** حسابات الخزينة المركزية المسجلة في إعدادات طرق الدفع. */
+export function ownerTreasuryAccounts(settings: Settings = DEFAULT_SETTINGS): OwnerTreasuryAccount[] {
+  return normalizeOwnerTreasuryAccounts(settings.paymentRouting?.ownerAccounts, settings.paymentRouting?.masterAccounts);
+}
+/** الحسابات المركزية المفعلة فقط — المتاحة كوجهة استلام في نموذج الحجز. */
+export function activeOwnerTreasuryAccounts(settings: Settings = DEFAULT_SETTINGS): OwnerTreasuryAccount[] {
+  return ownerTreasuryAccounts(settings).filter((account) => account.isActive !== false);
+}
+/** الحساب المركزي المطابق لطريقة الدفع (المفترض ثم أي مفعّل من نفس النوع). */
+export function ownerReceivingAccount(settings: Settings = DEFAULT_SETTINGS, method?: PaymentMethod | null): OwnerTreasuryAccount | undefined {
+  const kind = method === "click" ? "cliq" as const : method === "bank-transfer" ? "bank" as const : "vault" as const;
+  const active = activeOwnerTreasuryAccounts(settings);
+  return active.find((account) => account.kind === kind && account.isDefault) ?? active.find((account) => account.kind === kind);
 }
 function normalizeDepositCompensation(value: unknown): DepositCompensation | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -943,7 +1001,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   }) : [];
   const normalizeLoyaltyTier = (value: unknown): LoyaltyTier => value === "silver" || value === "gold" || value === "platinum" ? value : "bronze";
   const loyaltyAccounts: LoyaltyAccount[] = Array.isArray(data.loyaltyAccounts) ? data.loyaltyAccounts.filter((account): account is LoyaltyAccount => Boolean(account?.id && account?.customerId)).map((account) => ({ id: account.id, customerId: account.customerId, pointsBalance: Math.max(0, Math.floor(Number(account.pointsBalance || 0))), tier: normalizeLoyaltyTier(account.tier), lifetimeEarned: Math.max(0, Math.floor(Number(account.lifetimeEarned || 0))), lifetimeRedeemed: Math.max(0, Math.floor(Number(account.lifetimeRedeemed || 0))), updatedAt: normalizeRecordedAt(account.updatedAt) ?? normalizeRecordedAt(account.createdAt) ?? new Date(0).toISOString(), createdAt: normalizeRecordedAt(account.createdAt) ?? new Date(0).toISOString() } satisfies LoyaltyAccount)) : [];
-  const loyaltyTransactions: LoyaltyTransaction[] = Array.isArray(data.loyaltyTransactions) ? data.loyaltyTransactions.filter((transaction): transaction is LoyaltyTransaction => Boolean(transaction?.id && transaction?.customerId && (transaction?.type === "earn" || transaction?.type === "redeem") && Number.isFinite(Number(transaction?.points)))).map((transaction) => ({ id: transaction.id, customerId: transaction.customerId, type: transaction.type === "redeem" ? "redeem" : "earn", points: Math.max(0, Math.floor(Number(transaction.points))), amount: Number.isFinite(Number(transaction.amount)) && Number(transaction.amount) >= 0 ? Math.round(Number(transaction.amount) * 100) / 100 : 0, bookingId: transaction.bookingId?.trim() || undefined, bookingReference: transaction.bookingReference?.trim() || undefined, note: transaction.note?.trim().slice(0, 240) || undefined, createdAt: normalizeRecordedAt(transaction.createdAt) ?? new Date(0).toISOString() } satisfies LoyaltyTransaction)) : [];  const paymentRouting = { ...(incomingSettings.paymentRouting ?? {}), masterAccounts: normalizeMasterPaymentAccounts(incomingSettings.paymentRouting?.masterAccounts), staffFloats: normalizeStaffFloatAccounts(incomingSettings.paymentRouting?.staffFloats) };
+  const loyaltyTransactions: LoyaltyTransaction[] = Array.isArray(data.loyaltyTransactions) ? data.loyaltyTransactions.filter((transaction): transaction is LoyaltyTransaction => Boolean(transaction?.id && transaction?.customerId && (transaction?.type === "earn" || transaction?.type === "redeem") && Number.isFinite(Number(transaction?.points)))).map((transaction) => ({ id: transaction.id, customerId: transaction.customerId, type: transaction.type === "redeem" ? "redeem" : "earn", points: Math.max(0, Math.floor(Number(transaction.points))), amount: Number.isFinite(Number(transaction.amount)) && Number(transaction.amount) >= 0 ? Math.round(Number(transaction.amount) * 100) / 100 : 0, bookingId: transaction.bookingId?.trim() || undefined, bookingReference: transaction.bookingReference?.trim() || undefined, note: transaction.note?.trim().slice(0, 240) || undefined, createdAt: normalizeRecordedAt(transaction.createdAt) ?? new Date(0).toISOString() } satisfies LoyaltyTransaction)) : [];  const paymentRouting = { ...(incomingSettings.paymentRouting ?? {}), ownerAccounts: normalizeOwnerTreasuryAccounts(incomingSettings.paymentRouting?.ownerAccounts, incomingSettings.paymentRouting?.masterAccounts), masterAccounts: normalizeMasterPaymentAccounts(incomingSettings.paymentRouting?.masterAccounts), staffFloats: normalizeStaffFloatAccounts(incomingSettings.paymentRouting?.staffFloats) };
   return { bookings, waitlist: (data.waitlist ?? []).map((entry) => ({ ...linkShift(entry), depositPaymentMethod: normalizePaymentMethodId(entry.depositPaymentMethod), depositPaymentRecordedAt: normalizeRecordedAt(entry.depositPaymentRecordedAt), status: entry.status === "cancelled" ? "cancelled" : entry.status === "promoted" ? "promoted" : "active", cancelledAt: typeof entry.cancelledAt === "string" ? entry.cancelledAt : undefined, cancellationReason: entry.cancellationReason === "start-time" ? "start-time" : entry.cancellationReason === "manual" ? "manual" : undefined, promotedAt: typeof entry.promotedAt === "string" ? entry.promotedAt : undefined, promotedByUserId: Number.isInteger(entry.promotedByUserId) ? entry.promotedByUserId : undefined, promotedByName: entry.promotedByName?.trim() || undefined, promotedBookingId: entry.promotedBookingId?.trim() || undefined, promotedBookingReference: entry.promotedBookingReference?.trim() || undefined, promotedReplacedCustomerNames: entry.promotedReplacedCustomerNames?.trim() || undefined })), turnoverTasks, expenses, customers, contracts, assets, maintenanceTasks, maintenanceAuditLog, notifications, weatherLogs, utilityReadings, loyaltyAccounts, loyaltyTransactions, chalets: migratedChalets, specialPriceRules, auditLog, staffFloatSettlements: normalizeStaffFloatSettlements(data.staffFloatSettlements), settings: { ...DEFAULT_SETTINGS, ...incomingSettings, device, paymentRouting, businessLogoUrl: businessLogoUrl && isValidBusinessLogoUrl(businessLogoUrl) ? businessLogoUrl : undefined, weekendDays: weekendDays?.length ? weekendDays : DEFAULT_SETTINGS.weekendDays, periodPricing, whatsAppOptions: { ...DEFAULT_WHATSAPP_MESSAGE_OPTIONS, ...(incomingSettings.whatsAppOptions ?? {}) }, bookingTypes: { ...DEFAULT_SETTINGS.bookingTypes, ...(incomingSettings.bookingTypes ?? {}) } } };
 }
 

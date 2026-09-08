@@ -11,7 +11,7 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, activeStaffFloatAccounts, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, propertyTypeIcon, remainingAmount, reservedPeriodColorKeyForShift, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
+import { Booking, BookingType, Chalet, CommissionType, Payment, PaymentMethod, PaymentRecipientType, activePaymentMethods, activeStaffFloatAccounts, bookingShiftLabel, bookingToWaitlistEntry, bookingTypeForShift, bookingTypeLabel, calculateCollectionCommission, daysCount, durationLabel, formatMoney, getChaletShifts, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, legacyShiftIdForBookingType, localDateISO, ownerReceivingAccount, propertyTypeIcon, remainingAmount, reservedPeriodColorKeyForShift, resolvedBookingPrice, suggestNearestAvailableCheckout, toPositiveFiniteAmount, weekdayLabel } from "@/lib/booking-model";
 import { isBookingDateMaintenanceBlocked } from "@/lib/maintenance-blocks";
 import { hasBookingConflict } from "@/services/availabilityService";
 import { configuredBookingPrice } from "@/services/pricingService";
@@ -112,9 +112,10 @@ export default function BookingForm() {
   };
   const paymentAccountLabel = (method: PaymentMethod, recipient: RecipientChoice) => {
     if (recipient.type === "owner") {
-      if (method === "click") return settings.paymentRouting?.masterAccounts?.cliqAlias || (language === "ar" ? "حساب CliQ للمالك" : "Owner CliQ account");
-      if (method === "bank-transfer") return settings.paymentRouting?.masterAccounts?.bankDetails || (language === "ar" ? "الحساب البنكي للمالك" : "Owner bank account");
-      return settings.paymentRouting?.masterAccounts?.cashHandlerLabel || recipient.name;
+      const account = ownerReceivingAccount(settings, method);
+      if (method === "click") return account?.detail || (language === "ar" ? "حساب CliQ للمالك" : "Owner CliQ account");
+      if (method === "bank-transfer") return account?.detail || (language === "ar" ? "الحساب البنكي للمالك" : "Owner bank account");
+      return account?.detail || recipient.name;
     }
     if (recipient.floatId) {
       if (method === "click") return recipient.cliqAlias || (language === "ar" ? "بيانات CliQ غير مكتملة" : "CliQ details missing");
@@ -190,7 +191,7 @@ export default function BookingForm() {
     const resolvedDepositMethod = existing?.depositPaymentMethod ?? (depositValue > 0 ? depositPaymentMethod ?? undefined : undefined);
     const depositCollection = !existing && !sourceWaitlist && depositValue > 0 && resolvedDepositMethod ? buildCollectionPayment("pending-security-deposit", depositValue, resolvedDepositMethod, depositRecipientId, language === "ar" ? "تأمين مسترد" : "Refundable security deposit") : existing?.depositCollection;
     return { id: existing?.id ?? "", customerName: name, phone: normalizedPhone.value ?? phone, chaletId: chaletId || undefined, chaletName: selectedChalet?.name ?? existing?.chaletName, startDate, endDate, bookingType: multiDayRange ? "multi-day" : bookingTypeForShift(shiftId), shiftId: selectedShift?.id, shiftName: selectedShift?.name, shiftColor: selectedShift?.color, startTime, endTime, price: rentalTotal, discountAmount: Number(discountAmount || 0), depositAmount: depositValue, depositPaymentMethod: resolvedDepositMethod, depositPaymentRecordedAt: resolvedDepositMethod ? existing?.depositPaymentRecordedAt ?? sourceWaitlist?.depositPaymentRecordedAt : undefined, depositCollection, payments: existing?.payments ?? sourceWaitlist?.payments ?? pendingInitialPayment, notes, status: existing?.status ?? "confirmed", createdAt: existing?.createdAt ?? new Date().toISOString() } as Booking;
-  }, [automaticPrice, chaletId, cloneSource, depositAmount, depositPaymentMethod, depositRecipientId, discountAmount, endDate, existing, initialPayment, initialPaymentMethod, initialRecipientId, language, multiDayRange, name, normalizedPhone.value, notes, phone, price, priceIsManual, recipientChoices, selectedChalet?.name, selectedShift?.color, selectedShift?.id, selectedShift?.name, settings.paymentRouting?.masterAccounts?.bankDetails, settings.paymentRouting?.masterAccounts?.cashHandlerLabel, settings.paymentRouting?.masterAccounts?.cliqAlias, shiftId, sourceWaitlist, startDate, startTime, endTime]);
+  }, [automaticPrice, chaletId, cloneSource, depositAmount, depositPaymentMethod, depositRecipientId, discountAmount, endDate, existing, initialPayment, initialPaymentMethod, initialRecipientId, language, multiDayRange, name, normalizedPhone.value, notes, phone, price, priceIsManual, recipientChoices, selectedChalet?.name, selectedShift?.color, selectedShift?.id, selectedShift?.name, settings.paymentRouting?.ownerAccounts, shiftId, sourceWaitlist, startDate, startTime, endTime]);
   const remaining = remainingAmount(draft);
   const hasValidPrice = Number.isFinite(Number(price)) && Number(price) > 0;
   const invalidPhone = Boolean(phone.trim() && normalizedPhone.error);

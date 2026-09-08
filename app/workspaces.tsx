@@ -27,6 +27,7 @@ const SLATE_400 = "#94A3B8";
 const SLATE_300 = "#CBD5E1";
 const SLATE_200 = "#E2E8F0";
 const SLATE_100 = "#F1F5F9";
+const SLATE_50 = "#F8FAFC";
 const SLATE_950_70 = "#020617B3";
 const ORANGE_500_40 = "#F9731666";
 
@@ -256,20 +257,26 @@ function UnitCard({ chalet, bookings, currency, colors, language, align, row }: 
     <View style={[styles.unitRow, { flexDirection: row }]}>
       <View style={styles.unitIdentity}>
         <View style={[styles.unitHead, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
-          <View style={[styles.unitIcon, { borderColor: SLATE_700 + "99" }]}><MaterialIcons name={propertyTypeIcon(chalet.propertyType)} size={20} color={chalet.color} /></View>
-          <Text numberOfLines={1} style={[styles.unitName, { textAlign: align }]}>{chalet.name}</Text>
+          <View style={[styles.unitIcon, { borderColor: SLATE_700 + "99" }]}><MaterialIcons name={propertyTypeIcon(chalet.propertyType)} size={18} color={chalet.color} /></View>
+          <Text numberOfLines={1} style={[styles.unitName, { textAlign: align, writingDirection: textDirection }]}>{chalet.name}</Text>
           <Text numberOfLines={1} style={styles.unitCode}>{codeText}</Text>
         </View>
       </View>
-      <View style={[styles.unitStatsBar, { flexDirection: "row", flexWrap: "wrap", justifyContent: "center" }]}>
-        <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الأيام المشغولة:" : "Occupied days:"}</Text>
-        <Text style={[styles.statValue, { writingDirection: "ltr" }]}>{performance.occupiedDays}</Text>
+      <View style={[styles.unitStatsBar, { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-evenly" }]}>
+        <View style={styles.statGroup}>
+          <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الأيام المشغولة:" : "Occupied days:"}</Text>
+          <Text style={[styles.statValue, { writingDirection: "ltr" }]}>{performance.occupiedDays}</Text>
+        </View>
         <Text style={[styles.statDot, { color: SLATE_600 }]}>•</Text>
-        <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الحجوزات:" : "Bookings:"}</Text>
-        <Text style={[styles.statValue, { writingDirection: "ltr" }]}>{performance.bookingCount}</Text>
+        <View style={styles.statGroup}>
+          <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الحجوزات:" : "Bookings:"}</Text>
+          <Text style={[styles.statValue, { writingDirection: "ltr" }]}>{performance.bookingCount}</Text>
+        </View>
         <Text style={[styles.statDot, { color: SLATE_600 }]}>•</Text>
-        <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الإيراد:" : "Revenue:"}</Text>
-        <Text style={[styles.statValue, { color: colors.success, writingDirection: textDirection }]}>{formatMoney(performance.rentalRevenue, currency)}</Text>
+        <View style={styles.statGroup}>
+          <Text style={[styles.statLabel, { writingDirection: textDirection }]}>{language === "ar" ? "الإيراد:" : "Revenue:"}</Text>
+          <Text style={[styles.statValue, { color: colors.success, writingDirection: textDirection }]}>{formatMoney(performance.rentalRevenue, currency)}</Text>
+        </View>
       </View>
       <View style={[styles.unitActions, { flexDirection: "row", alignItems: "center", gap: 8 }]}>
         <View style={[styles.typeBadge, { backgroundColor: chalet.color + "18", borderColor: chalet.color + "55" }]}><Text numberOfLines={1} style={{ color: chalet.color, fontSize: 11, fontWeight: "700" }}>{typeLabel}</Text></View>
@@ -315,20 +322,21 @@ const styles = StyleSheet.create({
   workBanner: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginTop: 14 },
   workBannerIcon: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   workBannerText: { flex: 1, minWidth: 0, color: SLATE_300, fontSize: 12, lineHeight: 18, fontWeight: "700" },
-  unitCard: { marginTop: 8, marginBottom: 12, borderWidth: 1, borderRadius: 20, padding: 14, backgroundColor: SLATE_900_50, borderColor: SLATE_800_80 },
+  unitCard: { marginTop: 4, marginBottom: 8, borderWidth: 1, borderRadius: 20, padding: 12, backgroundColor: SLATE_900_50, borderColor: SLATE_800_80 },
   unitRow: { alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" },
   unitIdentity: { flexShrink: 0, minWidth: 170, flexGrow: 1, flexBasis: 0 },
   unitHead: { alignItems: "center", gap: 8 },
-  unitIcon: { width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: SLATE_700, backgroundColor: SLATE_800_80, alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  unitName: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: SLATE_100, flexShrink: 1 },
+  unitIcon: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: SLATE_700, backgroundColor: SLATE_800_80, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  unitName: { fontSize: 14, lineHeight: 20, fontWeight: "700", color: SLATE_50, flexShrink: 1 },
   unitCode: { fontSize: 11, lineHeight: 16, color: SLATE_300, fontWeight: "600", marginTop: 1, writingDirection: "ltr", flexShrink: 1 },
-  unitStatsBar: { minHeight: 36, borderRadius: 12, borderWidth: 1, borderColor: SLATE_800_80, backgroundColor: SLATE_950_70, paddingHorizontal: 16, paddingVertical: 8, alignItems: "center", gap: 12, flexShrink: 1, flexBasis: 200 },
-  statLabel: { color: SLATE_300, fontSize: 12, fontWeight: "500", flexShrink: 0 },
+  unitStatsBar: { minHeight: 40, borderRadius: 12, borderWidth: 1, borderColor: SLATE_800_80, backgroundColor: SLATE_950_70, paddingHorizontal: 12, paddingVertical: 8, alignItems: "center", gap: 10, flexShrink: 1, flexBasis: 200 },
+  statGroup: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0, minWidth: 0 },
+  statLabel: { color: SLATE_400, fontSize: 12, fontWeight: "500", flexShrink: 0 },
   statValue: { color: SLATE_100, fontSize: 12, fontWeight: "900", flexShrink: 0 },
   statDot: { fontSize: 12, fontWeight: "800", flexShrink: 0 },
   typeBadge: { minHeight: 22, borderRadius: 8, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   unitActions: { flexShrink: 0 },
-  unitProfileButton: { minHeight: 32, borderRadius: 12, paddingHorizontal: 14, alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  unitProfileButton: { minHeight: 32, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: SLATE_700, backgroundColor: SLATE_800_90, alignItems: "center", justifyContent: "center", flexShrink: 0 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(5, 8, 15, 0.82)", alignItems: "center", justifyContent: "center", padding: 18 },
   modalCard: { width: "100%", maxWidth: 460, borderRadius: 24, borderWidth: 1, padding: 20 },
   modalHeader: { alignItems: "center", gap: 11 },

@@ -53,9 +53,15 @@ describe("payment-method settings", () => {
     expect(management).toContain("delete-outline");
     expect(management).toContain("المالك / الخزينة المركزية");
     expect(management).toContain("حالة الحساب — مفعّل للاستلام");
-    expect(management).toContain("مفعّل وجاهز للاستلام");
-    expect(management).toContain("يلزم إكمال البيانات للتفعيل");
+    expect(management).toContain("✓ مفعّل");
+    expect(management).toContain("⚠️ بيانات غير مكتملة");
     expect(management).toContain("يرجى إكمال بيانات الحساب عبر زر التعديل أولاً");
+    expect(management).toContain("تضمين هذا الحساب في رسائل الواتساب وقوالب الحجز للعميل");
+    expect(management).toContain("setEditingAccountId(account.id)");
+    expect(management).toContain("existingIds.has(item.id) ? item.id : createOwnerAccountId()");
+    expect(management).not.toContain("ownerFlags.whatsApp");
+    expect(management).not.toContain("floatDraft.whatsApp");
+    expect(management).not.toContain("الظهور في قوالب الرسائل (واتساب)");
     expect(management).not.toContain("disabled={lockedEdit}");
   });
 

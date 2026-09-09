@@ -26,23 +26,29 @@ export function bookingMessageTemplateLabel(template: BookingMessageTemplate, la
 /** Compatibility export for existing booking and template callers. */
 export const formatWhatsAppPhone = formatJordanianWhatsAppPhone;
 
-/** سطور «وجهة الدفع» تُبنى حصرًا من الحسابات المرخّصة للظهور في قوالب الواتساب (whatsApp === true). */
+/** سطور «وجهة الدفع» تُبنى حصرًا من الحسابات المرخّصة للظهور في قوالب الواتساب (كل حساب/قناة مُحدَّد على حدة). */
 function whatsAppPaymentDestinationLines(booking: Booking, settings: Settings, ar: boolean): string[] {
   const visible = whatsAppVisiblePaymentAccounts(settings);
-  const lines: string[] = [];
   const method = (booking.payments ?? []).find((payment) => !payment.voidedAt)?.paymentMethod ?? booking.depositCollection?.paymentMethod;
   const kind = method === "click" ? "cliq" : method === "bank-transfer" ? "bank" : "vault";
-  if (kind === "cliq") {
-    const cliq = visible.owner.find((account) => account.kind === "cliq");
-    const floatCliq = visible.floats.filter((account) => (account.cliqAlias || "").trim());
-    if (cliq && ((cliq.detail || "").trim() || (cliq.holderName || "").trim())) lines.push(`${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${(cliq.holderName || cliq.label).trim()}${(cliq.detail || "").trim() ? ` (${cliq.detail.trim()})` : ""}`);
-    else if (floatCliq.length) lines.push(`${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${floatCliq.map((account) => (account.cliqAlias || "").trim()).filter(Boolean).join(ar ? "، " : ", ")}`);
-  } else if (kind === "bank") {
-    const bank = visible.owner.find((account) => account.kind === "bank");
-    if (bank && ((bank.iban || bank.detail || "").trim() || (bank.provider || "").trim())) lines.push(`${ar ? "حوالة بنكية إلى" : "Bank transfer to"}: ${(bank.holderName || bank.label).trim()}${(bank.iban || bank.detail || "").trim() ? ` (${(bank.iban || bank.detail).trim()})` : ""}`);
-  } else {
-    const vault = visible.owner.find((account) => account.kind === "vault");
-    if (vault) lines.push(`${ar ? "الاستلام نقدًا حيث يتوفر" : "Receive cash at"}: ${vault.label.trim()}`);
+  const lines: string[] = [];
+  for (const account of visible.owner) {
+    if (account.kind !== kind) continue;
+    if (kind === "vault") { lines.push(`${ar ? "الاستلام نقدًا حيث يتوفر" : "Receive cash at"}: ${account.label.trim()}`); continue; }
+    const value = (account.iban || account.detail || "").trim();
+    if (!((account.provider || "").trim() || value)) continue;
+    lines.push(`${kind === "cliq" ? (ar ? "تحويل CliQ إلى" : "CliQ transfer to") : (ar ? "حوالة بنكية إلى" : "Bank transfer to")}: ${(account.holderName || account.label).trim()}${value ? ` (${value})` : ""}`);
+  }
+  for (const float of visible.floats) {
+    const channels = Array.isArray(float.channels) ? float.channels.filter((channel) => channel.whatsApp === true && (kind === "cliq" ? channel.kind === "cliq" : kind === "bank" ? channel.kind === "bank" : false)) : [];
+    if (channels.length) {
+      for (const channel of channels) lines.push(channel.kind === "cliq"
+        ? `${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${(channel.holderName || float.label).trim()}${(channel.alias || "").trim() ? ` (${(channel.alias || "").trim()})` : ""}`
+        : `${ar ? "حوالة بنكية إلى" : "Bank transfer to"}: ${(channel.holderName || float.label).trim()}${(channel.iban || "").trim() ? ` (${(channel.iban || "").trim()})` : ""}`);
+    } else if (!Array.isArray(float.channels) || !float.channels.length) {
+      if (kind === "cliq" && (float.cliqAlias || "").trim()) lines.push(`${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${float.label.trim()} (${float.cliqAlias?.trim()})`);
+      else if (kind === "bank" && (float.bankDetails || "").trim()) lines.push(`${ar ? "حوالة بنكية إلى" : "Bank transfer to"}: ${float.label.trim()} (${float.bankDetails?.trim()})`);
+    }
   }
   return lines;
 }

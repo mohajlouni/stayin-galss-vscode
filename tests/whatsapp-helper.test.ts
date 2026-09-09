@@ -107,6 +107,14 @@ describe("WhatsApp booking message", () => {
     expect(message).not.toContain("STAYIN01");
   });
 
+  it("injects only the marked CliQ channel of a float while leaving unmarked channels out", () => {
+    const marked: Settings = { ...settings, paymentRouting: { staffFloats: [{ id: "float-1", label: "نقطة الرشيد", channels: [{ kind: "cliq", alias: "FLOATIN01", whatsApp: true }, { kind: "cliq", alias: "PRIVATE99" }], isActive: true }] } };
+    const clickBooked = { ...booking, payments: [{ id: "payment-1", amount: 75, date: "2026-08-18", paymentMethod: "click", recipientType: "staff", recipientTargetId: "float-1" } as Booking["payments"][number]] };
+    const message = generateBookingWhatsAppMessage(clickBooked, marked, "ar", chalet);
+    expect(message).toContain("FLOATIN01");
+    expect(message).not.toContain("PRIVATE99");
+  });
+
   it("uses the global custom receipt template and replaces paid and remaining values", () => {
     const message = generateSelectedBookingWhatsAppMessage({
       selectedItems: ["receipt"],

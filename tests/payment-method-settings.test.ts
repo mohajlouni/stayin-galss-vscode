@@ -48,10 +48,15 @@ describe("payment-method settings", () => {
     expect(store).toContain('PAYMENT_METHODS_STORAGE_KEY = "@stayin_payment_methods"');
     expect(store).toContain("persistPaymentMethods");
     expect(more).toContain('route: "/payment-methods"');
-    expect(management).toContain("إضافة طريقة دفع");
-    expect(management).toContain("تعديل طريقة الدفع");
+    expect(management).toContain("إضافة صندوق عهدة وتحصيل (موظف / حارس)");
+    expect(management).toContain("تعديل حساب الخزينة");
     expect(management).toContain("delete-outline");
-    expect(management).toContain("PAYMENT_METHOD_ICON_OPTIONS");
+    expect(management).toContain("المالك / الخزينة المركزية");
+    expect(management).toContain("حالة الحساب — مفعّل للاستلام");
+    expect(management).toContain("مفعّل وجاهز للاستلام");
+    expect(management).toContain("يلزم إكمال البيانات للتفعيل");
+    expect(management).toContain("يرجى إكمال بيانات الحساب عبر زر التعديل أولاً");
+    expect(management).not.toContain("disabled={lockedEdit}");
   });
 
   it("preserves recipient routing and commission metadata without changing legacy payment records", () => {
@@ -74,7 +79,7 @@ describe("payment-method settings", () => {
     expect(form).toContain("collectionRecipients");
     expect(form).toContain("calculatedCommission");
     expect(management).toContain("حسابات المالك الرئيسية");
-    expect(management).toContain("defaultRecipientType");
+    expect(management).toContain("حساب الاستلام الافتراضي");
     expect(members).toContain("allowDirectCollection");
     expect(members).toContain("commissionRate");
     expect(reporting).toContain("collectionSettlements");

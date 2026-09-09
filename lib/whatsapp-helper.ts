@@ -1,4 +1,4 @@
-import { Booking, Chalet, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, Settings, bookingTypeLabel, formatBookingDate, formatMoney, formatTime12, refundableDepositAmount, remainingAmount, totalPaid } from "./booking-model";
+import { Booking, Chalet, DEFAULT_WHATSAPP_MESSAGE_OPTIONS, Settings, bookingTypeLabel, formatBookingDate, formatMoney, formatTime12, refundableDepositAmount, remainingAmount, totalPaid, whatsAppVisiblePaymentAccounts } from "./booking-model";
 import { buildWhatsAppLinks, formatJordanianWhatsAppPhone, openJordanianWhatsApp } from "./whatsapp";
 
 export type WhatsAppLanguage = "ar" | "en";
@@ -26,6 +26,27 @@ export function bookingMessageTemplateLabel(template: BookingMessageTemplate, la
 /** Compatibility export for existing booking and template callers. */
 export const formatWhatsAppPhone = formatJordanianWhatsAppPhone;
 
+/** سطور «وجهة الدفع» تُبنى حصرًا من الحسابات المرخّصة للظهور في قوالب الواتساب (whatsApp === true). */
+function whatsAppPaymentDestinationLines(booking: Booking, settings: Settings, ar: boolean): string[] {
+  const visible = whatsAppVisiblePaymentAccounts(settings);
+  const lines: string[] = [];
+  const method = (booking.payments ?? []).find((payment) => !payment.voidedAt)?.paymentMethod ?? booking.depositCollection?.paymentMethod;
+  const kind = method === "click" ? "cliq" : method === "bank-transfer" ? "bank" : "vault";
+  if (kind === "cliq") {
+    const cliq = visible.owner.find((account) => account.kind === "cliq");
+    const floatCliq = visible.floats.filter((account) => (account.cliqAlias || "").trim());
+    if (cliq && ((cliq.detail || "").trim() || (cliq.holderName || "").trim())) lines.push(`${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${(cliq.holderName || cliq.label).trim()}${(cliq.detail || "").trim() ? ` (${cliq.detail.trim()})` : ""}`);
+    else if (floatCliq.length) lines.push(`${ar ? "تحويل CliQ إلى" : "CliQ transfer to"}: ${floatCliq.map((account) => (account.cliqAlias || "").trim()).filter(Boolean).join(ar ? "، " : ", ")}`);
+  } else if (kind === "bank") {
+    const bank = visible.owner.find((account) => account.kind === "bank");
+    if (bank && ((bank.iban || bank.detail || "").trim() || (bank.provider || "").trim())) lines.push(`${ar ? "حوالة بنكية إلى" : "Bank transfer to"}: ${(bank.holderName || bank.label).trim()}${(bank.iban || bank.detail || "").trim() ? ` (${(bank.iban || bank.detail).trim()})` : ""}`);
+  } else {
+    const vault = visible.owner.find((account) => account.kind === "vault");
+    if (vault) lines.push(`${ar ? "الاستلام نقدًا حيث يتوفر" : "Receive cash at"}: ${vault.label.trim()}`);
+  }
+  return lines;
+}
+
 export function generateBookingWhatsAppMessage(booking: Booking, settings: Settings, language: WhatsAppLanguage = "ar", chalet?: Chalet) {
   const options = { ...DEFAULT_WHATSAPP_MESSAGE_OPTIONS, ...(settings.whatsAppOptions ?? {}) };
   const ar = language === "ar";
@@ -49,6 +70,8 @@ export function generateBookingWhatsAppMessage(booking: Booking, settings: Setti
     else lines.push(ar ? "حالة الإيجار: مكتمل السداد" : "Rental status: paid in full");
     const deposit = refundableDepositAmount(booking);
     if (deposit > 0) lines.push(`${ar ? "التأمين القابل للاسترداد" : "Refundable security deposit"}: ${formatMoney(deposit, settings.currency)}`);
+    const destinations = whatsAppPaymentDestinationLines(booking, settings, ar);
+    if (destinations.length) lines.push("", ar ? "وجهة الدفع" : "Payment destination", ...destinations);
   }
   if (options.includeLocation && chalet?.locationUrl?.trim()) {
     lines.push("", `${ar ? "الموقع" : "Location"}: ${chalet.locationUrl.trim()}`);
@@ -163,16 +186,21 @@ export function generateSelectedBookingWhatsAppMessage({
   const checkOut = `${date(booking.endDate)} · ${time(booking.endTime)}`;
   const sections: string[] = [ar ? `مرحبًا ${booking.customerName}،` : `Hello ${booking.customerName},`];
 
-  if (selected.has("receipt")) sections.push(messageSection(whatsappSendItemLabel("receipt", language), customReceiptTemplate?.trim() ? [interpolateBookingTemplate(customReceiptTemplate.trim(), booking, settings, language, chalet)] : [
-    `${ar ? "الشاليه" : "Chalet"}: ${booking.chaletName || (ar ? "الشاليه" : "the chalet")}`,
-    `${ar ? "المرجع" : "Reference"}: ${booking.bookingReference || "—"}`,
-    `${ar ? "الفترة" : "Stay"}: ${bookingTypeLabel(booking.bookingType, settings, language)}`,
-    `${ar ? "الوصول" : "Check-in"}: ${checkIn}`,
-    `${ar ? "المغادرة" : "Check-out"}: ${checkOut}`,
-    `${ar ? "إجمالي الإيجار" : "Rental total"}: ${formatMoney(booking.price, settings.currency)}`,
-    `${ar ? "المدفوع" : "Paid"}: ${formatMoney(totalPaid(booking), settings.currency)}`,
-    `${ar ? "المتبقي" : "Remaining"}: ${formatMoney(remainingAmount(booking), settings.currency)}`,
-  ]));
+  if (selected.has("receipt")) {
+    const receiptDefault = [
+      `${ar ? "الشاليه" : "Chalet"}: ${booking.chaletName || (ar ? "الشاليه" : "the chalet")}`,
+      `${ar ? "المرجع" : "Reference"}: ${booking.bookingReference || "—"}`,
+      `${ar ? "الفترة" : "Stay"}: ${bookingTypeLabel(booking.bookingType, settings, language)}`,
+      `${ar ? "الوصول" : "Check-in"}: ${checkIn}`,
+      `${ar ? "المغادرة" : "Check-out"}: ${checkOut}`,
+      `${ar ? "إجمالي الإيجار" : "Rental total"}: ${formatMoney(booking.price, settings.currency)}`,
+      `${ar ? "المدفوع" : "Paid"}: ${formatMoney(totalPaid(booking), settings.currency)}`,
+      `${ar ? "المتبقي" : "Remaining"}: ${formatMoney(remainingAmount(booking), settings.currency)}`,
+    ];
+    const destinations = whatsAppPaymentDestinationLines(booking, settings, ar);
+    if (destinations.length) receiptDefault.push(...[ar ? "وجهة الدفع" : "Payment destination", ...destinations]);
+    sections.push(messageSection(whatsappSendItemLabel("receipt", language), customReceiptTemplate?.trim() ? [interpolateBookingTemplate(customReceiptTemplate.trim(), booking, settings, language, chalet)] : receiptDefault));
+  }
   if (selected.has("confirmation")) sections.push(messageSection(whatsappSendItemLabel("confirmation", language), [generateBookingTemplateMessage("confirmation", booking, { ...settings, enableDisclaimer: false }, language, chalet, customConfirmationTemplate)]));
   if (selected.has("arrival")) sections.push(messageSection(whatsappSendItemLabel("arrival", language), customArrivalTemplate?.trim() ? [interpolateBookingTemplate(customArrivalTemplate.trim(), booking, settings, language, chalet)] : [
     ar ? `نرحب بكم في ${booking.chaletName || "الشاليه"}.` : `Welcome to ${booking.chaletName || "the chalet"}.`,

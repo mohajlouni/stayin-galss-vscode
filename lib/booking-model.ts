@@ -54,9 +54,11 @@ export type PaymentMethodOption = { id: string; label: string; isActive: boolean
 export type MasterPaymentAccounts = { cliqAlias?: string; bankDetails?: string; cashHandlerLabel?: string; directCliqEnabled?: boolean; directBankEnabled?: boolean; directCashEnabled?: boolean };
 export type OwnerTreasuryKind = "cliq" | "bank" | "vault";
 /** حساب ملك للمنشأة مباشرة (قناة استلام للخزينة المركزية): CliQ أو IBAN بنكي أو خزينة كاش. */
-export type OwnerTreasuryAccount = { id: string; kind: OwnerTreasuryKind; label: string; detail: string; isActive?: boolean; isDefault?: boolean };
+export type OwnerTreasuryAccount = { id: string; kind: OwnerTreasuryKind; label: string; detail: string; provider?: string; holderName?: string; iban?: string; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean };
+/** قناة استلام داخل نقطة العهدة الميدانية: CliQ أو بنك، ببياناتها المنظمة وعلامة الافتراضية داخل النقطة. */
+export type StaffFloatChannel = { kind: "cliq" | "bank"; alias?: string; provider?: string; holderName?: string; iban?: string; isDefault?: boolean };
 /** نقطة تحصيل ميدانية مرتبطة بموظف: تستقبل عمليات على ذمة الموظف (عهدة) لحين التوريد للمالك. */
-export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; label: string; cliqAlias?: string; bankDetails?: string; maxFloatLimit?: number; isActive?: boolean };
+export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; contactPhone?: string; label: string; cliqAlias?: string; bankDetails?: string; channels?: StaffFloatChannel[]; maxFloatLimit?: number; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean; entity?: "staff" | "guard" };
 /** تسوية وتوريد عهدة: المالك يصفّر ذمة الموظف وينقل المبلغ لخزينته. */
 export type StaffFloatSettlement = { id: string; floatId: string; amount: number; settledAt: string; note?: string; settledByUserId?: number; settledByName?: string };
 /** خصم أضرار/غرامات من التأمين عند المغادرة: يُحوَّل لبند إيرادات تعويضات ويخصم من الاسترداد. */
@@ -135,7 +137,7 @@ export function normalizeStaffFloatAccounts(value: unknown): StaffFloatAccount[]
     const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 120) : "";
     if (!id || !label || ids.has(id)) return [];
     ids.add(id);
-    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, isActive: candidate.isActive !== false } satisfies StaffFloatAccount];
+    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone.trim().slice(0, 30) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, channels: Array.isArray(candidate.channels) ? candidate.channels.flatMap((entry) => { const c = entry as Partial<StaffFloatChannel>; if (c?.kind !== "cliq" && c?.kind !== "bank") return []; return [{ kind: c.kind, alias: typeof c.alias === "string" ? c.alias.trim().slice(0, 160) || undefined : undefined, provider: typeof c.provider === "string" ? c.provider.trim().slice(0, 60) || undefined : undefined, holderName: typeof c.holderName === "string" ? c.holderName.trim().slice(0, 60) || undefined : undefined, iban: typeof c.iban === "string" ? c.iban.trim().slice(0, 200) || undefined : undefined, isDefault: c.isDefault === true || undefined } satisfies StaffFloatChannel]; }) : undefined, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || undefined, entity: candidate.entity === "staff" || candidate.entity === "guard" ? candidate.entity : undefined } satisfies StaffFloatAccount];
   });
 }
 /** العُهد الميدانية المسجلة في إعدادات طرق الدفع. */
@@ -145,6 +147,13 @@ export function staffFloatAccounts(settings: Settings = DEFAULT_SETTINGS): Staff
 /** العُهد المفعلة فقط — المتاحة كوجهة استلام في نموذج الحجز. */
 export function activeStaffFloatAccounts(settings: Settings = DEFAULT_SETTINGS): StaffFloatAccount[] {
   return staffFloatAccounts(settings).filter((account) => account.isActive !== false);
+}
+/** الحسابات المرخّصة للظهور في رسائل وقوالب الواتساب للعميل (مفتاح «الظهور في قوالب الرسائل»). */
+export function whatsAppVisiblePaymentAccounts(settings: Settings = DEFAULT_SETTINGS): { owner: OwnerTreasuryAccount[]; floats: StaffFloatAccount[] } {
+  return {
+    owner: ownerTreasuryAccounts(settings).filter((account) => account.whatsApp === true),
+    floats: normalizeStaffFloatAccounts(settings.paymentRouting?.staffFloats).filter((account) => account.whatsApp === true),
+  };
 }
 export function normalizeStaffFloatSettlements(value: unknown): StaffFloatSettlement[] {
   if (!Array.isArray(value)) return [];
@@ -193,7 +202,7 @@ function normalizeOwnerTreasuryAccount(value: unknown): OwnerTreasuryAccount | u
   const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 60) : "";
   const detail = typeof candidate.detail === "string" ? candidate.detail.trim().slice(0, 200) : "";
   if (!id || !kind || !label || !/^[a-z0-9-]{2,72}$/.test(id)) return undefined;
-  return { id, kind, label, detail, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined } satisfies OwnerTreasuryAccount;
+  return { id, kind, label, detail, provider: typeof candidate.provider === "string" ? candidate.provider.trim().slice(0, 60) || undefined : undefined, holderName: typeof candidate.holderName === "string" ? candidate.holderName.trim().slice(0, 60) || undefined : undefined, iban: typeof candidate.iban === "string" ? candidate.iban.trim().slice(0, 200) || undefined : undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || undefined } satisfies OwnerTreasuryAccount;
 }
 /** يضمن علامة "افتراضي" واحدة على أول حساب مفعّل (أو أول حساب إن لم يكن أي مفعّل). */
 function ensureOwnerTreasuryDefault(accounts: OwnerTreasuryAccount[]): OwnerTreasuryAccount[] {

@@ -98,7 +98,7 @@ describe("العُهد النقدية ومحاسبة التأمين", () => {
     expect(management).toContain("تستقر الدفعات مباشرة في إيرادات الخزينة العامة للمنشأة");
     expect(management).toContain("المبالغ المستلمة هنا تُسجل كذمة مالية/عهدة معلقة على الموظف لحين التوريد والتسوية مع المالك");
     expect(management).toContain("إضافة نقطة تحصيل موظف");
-    expect(management).toContain("الموظف المرتبط");
+    expect(management).toContain("معرف المستخدم #UID");
     expect(management).toContain("الحد الأقصى المسموح للعهدة");
     expect(management).toContain("ownerAccounts");
     expect(management).toContain("حسابات الخزينة المركزية");

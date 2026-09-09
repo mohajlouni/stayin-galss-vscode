@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { Booking, Chalet, DEFAULT_SETTINGS } from "../lib/booking-model";
+import { Booking, Chalet, DEFAULT_SETTINGS, type Settings } from "../lib/booking-model";
 import { formatWhatsAppPhone, generateBookingWhatsAppMessage, generateBookingWhatsAppUrl, generateSelectedBookingWhatsAppMessage } from "../lib/whatsapp-helper";
 import { generateConsolidatedWhatsAppMessage } from "../lib/whatsapp-message-engine";
 import { JORDANIAN_PHONE_WARNING, buildWhatsAppLinks, normalizeJordanianWhatsAppPhone, openJordanianWhatsApp } from "../lib/whatsapp";
@@ -88,6 +88,23 @@ describe("WhatsApp booking message", () => {
     expect(message).toContain("شروط الإقامة");
     expect(message).toContain("1. عدم تجاوز عدد الضيوف المتفق عليه");
     expect(message).not.toContain("إيصال الحجز");
+  });
+
+  it("pulls payment destinations into confirmations only from accounts marked for WhatsApp templates", () => {
+    const marked: Settings = { ...settings, paymentRouting: { ownerAccounts: [{ id: "owner-cliq-marked", kind: "cliq", label: "CliQ الرئيسي", detail: "STAYIN01", holderName: "شركة الملاذ", isActive: true, whatsApp: true }, { id: "owner-cliq-hidden", kind: "cliq", label: "CliQ خاص", detail: "HIDDEN02", holderName: "حساب خاص", isActive: true }] } };
+    const clickBooked = { ...booking, payments: [{ id: "payment-1", amount: 75, date: "2026-08-18", paymentMethod: "click", recipientType: "owner", recipientTargetId: "owner" } as Booking["payments"][number]] };
+    const message = generateBookingWhatsAppMessage(clickBooked, marked, "ar", chalet);
+    expect(message).toContain("وجهة الدفع");
+    expect(message).toContain("STAYIN01");
+    expect(message).not.toContain("HIDDEN02");
+  });
+
+  it("omits payment destinations entirely when no account is marked for WhatsApp templates", () => {
+    const unmarked: Settings = { ...settings, paymentRouting: { ownerAccounts: [{ id: "owner-cliq-marked", kind: "cliq", label: "CliQ الرئيسي", detail: "STAYIN01", holderName: "شركة الملاذ", isActive: true }] } };
+    const clickBooked = { ...booking, payments: [{ id: "payment-1", amount: 75, date: "2026-08-18", paymentMethod: "click", recipientType: "owner", recipientTargetId: "owner" } as Booking["payments"][number]] };
+    const message = generateBookingWhatsAppMessage(clickBooked, unmarked, "ar", chalet);
+    expect(message).not.toContain("وجهة الدفع");
+    expect(message).not.toContain("STAYIN01");
   });
 
   it("uses the global custom receipt template and replaces paid and remaining values", () => {

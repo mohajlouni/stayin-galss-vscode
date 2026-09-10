@@ -41,6 +41,29 @@ export const PAYMENT_METHOD_ICON_OPTIONS = ["💵", "📱", "⚡", "🏦", "💳
 export type PaymentMethodIcon = (typeof PAYMENT_METHOD_ICON_OPTIONS)[number];
 export type PaymentMethod = string;
 export type PaymentRecipientType = "owner" | "staff" | "guard";
+/** القيم المجردة لطريقة الدفع في دفتر الأستاذ المالي — مستقلة عن هوية المستلم. */
+export const LEDGER_PAYMENT_METHODS = ["CASH", "CLIQ", "IBAN", "OTHER"] as const;
+export type LedgerPaymentMethod = (typeof LEDGER_PAYMENT_METHODS)[number];
+/** طرق الدفع المجردة الثابتة المعروضة في نموذج الحجز (الطريقة فقط، ويُحدد المستلم لاحقًا). */
+export const ABSTRACT_PAYMENT_METHODS = [
+  { id: "cash", ar: "نقداً", en: "Cash", icon: "💵" },
+  { id: "cliq", ar: "الحوالة عبر CliQ", en: "CliQ transfer", icon: "⚡" },
+  { id: "iban", ar: "الحوالة البنكية (IBAN)", en: "Bank transfer (IBAN)", icon: "🏦" },
+  { id: "other", ar: "بطاقة / دفع إلكتروني / أخرى", en: "Card / electronic / other", icon: "💳" },
+] as const;
+/** يختصر أي معرف طريقة (جديد أو قديم) إلى الطريقة المجردة لغرض دفتر الأستاذ. */
+export function ledgerPaymentMethod(method: PaymentMethod | undefined): LedgerPaymentMethod | undefined {
+  const id = typeof method === "string" ? method.toLowerCase() : "";
+  if (id === "cash" || id === "cash-owner" || id === "cash-guardian") return "CASH";
+  if (id === "cliq" || id === "click") return "CLIQ";
+  if (id === "iban" || id === "bank-transfer") return "IBAN";
+  if (id === "other" || id === "card" || id === "wallet") return "OTHER";
+  return undefined;
+}
+/** خيارات طريقة الدفع المجردة في نموذج الحجز — لا تشمل الطرق المخصصة أو «بيد المالك/الحارس». */
+export function abstractPaymentMethodOptions(language: AppLanguage = "ar"): PaymentMethodOption[] {
+  return ABSTRACT_PAYMENT_METHODS.map((item) => ({ id: item.id, label: language === "ar" ? item.ar : item.en, isActive: true, icon: item.icon }));
+}
 export type CommissionType = "percent" | "fixed";
 /** مصدر الحجز: إدخال يدوي من المالك أو مُنشأ عبر تطبيق الضيوف مستقبلًا. */
 export const BOOKING_SOURCES = ["manual_host", "guest_app"] as const;
@@ -52,13 +75,13 @@ export const ACCOUNT_TIERS = ["free", "private_saas"] as const;
 export type AccountTier = (typeof ACCOUNT_TIERS)[number];
 export type PaymentMethodOption = { id: string; label: string; isActive: boolean; icon: PaymentMethodIcon; isArchived?: boolean; defaultRecipientType?: PaymentRecipientType };
 export type MasterPaymentAccounts = { cliqAlias?: string; bankDetails?: string; cashHandlerLabel?: string; directCliqEnabled?: boolean; directBankEnabled?: boolean; directCashEnabled?: boolean };
-export type OwnerTreasuryKind = "cliq" | "bank" | "vault";
+export type OwnerTreasuryKind = "cliq" | "bank" | "vault" | "other";
 /** حساب ملك للمنشأة مباشرة (قناة استلام للخزينة المركزية): CliQ أو IBAN بنكي أو خزينة كاش. */
 export type OwnerTreasuryAccount = { id: string; kind: OwnerTreasuryKind; label: string; detail: string; provider?: string; holderName?: string; iban?: string; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean };
 /** قناة استلام داخل نقطة العهدة الميدانية: CliQ أو بنك، ببياناتها المنظمة وعلامة الافتراضية داخل النقطة. */
 export type StaffFloatChannel = { kind: "cliq" | "bank"; alias?: string; provider?: string; holderName?: string; iban?: string; isDefault?: boolean; whatsApp?: boolean; isActive?: boolean };
 /** نقطة تحصيل ميدانية مرتبطة بموظف: تستقبل عمليات على ذمة الموظف (عهدة) لحين التوريد للمالك. */
-export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; contactPhone?: string; label: string; cliqAlias?: string; bankDetails?: string; channels?: StaffFloatChannel[]; maxFloatLimit?: number; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean; entity?: "staff" | "guard" };
+export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; contactPhone?: string; label: string; cliqAlias?: string; bankDetails?: string; channels?: StaffFloatChannel[]; maxFloatLimit?: number; cashActive?: boolean; hasOther?: boolean; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean; entity?: "staff" | "guard" };
 /** تسوية وتوريد عهدة: المالك يصفّر ذمة الموظف وينقل المبلغ لخزينته. */
 export type StaffFloatSettlement = { id: string; floatId: string; amount: number; settledAt: string; note?: string; settledByUserId?: number; settledByName?: string };
 /** خصم أضرار/غرامات من التأمين عند المغادرة: يُحوَّل لبند إيرادات تعويضات ويخصم من الاسترداد. */
@@ -137,8 +160,9 @@ export function normalizeStaffFloatAccounts(value: unknown): StaffFloatAccount[]
     const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 120) : "";
     if (!id || !label || ids.has(id)) return [];
     ids.add(id);
-    const channels = Array.isArray(candidate.channels) ? candidate.channels.flatMap((entry) => { const c = entry as Partial<StaffFloatChannel>; if (c?.kind !== "cliq" && c?.kind !== "bank") return []; return [{ kind: c.kind, alias: typeof c.alias === "string" ? c.alias.trim().slice(0, 160) || undefined : undefined, provider: typeof c.provider === "string" ? c.provider.trim().slice(0, 60) || undefined : undefined, holderName: typeof c.holderName === "string" ? c.holderName.trim().slice(0, 60) || undefined : undefined, iban: typeof c.iban === "string" ? c.iban.trim().slice(0, 200) || undefined : undefined, isDefault: c.isDefault === true || undefined, whatsApp: c.whatsApp === true || undefined, isActive: c.isActive !== false || undefined } satisfies StaffFloatChannel]; }) : undefined;
-    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone.trim().slice(0, 30) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, channels, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || (Array.isArray(channels) && channels.some((entry) => entry.whatsApp === true)) || undefined, entity: candidate.entity === "staff" || candidate.entity === "guard" ? candidate.entity : undefined } satisfies StaffFloatAccount];
+    const channels = Array.isArray(candidate.channels) ? candidate.channels.flatMap((entry) => { const c = entry as Partial<StaffFloatChannel>; if (c?.kind !== "cliq" && c?.kind !== "bank") return []; return [{ kind: c.kind, alias: typeof c.alias === "string" ? c.alias.trim().slice(0, 160) || undefined : undefined, provider: typeof c.provider === "string" ? c.provider.trim().slice(0, 60) || undefined : undefined, holderName: typeof c.holderName === "string" ? c.holderName.trim().slice(0, 60) || undefined : undefined, iban: typeof c.iban === "string" ? c.iban.trim().slice(0, 200) || undefined : undefined, isDefault: c.isDefault === true || undefined, whatsApp: c.whatsApp === true || undefined, isActive: c.isActive === false ? false : undefined } satisfies StaffFloatChannel]; }) : undefined;
+    const cashActive = candidate.cashActive === true || (candidate.cashActive === undefined && candidate.isActive !== false);
+    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone.trim().slice(0, 30) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, channels, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, cashActive, hasOther: candidate.hasOther === true || undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || (Array.isArray(channels) && channels.some((entry) => entry.whatsApp === true)) || undefined, entity: candidate.entity === "staff" || candidate.entity === "guard" ? candidate.entity : undefined } satisfies StaffFloatAccount];
   });
 }
 /** العُهد الميدانية المسجلة في إعدادات طرق الدفع. */
@@ -199,7 +223,7 @@ function normalizeOwnerTreasuryAccount(value: unknown): OwnerTreasuryAccount | u
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as Partial<OwnerTreasuryAccount>;
   const id = typeof candidate.id === "string" ? candidate.id.trim().slice(0, 72) : "";
-  const kind = candidate.kind === "cliq" || candidate.kind === "bank" || candidate.kind === "vault" ? candidate.kind : undefined;
+  const kind = candidate.kind === "cliq" || candidate.kind === "bank" || candidate.kind === "vault" || candidate.kind === "other" ? candidate.kind : undefined;
   const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 60) : "";
   const detail = typeof candidate.detail === "string" ? candidate.detail.trim().slice(0, 200) : "";
   if (!id || !kind || !label || !/^[a-z0-9-]{2,72}$/.test(id)) return undefined;
@@ -246,7 +270,7 @@ export function activeOwnerTreasuryAccounts(settings: Settings = DEFAULT_SETTING
 }
 /** الحساب المركزي المطابق لطريقة الدفع (المفترض ثم أي مفعّل من نفس النوع). */
 export function ownerReceivingAccount(settings: Settings = DEFAULT_SETTINGS, method?: PaymentMethod | null): OwnerTreasuryAccount | undefined {
-  const kind = method === "click" ? "cliq" as const : method === "bank-transfer" ? "bank" as const : "vault" as const;
+  const kind = method === "click" ? "cliq" as const : method === "bank-transfer" ? "bank" as const : method === "card" || method === "wallet" || method === "other" ? "other" as const : "vault" as const;
   const active = activeOwnerTreasuryAccounts(settings);
   return active.find((account) => account.kind === kind && account.isDefault) ?? active.find((account) => account.kind === kind);
 }
@@ -258,7 +282,7 @@ function normalizeDepositCompensation(value: unknown): DepositCompensation | und
   if (amount === undefined || !date) return undefined;
   return { amount, date, recordedAt: typeof candidate.recordedAt === "string" && !Number.isNaN(new Date(candidate.recordedAt).getTime()) ? candidate.recordedAt : undefined, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, sourceFloatId: typeof candidate.sourceFloatId === "string" ? candidate.sourceFloatId.trim().slice(0, 72) || undefined : undefined, returnedByUserId: Number.isInteger(candidate.returnedByUserId) ? candidate.returnedByUserId : undefined, returnedByName: typeof candidate.returnedByName === "string" ? candidate.returnedByName.trim().slice(0, 120) || undefined : undefined };
 }
-export type Payment = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; recipientType?: PaymentRecipientType; handlerUserId?: number; handlerName?: string; recipientAccountLabel?: string; /** معرف حساب الاستلام الفعلي: "owner" أو member-{userId} أو float-{floatId}. */ recipientTargetId?: string; calculatedCommission?: number; commissionType?: CommissionType; receiptUri?: string; voidedAt?: string; voidReason?: string; recordedByUserId?: number; recordedByName?: string; updatedByUserId?: number; updatedByName?: string; voidedByUserId?: number; voidedByName?: string };
+export type Payment = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; recipientType?: PaymentRecipientType; handlerUserId?: number; handlerName?: string; recipientAccountLabel?: string; /** معرف حساب الاستلام الفعلي: "owner" أو member-{userId} أو float-{floatId}. */ recipientTargetId?: string; /** كيان المستلم في دفتر الأستاذ: "owner" أو member-{userId} أو float-{floatId}. */ recipientEntityId?: string; /** الحساب الفرعي الفعلي: معرف حساب الخزينة المركزية أو معرف العهدة/قناتها. */ recipientSubAccountId?: string; /** هل المبلغ على ذمة موظف/حارس (تكوين التزام عهدة)؟ أم دخل الخزينة المركزية مباشرة. */ isCustody?: boolean; calculatedCommission?: number; commissionType?: CommissionType; receiptUri?: string; voidedAt?: string; voidReason?: string; recordedByUserId?: number; recordedByName?: string; updatedByUserId?: number; updatedByName?: string; voidedByUserId?: number; voidedByName?: string };
 export type DepositRefund = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; /** العهدة التي تورّد منها مبلغ الإرجاع (عند التحصيل عبر موظف). */ sourceFloatId?: string; /** من نفّذ الإرجاع (المالك أو الموظف/الحارس من عهدته). */ returnedByUserId?: number; returnedByName?: string };
 export type CheckInConfirmation = { actualArrivalAt: string; rentalBalanceVerified: boolean; rentalBalancePaymentMethod?: PaymentMethod; securityDepositVerified: boolean; securityDepositPaymentMethod?: PaymentMethod; identityNote?: string; identityImageUri?: string; utilityReading?: UtilityMeterInput };
 export type CheckoutConfirmation = { inspectionPassed: boolean; inspectionNote?: string; depositRefund?: { amount: number; paymentMethod: PaymentMethod; note?: string; returnedByUserId?: number; returnedByName?: string }; /** خصم أضرار/غرامات من التأمين: يُحوَّل لإيرادات تعويضات ويقلل الاسترداد. */ depositCompensation?: { amount: number; note?: string }; assetInspections?: AssetInspectionItem[]; utilityReading?: UtilityMeterInput };
@@ -709,6 +733,11 @@ export function reservedPeriodColorKeyForShift(shift: Pick<ChaletShift, "id" | "
   return "other";
 }
 export function reservedPeriodColorForShift(shift: Pick<ChaletShift, "id" | "name" | "periodKind">) { return RESERVED_PERIOD_COLORS[reservedPeriodColorKeyForShift(shift)]; }
+/** الفترات المخصصة (فترة مخصصة / مناسبة / تصوير / فترة أخرى) تُترك بلا توقيت ثابت ليتحكم العميل يدويًا في وقت الوصول والمغادرة. */
+export function isFlexibleShift(shift: Pick<ChaletShift, "id" | "name" | "periodKind">) {
+  const key = reservedPeriodColorKeyForShift(shift);
+  return key === "custom" || key === "event" || key === "other";
+}
 export function legacyChaletShifts(periodPricing?: Partial<PeriodPricingSettings>, periodTimes?: Chalet["periodTimes"], bookingTypes: Settings["bookingTypes"] = DEFAULT_SETTINGS.bookingTypes): ChaletShift[] {
   return PRICED_BOOKING_TYPES.map((type) => {
     const configured = bookingTypes[type] ?? DEFAULT_SETTINGS.bookingTypes[type];
@@ -944,7 +973,7 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   const normalizeRecordedAt = (value: unknown) => typeof value === "string" && !Number.isNaN(new Date(value).getTime()) ? value : undefined;
   const normalizePayment = (payment: Payment): Payment => {
     const paymentMethod = normalizePaymentMethodId(payment.paymentMethod);
-    return { ...payment, amount: Math.max(0, Number(payment.amount || 0)), recordedAt: normalizeRecordedAt(payment.recordedAt), note: payment.note?.trim() || undefined, paymentMethod, recipientType: normalizePaymentRecipientType(payment.recipientType), recipientTargetId: typeof payment.recipientTargetId === "string" ? payment.recipientTargetId.trim().slice(0, 64) || undefined : undefined, handlerUserId: Number.isInteger(payment.handlerUserId) ? payment.handlerUserId : undefined, handlerName: payment.handlerName?.trim().slice(0, 255) || undefined, recipientAccountLabel: payment.recipientAccountLabel?.trim().slice(0, 180) || undefined, calculatedCommission: Math.max(0, Number(payment.calculatedCommission || 0)) || undefined, commissionType: payment.commissionType === "fixed" ? "fixed" : payment.commissionType === "percent" ? "percent" : undefined, receiptUri: payment.receiptUri?.trim() || undefined, voidedAt: normalizeRecordedAt(payment.voidedAt), voidReason: payment.voidReason?.trim() || undefined, recordedByUserId: Number.isInteger(payment.recordedByUserId) ? payment.recordedByUserId : undefined, recordedByName: payment.recordedByName?.trim() || undefined, updatedByUserId: Number.isInteger(payment.updatedByUserId) ? payment.updatedByUserId : undefined, updatedByName: payment.updatedByName?.trim() || undefined, voidedByUserId: Number.isInteger(payment.voidedByUserId) ? payment.voidedByUserId : undefined, voidedByName: payment.voidedByName?.trim() || undefined };
+    return { ...payment, amount: Math.max(0, Number(payment.amount || 0)), recordedAt: normalizeRecordedAt(payment.recordedAt), note: payment.note?.trim() || undefined, paymentMethod, recipientType: normalizePaymentRecipientType(payment.recipientType), recipientTargetId: typeof payment.recipientTargetId === "string" ? payment.recipientTargetId.trim().slice(0, 64) || undefined : undefined, recipientEntityId: typeof payment.recipientEntityId === "string" ? payment.recipientEntityId.trim().slice(0, 64) || undefined : undefined, recipientSubAccountId: typeof payment.recipientSubAccountId === "string" ? payment.recipientSubAccountId.trim().slice(0, 128) || undefined : undefined, isCustody: payment.isCustody === true ? true : payment.isCustody === false ? false : undefined, handlerUserId: Number.isInteger(payment.handlerUserId) ? payment.handlerUserId : undefined, handlerName: payment.handlerName?.trim().slice(0, 255) || undefined, recipientAccountLabel: payment.recipientAccountLabel?.trim().slice(0, 180) || undefined, calculatedCommission: Math.max(0, Number(payment.calculatedCommission || 0)) || undefined, commissionType: payment.commissionType === "fixed" ? "fixed" : payment.commissionType === "percent" ? "percent" : undefined, receiptUri: payment.receiptUri?.trim() || undefined, voidedAt: normalizeRecordedAt(payment.voidedAt), voidReason: payment.voidReason?.trim() || undefined, recordedByUserId: Number.isInteger(payment.recordedByUserId) ? payment.recordedByUserId : undefined, recordedByName: payment.recordedByName?.trim() || undefined, updatedByUserId: Number.isInteger(payment.updatedByUserId) ? payment.updatedByUserId : undefined, updatedByName: payment.updatedByName?.trim() || undefined, voidedByUserId: Number.isInteger(payment.voidedByUserId) ? payment.voidedByUserId : undefined, voidedByName: payment.voidedByName?.trim() || undefined };
   };
   const normalizeUtilityMeterInput = (value: UtilityMeterInput | undefined): UtilityMeterInput | undefined => {
     if (!value || typeof value !== "object") return undefined;
@@ -1319,6 +1348,23 @@ export function singleAvailableChaletSlotsForDates(dates: string[], bookings: Bo
   }));
 }
 export function hasConflict(candidate: Pick<Booking, "startDate" | "endDate" | "startTime" | "endTime" | "bookingType" | "shiftId"> & { chaletId?: string; chaletName?: string }, bookings: Booking[], ignoreId?: string) { return findConflicts(candidate, bookings, ignoreId).length > 0; }
+/** أقرب حجز قادم على نفس الوحدة بعد انتهاء الفترة الحالية مع مدة الفاصل بالدقائق (تنبيه تشغيلي للتنظيف والتجهيز). */
+export function nextUpcomingBookingGap(candidate: Parameters<typeof findConflicts>[0], bookings: Booking[], ignoreId?: string) {
+  const range = getBookingRange(candidate);
+  const chalet = candidate.chaletId ?? candidate.chaletName?.trim() ?? "";
+  let next: { booking: Booking; gapMinutes: number } | null = null;
+  for (const booking of bookings) {
+    if (booking.id === ignoreId || booking.status === "cancelled" || booking.status === "completed" || booking.status === "waitlisted") continue;
+    const otherChalet = booking.chaletId ?? booking.chaletName?.trim() ?? "";
+    if (chalet !== otherChalet) continue;
+    const other = getBookingRange(booking);
+    if (other.start >= range.end) {
+      const gapMinutes = other.start - range.end;
+      if (!next || gapMinutes < next.gapMinutes) next = { booking, gapMinutes };
+    }
+  }
+  return next;
+}
 /** Returns the latest checkout on or before the selected date that avoids all chalet conflicts. */
 export function suggestNearestAvailableCheckout(candidate: Pick<Booking, "startDate" | "endDate" | "startTime" | "endTime" | "bookingType"> & { chaletId?: string; chaletName?: string }, bookings: Booking[], ignoreId?: string, maxSearchDays = 90) {
   for (let offset = 1; offset <= maxSearchDays; offset += 1) {
@@ -1424,8 +1470,9 @@ export function paymentMethodLabel(method: PaymentMethod | undefined, language: 
   if (!method) return language === "ar" ? "غير محددة" : "Not specified";
   const configured = configuredMethods && normalizePaymentMethodOptions(configuredMethods).find((option) => option.id === method);
   if (configured) return configured.label;
-  const defaults: Record<string, { ar: string; en: string }> = { "cash-guardian": { ar: "كاش بيد الحارس", en: "Cash with guardian" }, "cash-owner": { ar: "كاش بيد المالك", en: "Cash with owner" }, "bank-transfer": { ar: "تحويل بنكي", en: "Bank transfer" }, click: { ar: "تحويل CliQ", en: "CliQ transfer" }, card: { ar: "بطاقة / دفع إلكتروني", en: "Card / electronic payment" }, other: { ar: "أخرى", en: "Other" }, wallet: { ar: "محفظة", en: "Wallet" } };
-  return defaults[method]?.[language] ?? method;
+  const key = method.toLowerCase();
+  const defaults: Record<string, { ar: string; en: string }> = { "cash-guardian": { ar: "كاش بيد الحارس", en: "Cash with guardian" }, "cash-owner": { ar: "كاش بيد المالك", en: "Cash with owner" }, "bank-transfer": { ar: "تحويل بنكي", en: "Bank transfer" }, click: { ar: "تحويل CliQ", en: "CliQ transfer" }, card: { ar: "بطاقة / دفع إلكتروني", en: "Card / electronic payment" }, other: { ar: "بطاقة / دفع إلكتروني / أخرى", en: "Card / electronic / other" }, wallet: { ar: "محفظة", en: "Wallet" }, cash: { ar: "نقداً", en: "Cash" }, cliq: { ar: "الحوالة عبر CliQ", en: "CliQ transfer" }, iban: { ar: "الحوالة البنكية (IBAN)", en: "Bank transfer (IBAN)" } };
+  return defaults[key]?.[language] ?? method;
 }
 export function formatMoney(value: number, currency = "د.أ") { return `${Number(value || 0).toFixed(2)} ${currency}`; }
 export function formatTime12(time: string, language: AppLanguage = "ar", format: "12h" | "24h" = "12h") { const [h, m] = time.split(":").map(Number); if (format === "24h") return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`; const suffix = language === "ar" ? (h < 12 ? "ص" : "م") : (h < 12 ? "AM" : "PM"); const hour = h % 12 || 12; return `${hour}:${String(m).padStart(2, "0")} ${suffix}`; }

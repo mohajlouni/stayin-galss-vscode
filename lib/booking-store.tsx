@@ -280,26 +280,29 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.setItem(scopedStorageKey, JSON.stringify(merged)),
       persistPaymentMethods(merged.settings.paymentMethods),
     ]);
+    // Push the workspace snapshot in the background — the local commit above is
+    // authoritative and must never block progress (e.g. closing the booking form)
+    // on the network. Version conflicts are still captured for the sync banner and
+    // reconciled by the next pull/merge.
     if (canSyncWorkspace && remoteReady && remoteVersion !== null) {
-      try {
-        const result = await saveRemoteData.mutateAsync({ payload: JSON.stringify(merged), expectedVersion: remoteVersion });
-        setRemoteVersion(result.version);
-        setSyncConflict(false);
-        await recordSuccessfulSync();
-      } catch (error) {
-        setSyncConflict(isWorkspaceVersionConflict(error));
-      }
+      void saveRemoteData.mutateAsync({ payload: JSON.stringify(merged), expectedVersion: remoteVersion })
+        .then(async (result) => {
+          setRemoteVersion(result.version);
+          setSyncConflict(false);
+          await recordSuccessfulSync();
+        })
+        .catch((error) => {
+          setSyncConflict(isWorkspaceVersionConflict(error));
+        });
     }
     // Mirror the workspace snapshot to Supabase (additive, non-blocking). On
     // failure this is silently ignored; the tRPC + device copy remain source of truth.
     if (supabaseReady && supabaseToken) {
-      try {
-        await saveWorkspaceState(supabaseToken, JSON.stringify(merged));
-      } catch (error) {
+      void saveWorkspaceState(supabaseToken, JSON.stringify(merged)).catch((error) => {
         // Snapshot write failed — not fatal. Next successful sync will retry,
         // unless the RPC itself is missing, in which case the mirror is dead.
         if (isSupabaseRpcMissing(error)) supabaseEndpointDown.current = true;
-      }
+      });
     }
   };
 

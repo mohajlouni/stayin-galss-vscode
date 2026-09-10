@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Booking, PERIOD_COLORS, bookingCoversDate, bookingMatchesSearch, bookingPeriodReferenceDigit, bookingReferenceFor, bookingToWaitlistEntry, calculateRentalTotal, classifyBookingType, configuredBookingPrice, dateLabel, DEFAULT_SETTINGS, expireElapsedRecords, formatBookingReference, formatTime12, getActiveChaletShifts, getChaletShifts, getBookingRange, getBookingTimestampRange, getRentalBreakdown, hasConflict, hasDayConflict, isBookingExpired, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, isValidBusinessLogoUrl, isValidChaletColor, isValidChaletReferenceCode, isWaitlistExpired, isValidGoogleMapsUrl, isValidGuardianPhone, matchesBookingListFilter, normalizeAppData, normalizeBookingEndDate, normalizeBookingReferences, normalizeChaletReferenceCodes, paymentMethodLabel, paymentStatus, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, resolvedBookingPrice, splitBookingsByCheckout, suggestChaletReferenceCode, totalDepositRefunded, totalPaid, typeColors } from "../lib/booking-model";
+import { Booking, PERIOD_COLORS, activeStaffFloatAccounts, bookingCoversDate, bookingMatchesSearch, bookingPeriodReferenceDigit, bookingReferenceFor, bookingToWaitlistEntry, calculateRentalTotal, classifyBookingType, configuredBookingPrice, dateLabel, DEFAULT_SETTINGS, expireElapsedRecords, formatBookingReference, formatTime12, getActiveChaletShifts, getChaletShifts, getBookingRange, getBookingTimestampRange, getRentalBreakdown, hasConflict, hasDayConflict, isBookingExpired, isBookingPeriodEndedToday, isBookingStartDatePast, isInvalidTimeOrder, isValidBusinessLogoUrl, isValidChaletColor, isValidChaletReferenceCode, isWaitlistExpired, isValidGoogleMapsUrl, isValidGuardianPhone, matchesBookingListFilter, normalizeAppData, normalizeBookingEndDate, normalizeBookingReferences, normalizeChaletReferenceCodes, normalizeStaffFloatAccounts, paymentMethodLabel, paymentStatus, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, resolvedBookingPrice, splitBookingsByCheckout, suggestChaletReferenceCode, totalDepositRefunded, totalPaid, typeColors, type StaffFloatAccount } from "../lib/booking-model";
 import { suggestNearestAvailableCheckout } from "../lib/booking-model";
 import { bookingOccupancyStatus, depositFinancialStatus } from "../lib/booking-model";
 const base = (overrides: Partial<Booking> = {}): Booking => ({ id: "1", customerName: "أحمد", phone: "079", startDate: "2026-08-17", endDate: "2026-08-17", bookingType: "morning", startTime: "09:00", endTime: "21:00", price: 100, payments: [{ id: "p", amount: 25, date: "2026-08-17" }], notes: "", status: "confirmed", createdAt: "" , ...overrides });
@@ -379,5 +379,30 @@ describe("dynamic chalet shifts", () => {
   it("formats both configured clock representations from the same stored 24-hour time", () => {
     expect(formatTime12("21:00", "ar", "12h")).toBe("9:00 م");
     expect(formatTime12("21:00", "ar", "24h")).toBe("21:00");
+  });
+});
+
+describe("staff float channel independence", () => {
+  it("keeps a CliQ-only float enabled while cash stays OFF", () => {
+    const raw: StaffFloatAccount[] = [{ id: "float-cliq", label: "نقطة الحارس", contactPhone: "0790000000", cashActive: false, isActive: true, channels: [{ kind: "cliq", alias: "STAYIN01", provider: "بنك الإسكان", isActive: true }] }];
+    const normalized = normalizeStaffFloatAccounts(raw);
+    expect(normalized[0]).toMatchObject({ isActive: true, cashActive: false });
+    expect(activeStaffFloatAccounts({ ...DEFAULT_SETTINGS, paymentRouting: { staffFloats: raw } }).map((account) => account.id)).toContain("float-cliq");
+  });
+
+  it("pauses the whole float without touching internal channel states", () => {
+    const raw: StaffFloatAccount[] = [{ id: "float-paused", label: "نقطة الموقوف", contactPhone: "0790000000", cashActive: false, isActive: false, channels: [{ kind: "cliq", alias: "STAYIN01", provider: "بنك الإسكان", isActive: true }] }];
+    const normalized = normalizeStaffFloatAccounts(raw);
+    expect(normalized[0]).toMatchObject({ isActive: false, cashActive: false });
+    expect(normalized[0].channels?.[0].isActive).not.toBe(false);
+    expect(activeStaffFloatAccounts({ ...DEFAULT_SETTINGS, paymentRouting: { staffFloats: raw } })).toHaveLength(0);
+  });
+
+  it("bridges legacy records where account isActive alone represented cash", () => {
+    const cashOnly = normalizeStaffFloatAccounts([{ id: "legacy-cash", label: "عهدة نقدية قديمة", contactPhone: "0790000001", isActive: true }]);
+    expect(cashOnly[0]).toMatchObject({ isActive: true, cashActive: true });
+    const cliqOnlyLegacy = normalizeStaffFloatAccounts([{ id: "legacy-cliq", label: "عهدة قديمة", contactPhone: "0790000002", isActive: false, channels: [{ kind: "cliq", alias: "LEGACY01", isActive: true }] }]);
+    expect(cliqOnlyLegacy[0]).toMatchObject({ isActive: false });
+    expect(cliqOnlyLegacy[0].cashActive).toBe(false);
   });
 });

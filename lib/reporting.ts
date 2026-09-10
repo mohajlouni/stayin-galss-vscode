@@ -1,12 +1,35 @@
 import { type Booking, type Chalet, type Expense, refundableDepositAmount, remainingRefundableDeposit, rentalTotal, totalDepositRefunded, totalPaid } from "./booking-model";
 
-import { expenseAmountForChalet, type Payment, type PaymentRecipientType } from "./booking-model";
+import { expenseAmountForChalet, ledgerPaymentMethod, type Payment, type PaymentMethod, type PaymentRecipientType } from "./booking-model";
 
 import { type AppData, type StaffFloatAccount, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal } from "./booking-model";
 
 export type ReportRange = "today" | "month" | "all";
 export const REPORT_PAYMENT_METHODS = ["cash-guardian", "cash-owner", "click"] as const;
 export type ReportPaymentMethod = (typeof REPORT_PAYMENT_METHODS)[number];
+
+/** يربط طريقة الدفع (جديدة مجردة أو قديمة) بسلة التقرير الثابتة، مع مراعاة العهدة. */
+export function reportPaymentMethodBucket(method: PaymentMethod | undefined, isCustody?: boolean): ReportPaymentMethod | undefined {
+  if (!method) return undefined;
+  if (method === "cash-guardian") return "cash-guardian";
+  if (method === "cash-owner") return "cash-owner";
+  if (method === "click") return "click";
+  const ledger = ledgerPaymentMethod(method);
+  if (ledger === "CLIQ") return "click";
+  if (ledger === "CASH") return isCustody === true ? "cash-guardian" : "cash-owner";
+  return undefined;
+}
+
+function emptyMethodTotals(): Record<ReportPaymentMethod, number> { return { "cash-guardian": 0, "cash-owner": 0, click: 0 }; }
+function collectMethodTotals(events: { paymentMethod?: PaymentMethod; isCustody?: boolean; voidedAt?: string; amount?: number }[]): Record<ReportPaymentMethod, number> {
+  const totals = emptyMethodTotals();
+  for (const event of events) {
+    if (event.voidedAt) continue;
+    const bucket = reportPaymentMethodBucket(event.paymentMethod, event.isCustody);
+    if (bucket) totals[bucket] += Math.max(0, Number(event.amount || 0));
+  }
+  return totals;
+}
 
 export type ChaletPerformance = {
   chaletId: string;
@@ -131,21 +154,15 @@ export function selectReportExpenses(expenses: Expense[], range: ReportRange, to
 }
 
 export function summarizeFinancialReport(bookings: Booking[], chalets: Chalet[], expenses: Expense[] = [], extra: { settlements?: AppData["staffFloatSettlements"]; settings?: AppData["settings"] } = {}): FinancialReportSummary {
-  const paymentMethods = REPORT_PAYMENT_METHODS.reduce<Record<ReportPaymentMethod, number>>((summary, method) => {
-    summary[method] = bookings.reduce((sum, booking) => sum + booking.payments.filter((payment) => !payment.voidedAt && payment.paymentMethod === method).reduce((paymentSum, payment) => paymentSum + Math.max(0, Number(payment.amount || 0)), 0), 0);
-    return summary;
-  }, { "cash-guardian": 0, "cash-owner": 0, click: 0 });
-  const depositCollectionMethods = REPORT_PAYMENT_METHODS.reduce<Record<ReportPaymentMethod, number>>((summary, method) => {
-    summary[method] = bookings.reduce((sum, booking) => {
-      const liveCollection = booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0 ? booking.depositCollection : undefined;
-      if (liveCollection?.paymentMethod === method) return sum + Math.max(0, Number(liveCollection.amount || 0));
-      // Legacy check-in collection: recorded at check-in but before structured
-      // depositCollection tracking existed. Only counts when actually received.
-      if (!liveCollection && booking.depositPaymentRecordedAt && booking.depositPaymentMethod === method) return sum + Math.max(0, Number(booking.depositAmount || 0));
-      return sum;
-    }, 0);
-    return summary;
-  }, { "cash-guardian": 0, "cash-owner": 0, click: 0 });
+  const paymentMethods = collectMethodTotals(bookings.flatMap((booking) => booking.payments));
+  const depositCollectionMethods = collectMethodTotals(bookings.flatMap((booking) => {
+    const liveCollection = booking.depositCollection && !booking.depositCollection.voidedAt && Number(booking.depositCollection.amount) > 0 ? booking.depositCollection : undefined;
+    if (liveCollection) return [{ paymentMethod: liveCollection.paymentMethod, isCustody: liveCollection.isCustody, amount: liveCollection.amount }];
+    // Legacy check-in collection: recorded at check-in but before structured
+    // depositCollection tracking existed. Only counts when actually received.
+    if (booking.depositPaymentRecordedAt) return [{ paymentMethod: booking.depositPaymentMethod, amount: booking.depositAmount }];
+    return [];
+  }));
   const totalExpenses = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount || 0)), 0);
 
   const chaletPerformance = chalets.map((chalet) => {

@@ -244,17 +244,31 @@ describe("completion funding wiring (store + dashboard)", () => {
   });
 
   it("renders the unified funding selector with entity, channel, account, and staff mode steps", () => {
-    expect(source).toContain("قناة الصرف من الخزينة");
-    expect(source).toContain("الحساب المموَّل منه");
-    expect(source).toContain("نقطة العهدة المخصوم منها");
+    expect(source).toContain("مصدر الدفع والتمويل");
+    expect(source).toContain("قناة الصرف والحساب");
+    expect(source).toContain("اسم الموظف / الحارس");
+    expect(source).toContain("طريقة السداد");
     expect(source).toContain("خصم من العهدة النقدية المعلقة");
     expect(source).toContain("دفع من الجيب الخاص للموظف");
     expect(source).toContain("أكمل تحديد مصدر التمويل لتمكين الترحيل التلقائي.");
     expect(source).toContain("fundingReady(completion)");
   });
 
+  it("shows card-level funding attribution for owner, staff float, and out-of-pocket", () => {
+    expect(source).toContain("maintenanceAttribution");
+    expect(source).toContain("طريقة الصرف: الخزينة المركزية");
+    expect(source).toContain("دُفعت بواسطة");
+    expect(source).toContain("ذمة مستحقة");
+  });
+
   it("replaces the three legacy payment radios with the cascade selector", () => {
     expect(source).not.toContain("maintenancePaymentSourceLabel(source, language)");
     expect(source).not.toContain("MAINTENANCE_PAYMENT_SOURCES.map");
+  });
+
+  it("exposes expenseFundingModeLabel for the card attribution text", () => {
+    expect(model).toContain("expenseFundingModeLabel");
+    expect(model).toContain("خصم من العهدة النقدية المعلقة");
+    expect(model).toContain("دفع من جيبه الخاص - ذمة مستحقة");
   });
 });

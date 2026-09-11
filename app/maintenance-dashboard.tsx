@@ -1,12 +1,13 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
 import { CalendarDateField } from "@/components/calendar-date-picker";
+import { CascadingSelectField, CascadingSelectSheet } from "@/components/ui/cascading-select";
 import { useColors } from "@/hooks/use-colors";
-import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, activeOwnerTreasuryAccounts, EXPENSE_FUNDING_CHANNELS, expenseFundingChannelLabel, expenseFundingEntityLabel, maintenanceAuditActionLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type ExpenseFundingChannel, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
+import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, activeOwnerTreasuryAccounts, EXPENSE_FUNDING_CHANNELS, EXPENSE_FUNDING_ENTITIES, expenseFundingChannelLabel, expenseFundingEntityLabel, expenseFundingModeLabel, maintenanceAuditActionLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type ExpenseFundingChannel, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { assetConditionLabel, isMaintenanceDueToday, isMaintenanceOverdue, isMaintenanceUpcoming, MAINTENANCE_FREQUENCIES, maintenanceFrequencyLabel, maintenanceStats, nextMaintenanceDueDate } from "@/lib/maintenance";
@@ -85,6 +86,29 @@ type AssetErrors = { name?: boolean; units?: boolean; expense?: boolean };
 /** خيار منفّذ المهمة في نافذة الإتمام: المستخدم الحالي، عهدة موظف/حارس، أو حارس الوحدة. */
 type PerformerOption = { id: string; name: string; role: MaintenancePerformerRole };
 type CompletionDraft = { task: MaintenanceTask; performerId: string; actualCost: string; fundingEntity: "owner" | "staff" | null; fundingChannel: ExpenseFundingChannel | null; fundingSourceId: string; fundingSourceLabel: string; staffMode: "float" | "reimbursement" | null; postExpense: boolean; scheduleNext: boolean; notes: string };
+/** اللوحة المنسدلة المفتوحة داخل نافذة الإتمام: منفّذ المهمة ثم سلسلة التمويل (جهة الصرف ← القناة/الموظف ← طريقة السداد). */
+type CompletionDropdown = { kind: "performer" | "entity" | "channel" | "staff" | "staffMode" } | null;
+/** قناة الصرف من الخزينة المركزية للمالك باختصارها على بطاقة المهمة (كاش / CliQ / IBAN). */
+const treasuryChannelShort = (channel: ExpenseFundingChannel | undefined) => channel === "cliq" ? "CliQ" : channel === "iban" ? "IBAN" : channel === "vault-cash" ? "كاش" : "—";
+/** طرق سداد الموظف من العهدة المتاحة في سلسلة التمويل، مع خيار الحجز والدّفع من الجيب الخاص. */
+const COMPLETION_STAFF_MODES: { id: "float" | "reimbursement"; label: [string, string]; icon: "account-balance-wallet" | "payments" }[] = [
+  { id: "float", label: ["خصم من العهدة النقدية المعلقة", "Deduct from the held float cash"], icon: "account-balance-wallet" },
+  { id: "reimbursement", label: ["دفع من الجيب الخاص للموظف", "Paid from the staff-monthly own pocket"], icon: "payments" },
+];
+/** سطر إسناد طريقة الصرف على بطاقة المهمة المكتملة: خزينة المالك / عهدة موظف / جيب خاص (ذمة مستحقة). */
+const maintenanceAttribution = (task: MaintenanceTask, language: "ar" | "en") => {
+  const staff = task.expenseFundingSourceLabel?.trim() || task.performedByName?.trim();
+  if (task.expenseFundingEntity === "owner" && task.expenseFundingChannel) {
+    const short = treasuryChannelShort(task.expenseFundingChannel);
+    return { label: language === "ar" ? `طريقة الصرف: الخزينة المركزية (${short})` : `Payment: owner treasury (${short})`, amber: false };
+  }
+  if (task.expenseFundingEntity === "staff" && task.expenseFundingMode && staff) {
+    const mode = expenseFundingModeLabel(task.expenseFundingMode, language);
+    const prefix = language === "ar" ? "دُفعت بواسطة" : "Paid by";
+    return { label: `${prefix}: ${staff} • ${mode}`, amber: task.expenseFundingMode === "reimbursement" };
+  }
+  return null;
+};
 
 export default function MaintenanceDashboard() {
   const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, addExpense, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
@@ -99,7 +123,19 @@ export default function MaintenanceDashboard() {
   const [assetErrors, setAssetErrors] = useState<AssetErrors>({});
   const [busy, setBusy] = useState<{ kind: "complete" | "start" | "cancel" | "delete-task" | "delete-asset"; id: string } | null>(null);
   const [completion, setCompletion] = useState<CompletionDraft | null>(null);
-  const [performerMenuOpen, setPerformerMenuOpen] = useState(false);
+  const [completionDropdown, setCompletionDropdown] = useState<CompletionDropdown>(null);
+  const [performerError, setPerformerError] = useState(false);
+  const [fundingError, setFundingError] = useState(false);
+  const [channelError, setChannelError] = useState(false);
+  const [staffError, setStaffError] = useState(false);
+  const [staffModeError, setStaffModeError] = useState(false);
+  /** إعادة فتح اللوحة نفسها عند ضغط الحقل مكرراً (إغلاق/فتح)، مع الحفاظ على آخر لوحة مفتوحة عند الإغلاق الكامل. */
+  const toggleCompletionDropdown = (kind: NonNullable<CompletionDropdown>["kind"]) => setCompletionDropdown((current) => current?.kind === kind ? null : { kind });
+  const completionScrollRef = useRef<ScrollView>(null);
+  const completionOffsets = useRef<Record<string, number>>({});
+  /** يسجّل الإزاحة الرأسية لكل حقل تحقق داخل نافذة الإتمام لتمرير سلس إلى أول حقل خاطئ. */
+  const registerCompletionField = (key: string) => (event: LayoutChangeEvent) => { completionOffsets.current[key] = event.nativeEvent.layout.y; };
+  const scrollToCompletionField = (key: string) => completionScrollRef.current?.scrollTo({ y: Math.max(0, completionOffsets.current[key] - 8), animated: true });
   const [auditFor, setAuditFor] = useState<string | null>(null);
   const [cancelFor, setCancelFor] = useState<MaintenanceTask | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -163,6 +199,9 @@ export default function MaintenanceDashboard() {
 
   const fundingOwnerAccounts = useMemo(() => activeOwnerTreasuryAccounts(settings), [settings]);
   const fundingStaffFloats = useMemo(() => activeStaffFloatAccounts(settings), [settings]);
+
+  /** يحل الحساب الافتراضي لشرائح تحويلات المالك من الخزينة (CliQ/IBAN): الحساب الافتراضي أولاً ثم أول حساب فعّال من نفس النوع. */
+  const resolveOwnerAccount = (channel: ExpenseFundingChannel) => channel === "cliq" || channel === "iban" ? fundingOwnerAccounts.find((account) => account.kind === (channel === "cliq" ? "cliq" : "bank") && account.isDefault) ?? fundingOwnerAccounts.find((account) => account.kind === (channel === "cliq" ? "cliq" : "bank")) : undefined;
 
   const sortedTasks = useMemo(() => {
     const tasks = [...(maintenanceTasks ?? [])];
@@ -270,23 +309,46 @@ export default function MaintenanceDashboard() {
   const openCompletionModal = (task: MaintenanceTask) => {
     if (!canOperate || busy) return;
     triggerHaptic();
-    const currentPerformer = performerOptions.find((option) => option.id === "current");
-    setCompletion({ task, performerId: currentPerformer?.id ?? performerOptions[0]?.id ?? "", actualCost: task.actualCost !== undefined ? String(task.actualCost) : task.cost !== undefined ? String(task.cost) : "", fundingEntity: "owner", fundingChannel: "vault-cash", fundingSourceId: "", fundingSourceLabel: "", staffMode: null, postExpense: true, scheduleNext: task.frequency === "once" ? false : true, notes: "" });
-    setPerformerMenuOpen(false);
+    setCompletion({ task, performerId: "", actualCost: task.actualCost !== undefined ? String(task.actualCost) : task.cost !== undefined ? String(task.cost) : "", fundingEntity: null, fundingChannel: null, fundingSourceId: "", fundingSourceLabel: "", staffMode: null, postExpense: true, scheduleNext: task.frequency === "once" ? false : true, notes: "" });
+    setPerformerError(false);
+    setFundingError(false);
+    setChannelError(false);
+    setStaffError(false);
+    setStaffModeError(false);
+    setCompletionDropdown(null);
   };
 
   const submitCompletion = async () => {
     if (!canOperate || busy || !completion) return;
     const performer = performerOptions.find((option) => option.id === completion.performerId);
-    if (!performer) return;
+    const needsFunding = completion.postExpense && hasPositiveActualCost(completion);
+    if (!performer || (needsFunding && !fundingReady(completion))) {
+      let firstInvalid: string | null = null;
+      if (!performer) { setPerformerError(true); firstInvalid = "performer"; }
+      if (needsFunding) {
+        if (!completion.fundingEntity) { if (!firstInvalid) firstInvalid = "funding"; setFundingError(true); }
+        else if (completion.fundingEntity === "owner") {
+          if (!completion.fundingChannel || (completion.fundingChannel !== "vault-cash" && !resolveOwnerAccount(completion.fundingChannel))) { if (!firstInvalid) firstInvalid = "channel"; setChannelError(true); }
+        } else {
+          if (!completion.fundingSourceId.trim()) { if (!firstInvalid) firstInvalid = "staff"; setStaffError(true); }
+          if (!completion.staffMode) { if (!firstInvalid) firstInvalid = "staffMode"; setStaffModeError(true); }
+        }
+      }
+      if (firstInvalid) scrollToCompletionField(firstInvalid);
+      else if (!performer) scrollToCompletionField("performer");
+      return;
+    }
     setBusy({ kind: "complete", id: completion.task.id });
     try {
       await triggerHaptic();
+      const needsFunding = completion.postExpense && hasPositiveActualCost(completion);
+      const ownerChannel = needsFunding && completion.fundingEntity === "owner" ? (completion.fundingChannel ?? undefined) : undefined;
+      const ownerAccount = ownerChannel && ownerChannel !== "vault-cash" ? resolveOwnerAccount(ownerChannel) : undefined;
       await completeMaintenanceTaskWithExpense(completion.task.id, {
         performedByName: performer.name,
         performedByRole: performer.role,
         actualCost: completion.actualCost.trim() ? Math.max(0, Number(completion.actualCost) || 0) : undefined,
-        funding: completion.postExpense && hasPositiveActualCost(completion) ? { entity: completion.fundingEntity ?? "owner", channel: completion.fundingEntity === "owner" ? (completion.fundingChannel ?? undefined) : undefined, sourceId: completion.fundingSourceId.trim() || undefined, sourceLabel: completion.fundingSourceLabel.trim() || undefined, mode: completion.fundingEntity === "staff" ? (completion.staffMode ?? undefined) : undefined } : undefined,
+        funding: needsFunding ? { entity: completion.fundingEntity ?? "owner", channel: ownerChannel, sourceId: (completion.fundingEntity === "staff" ? completion.fundingSourceId.trim() || undefined : ownerAccount?.id) || undefined, sourceLabel: (completion.fundingEntity === "staff" ? completion.fundingSourceLabel.trim() || undefined : ownerAccount?.label) || undefined, mode: completion.fundingEntity === "staff" ? (completion.staffMode ?? undefined) : undefined } : undefined,
         completionNotes: completion.notes,
         postExpense: completion.postExpense,
         scheduleNext: completion.scheduleNext,
@@ -538,6 +600,7 @@ export default function MaintenanceDashboard() {
         const allUnits = task.targetScope === "all_units";
         const unitLabel = allUnits ? (language === "ar" ? "كافة الوحدات" : "All units") : task.chaletName ?? "—";
         const dueColor = isMaintenanceOverdue(task, now) ? colors.error : isMaintenanceDueToday(task, now) ? colors.warning : colors.primary;
+        const attribution = maintenanceAttribution(task, language);
         return <View key={task.id} style={[styles.taskCard, { backgroundColor: colors.surface, borderColor: tone.color + "55", zIndex: menuOpen ? 2 : 0 }]}>
           {menuOpen ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق القائمة" : "Close menu"} onPress={() => setMenuFor(null)} style={StyleSheet.absoluteFill} /> : null}
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
@@ -552,6 +615,7 @@ export default function MaintenanceDashboard() {
               </View>
               {task.actualCost !== undefined || task.cost ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost ?? task.cost} {language === "ar" ? "د.أ" : "JOD"}{task.assetName ? ` · ${task.assetName}` : ""}</Text> : null}
               {task.status === "completed" && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
+              {attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><Text numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]}>{attribution.label}</Text></View> : null}
             </View>
             <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
               <View style={[styles.cardSideTop, { flexDirection: row }]}>
@@ -578,6 +642,7 @@ export default function MaintenanceDashboard() {
         const allUnits = task.targetScope === "all_units";
         const unitLabel = allUnits ? (language === "ar" ? "كافة الوحدات" : "All units") : task.chaletName ?? "—";
         const settledDate = task.completedAt?.slice(0, 10) ?? task.lastCompletedDate ?? "";
+        const attribution = maintenanceAttribution(task, language);
         return <View key={task.id} style={[styles.archiveCard, { backgroundColor: colors.surfaceMuted, borderColor: settled ? colors.success + "33" : colors.muted + "33" }]}>
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.archiveIcon, { backgroundColor: (settled ? colors.success : colors.muted) + "1A" }]}><MaterialIcons name={settled ? "done-all" : "cancel"} size={18} color={settled ? colors.success : colors.muted} /></View>
@@ -586,6 +651,7 @@ export default function MaintenanceDashboard() {
               <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{unitLabel} · {maintenanceFrequencyLabel(task.frequency, language)}{task.assetName ? ` · ${task.assetName}` : ""}</Text>
               {settled && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
               {settled && task.actualCost !== undefined ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost} {language === "ar" ? "د.أ" : "JOD"}{posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}</Text> : null}
+              {settled && attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><Text numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]}>{attribution.label}</Text></View> : null}
               {settledDate ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: {formatDate(settledDate) ?? settledDate}</Text> : null}
             </View>
           </View>
@@ -656,38 +722,42 @@ export default function MaintenanceDashboard() {
       <Pressable style={StyleSheet.absoluteFill} disabled={Boolean(busy)} onPress={() => !busy && setCompletion(null)} />
       <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={[styles.sheetHeader, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.success + "1A" }]}><MaterialIcons name="assignment-turned-in" size={20} color={colors.success} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align }}>{language === "ar" ? "إتمام وإغلاق مهمة الصيانة" : "Complete & close maintenance task"}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => !busy && setCompletion(null)} disabled={Boolean(busy)} style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
+        <ScrollView ref={completionScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
           <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{completion.task.title}</Text>
           <Text style={{ color: colors.muted, fontSize: 11, textAlign: align, marginTop: 2 }}>{completion.task.targetScope === "all_units" ? (language === "ar" ? "كافة الوحدات" : "All units") : completion.task.chaletName ?? "—"} · {maintenanceFrequencyLabel(completion.task.frequency, language)} · {language === "ar" ? "التكلفة المتوقعة" : "Expected cost"}: {formatMoney(completion.task.cost ?? 0, settings.currency)}</Text>
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "منفّذ المهمة" : "Performed by"}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "منفّذ المهمة" : "Performed by"} onPress={() => setPerformerMenuOpen(!performerMenuOpen)} style={[styles.performerSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="badge" size={17} color={colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{(() => { const current = performerOptions.find((option) => option.id === completion.performerId); return current ? current.name : (language === "ar" ? "اختر منفّذًا" : "Select performer"); })()}</Text><MaterialIcons name={performerMenuOpen ? "expand-less" : "expand-more"} size={18} color={colors.muted} /></Pressable>
-          {performerMenuOpen ? <View style={[styles.performerMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
-            {performerOptions.length ? performerOptions.map((option) => { const selected = completion.performerId === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.name} onPress={() => { setCompletion({ ...completion, performerId: option.id }); setPerformerMenuOpen(false); }} style={[styles.performerRow, { backgroundColor: selected ? colors.primary + "14" : "transparent" }]}><MaterialIcons name="person-outline" size={16} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{option.name}</Text><View style={[styles.roleTag, { backgroundColor: option.role === "owner" ? colors.primary + "1A" : option.role === "staff" ? colors.warning + "1A" : colors.success + "1A" }]}><Text style={{ color: option.role === "owner" ? colors.primary : option.role === "staff" ? "#B45309" : colors.success, fontSize: 9, fontWeight: "900" }}>{maintenancePerformerRoleLabel(option.role, language)}</Text></View></Pressable>; }) : <Text style={{ color: colors.muted, fontSize: 12, textAlign: "center", paddingVertical: 12 }}>{language === "ar" ? "لا يوجد منفّذون متاحون" : "No performers available"}</Text>}
-          </View> : null}
+          <View onLayout={registerCompletionField("performer")} style={[styles.completionField, { borderColor: performerError ? "#F43F5E" : colors.border, backgroundColor: performerError ? "#F43F5E0D" : colors.surface }, performerError ? styles.invalidInputGlow : null]}>
+            <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "منفّذ المهمة" : "Performed by"}</Text>
+            <CascadingSelectField value={performerOptions.find((option) => option.id === completion.performerId)?.name ?? null} placeholder={language === "ar" ? "اختر منفّذ المهمة..." : "Select task performer..."} error={performerError} icon="badge" onPress={() => toggleCompletionDropdown("performer")} colors={colors} language={language} />
+            {performerOptions.length === 0 ? <Text style={styles.fieldError}>{language === "ar" ? "لا يوجد منفّذون متاحون" : "No performers available"}</Text> : null}
+            {performerError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى تحديد منفّذ المهمة" : "Please select the task performer"}</Text> : null}
+          </View>
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "التكلفة الفعلية" : "Actual cost"} · {settings.currency}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "التكلفة الفعلية" : "Actual cost"} value={completion.actualCost} onChangeText={(value) => setCompletion({ ...completion, actualCost: value, postExpense: value.trim() !== "" && Number(value) > 0 })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "مصدر الدفع" : "Payment source"}</Text>
           {hasPositiveActualCost(completion) ? <>
-            <View style={styles.fundingRow}>
-              {(["owner", "staff"] as const).map((entity) => { const selected = completion.fundingEntity === entity; return <Pressable key={entity} accessibilityRole="button" accessibilityLabel={expenseFundingEntityLabel(entity, language)} onPress={() => setCompletion({ ...completion, fundingEntity: entity, fundingChannel: entity === "owner" ? (completion.fundingChannel ?? "vault-cash") : null, fundingSourceId: entity === "owner" ? completion.fundingSourceId : "", fundingSourceLabel: entity === "owner" ? completion.fundingSourceLabel : "", staffMode: entity === "staff" ? (completion.staffMode ?? "float") : null })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={entity === "owner" ? "account-balance" : "account-balance-wallet"} size={16} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{expenseFundingEntityLabel(entity, language)}</Text></Pressable>; })}
+            <View onLayout={registerCompletionField("funding")} style={[styles.completionField, { borderColor: fundingError ? "#F43F5E" : colors.border, backgroundColor: fundingError ? "#F43F5E0D" : colors.surface }, fundingError ? styles.invalidInputGlow : null]}>
+              <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "مصدر الدفع والتمويل" : "Payment & funding source"}</Text>
+              <Text style={[styles.completionFieldHint, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "الخزينة المركزية للمالك أو عهدة موظف / حارس ميداني" : "Owner central treasury or a staff/guard cash float"}</Text>
+              <CascadingSelectField value={completion.fundingEntity ? expenseFundingEntityLabel(completion.fundingEntity, language) : null} placeholder={language === "ar" ? "اختر جهة الصرف..." : "Choose payment source..."} error={fundingError} icon="account-balance" onPress={() => toggleCompletionDropdown("entity")} colors={colors} language={language} />
+              {fundingError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى تحديد جهة الصرف والتمويل" : "Please choose the payment & funding source"}</Text> : null}
             </View>
-            {completion.fundingEntity === "owner" ? <>
-              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "قناة الصرف من الخزينة" : "Withdrawal channel"}</Text>
-              <View style={styles.fundingRow}>
-                {EXPENSE_FUNDING_CHANNELS.map((channel) => { const selected = completion.fundingChannel === channel; return <Pressable key={channel} accessibilityRole="button" accessibilityLabel={expenseFundingChannelLabel(channel, language)} onPress={() => setCompletion({ ...completion, fundingChannel: channel, fundingSourceId: channel === "vault-cash" ? "" : completion.fundingSourceId, fundingSourceLabel: channel === "vault-cash" ? "" : completion.fundingSourceLabel })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={channel === "vault-cash" ? "point-of-sale" : channel === "cliq" ? "bolt" : "account-balance"} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{expenseFundingChannelLabel(channel, language)}</Text></Pressable>; })}
+            {completion.fundingEntity === "owner" ? <View onLayout={registerCompletionField("channel")} style={[styles.completionField, { borderColor: channelError ? "#F43F5E" : colors.border, backgroundColor: channelError ? "#F43F5E0D" : colors.surface }, channelError ? styles.invalidInputGlow : null]}>
+              <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "قناة الصرف والحساب" : "Withdrawal channel & account"}</Text>
+              <CascadingSelectField value={completion.fundingChannel ? expenseFundingChannelLabel(completion.fundingChannel, language) : null} placeholder={language === "ar" ? "اختر قناة الصرف..." : "Choose withdrawal channel..."} error={channelError} icon="bolt" onPress={() => toggleCompletionDropdown("channel")} colors={colors} language={language} />
+              {channelError ? <Text style={styles.fieldError}>{completion.fundingChannel === "cliq" || completion.fundingChannel === "iban" && !resolveOwnerAccount(completion.fundingChannel) ? (language === "ar" ? "لا توجد حسابات مفعلة لهذه القناة — فعّلها في إعدادات الدفع." : "No active accounts for this channel — enable them in payment settings.") : (language === "ar" ? "يرجى اختيار قناة الصرف والحساب" : "Please choose the withdrawal channel")}</Text> : null}
+              {completion.fundingChannel && completion.fundingChannel !== "vault-cash" && resolveOwnerAccount(completion.fundingChannel) ? <Text style={[styles.completionFieldHint, { color: colors.muted, textAlign: align }]}>{language === "ar" ? `الحساب المموَّل منه: ${resolveOwnerAccount(completion.fundingChannel)?.label}` : `Funded from: ${resolveOwnerAccount(completion.fundingChannel)?.label}`}</Text> : null}
+              {completion.fundingChannel && completion.fundingChannel !== "vault-cash" && !resolveOwnerAccount(completion.fundingChannel) ? <Text style={[styles.completionFieldHint, { color: colors.warning, textAlign: align }]}>{language === "ar" ? "لا توجد حسابات مفعلة لهذه القناة — فعّلها في إعدادات الدفع." : "No active accounts for this channel — enable them in payment settings."}</Text> : null}
+            </View> : completion.fundingEntity === "staff" ? <>
+              <View onLayout={registerCompletionField("staff")} style={[styles.completionField, { borderColor: staffError ? "#F43F5E" : colors.border, backgroundColor: staffError ? "#F43F5E0D" : colors.surface }, staffError ? styles.invalidInputGlow : null]}>
+                <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "اسم الموظف / الحارس" : "Staff / guard name"}</Text>
+                <CascadingSelectField value={completion.fundingSourceLabel.trim() || null} placeholder={language === "ar" ? "اختر الموظف..." : "Choose the staff..."} error={staffError} icon="badge" onPress={() => toggleCompletionDropdown("staff")} colors={colors} language={language} />
+                {staffError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى اختيار الموظف / الحارس" : "Please choose the staff / guard"}</Text> : null}
               </View>
-              {completion.fundingChannel !== "vault-cash" ? <>
-                <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "الحساب المموَّل منه" : "Funding account"}</Text>
-                {(() => { const accounts = fundingOwnerAccounts.filter((account) => (completion.fundingChannel === "cliq" && account.kind === "cliq") || (completion.fundingChannel === "iban" && account.kind === "bank")); return accounts.length ? accounts.map((account) => { const selected = completion.fundingSourceId === account.id; return <Pressable key={account.id} accessibilityRole="button" accessibilityLabel={account.label} onPress={() => setCompletion({ ...completion, fundingSourceId: account.id, fundingSourceLabel: account.label })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{account.label}</Text></Pressable>; }) : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "لا توجد حسابات مفعلة لهذه القناة — فعّلها في إعدادات الدفع." : "No active accounts for this channel — enable them in payment settings."}</Text>; })()}
-              </> : null}
-            </> : <>
-              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "نقطة العهدة المخصوم منها" : "Float point to deduct from"}</Text>
-              {fundingStaffFloats.length ? fundingStaffFloats.map((account) => { const selected = completion.fundingSourceId === account.id; return <Pressable key={account.id} accessibilityRole="button" accessibilityLabel={account.label} onPress={() => setCompletion({ ...completion, fundingSourceId: account.id, fundingSourceLabel: account.label })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{account.label}</Text></Pressable>; }) : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "لا توجد عُهد مفعلة — أنشئ نقطة عهدة في إعدادات الدفع." : "No active floats — create a float point in payment settings."}</Text>}
-              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "طريقة السداد" : "Payment mode"}</Text>
-              <View style={styles.fundingRow}>
-                {([{ id: "float", ar: "خصم من العهدة النقدية المعلقة", en: "Deduct from held float cash" }, { id: "reimbursement", ar: "دفع من الجيب الخاص للموظف", en: "Paid from staff own pocket" }] as const).map((mode) => { const selected = completion.staffMode === mode.id; return <Pressable key={mode.id} accessibilityRole="button" accessibilityLabel={mode.ar} onPress={() => setCompletion({ ...completion, staffMode: mode.id })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={mode.id === "float" ? "account-balance-wallet" : "payments"} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? mode.ar : mode.en}</Text></Pressable>; })}
-              </View>
-            </>}
+              {completion.fundingSourceId.trim() ? <View onLayout={registerCompletionField("staffMode")} style={[styles.completionField, { borderColor: staffModeError ? "#F43F5E" : colors.border, backgroundColor: staffModeError ? "#F43F5E0D" : colors.surface }, staffModeError ? styles.invalidInputGlow : null]}>
+                <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "طريقة السداد" : "Payment mode"}</Text>
+                <CascadingSelectField value={completion.staffMode ? COMPLETION_STAFF_MODES.find((mode) => mode.id === completion.staffMode)?.label[language === "ar" ? 0 : 1] ?? null : null} placeholder={language === "ar" ? "اختر طريقة السداد..." : "Choose payment mode..."} error={staffModeError} icon="account-balance-wallet" onPress={() => toggleCompletionDropdown("staffMode")} colors={colors} language={language} />
+                {staffModeError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى اختيار طريقة السداد" : "Please choose the payment mode"}</Text> : null}
+              </View> : null}
+            </> : null}
             {!fundingReady(completion) ? <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "أكمل تحديد مصدر التمويل لتمكين الترحيل التلقائي." : "Complete the funding selection to enable automatic posting."}</Text> : null}
           </> : null}
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "الترحيل التلقائي للمصروفات" : "Auto post expense"} disabled={!hasPositiveActualCost(completion)} onPress={() => setCompletion({ ...completion, postExpense: !completion.postExpense })} style={[styles.checkRow, { backgroundColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success + "12" : colors.surfaceMuted, borderColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.border, opacity: hasPositiveActualCost(completion) ? 1 : 0.45 }]}><MaterialIcons name={hasPositiveActualCost(completion) && completion.postExpense ? "check-box" : "check-box-outline-blank"} size={18} color={hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.muted} /><Text style={{ flex: 1, color: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "ترحيل تلقائي إلى سجل المصروفات تحت بند (صيانة وتشغيل)" : "Auto post to the expenses ledger under (Maintenance & operations)"}</Text></Pressable>
@@ -695,9 +765,14 @@ export default function MaintenanceDashboard() {
           {completion.task.frequency !== "once" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "جدولة الاستحقاق القادم" : "Schedule next occurrence"} onPress={() => setCompletion({ ...completion, scheduleNext: !completion.scheduleNext })} style={[styles.checkRow, { backgroundColor: completion.scheduleNext ? colors.primary + "12" : colors.surfaceMuted, borderColor: completion.scheduleNext ? colors.primary : colors.border }]}><MaterialIcons name={completion.scheduleNext ? "check-box" : "check-box-outline-blank"} size={18} color={completion.scheduleNext ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: completion.scheduleNext ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? `جدولة الاستحقاق القادم تلقائياً (تاريخ: ${formatDate(completionNextDate) ?? completionNextDate})` : `Automatically schedule the next occurrence (date: ${formatDate(completionNextDate) ?? completionNextDate})`}</Text></Pressable> : null}
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "ملاحظات الإتمام (اختياري)" : "Completion notes (optional)"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "ملاحظات الإتمام" : "Completion notes"} value={completion.notes} onChangeText={(value) => setCompletion({ ...completion, notes: value })} multiline placeholder={language === "ar" ? "ما تم إنجازه، قطع الغيار، ملاحظات إضافية..." : "What was done, parts, extra notes..."} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <CascadingSelectSheet visible={completionDropdown?.kind === "performer"} title={language === "ar" ? "منفّذ المهمة" : "Performed by"} options={performerOptions.map((option) => ({ key: option.id, label: option.name, icon: "person-outline" as const }))} selectedKey={completion.performerId || null} onSelect={(key) => { setPerformerError(false); setCompletion({ ...completion, performerId: key }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
+          <CascadingSelectSheet visible={completionDropdown?.kind === "entity"} title={language === "ar" ? "مصدر الدفع والتمويل" : "Payment & funding source"} options={EXPENSE_FUNDING_ENTITIES.map((entity) => ({ key: entity, label: expenseFundingEntityLabel(entity, language), icon: entity === "owner" ? ("account-balance" as const) : ("account-balance-wallet" as const) }))} selectedKey={completion.fundingEntity || null} onSelect={(key) => { setFundingError(false); setChannelError(false); setStaffError(false); setStaffModeError(false); setCompletion({ ...completion, fundingEntity: key as "owner" | "staff", fundingChannel: null, fundingSourceId: "", fundingSourceLabel: "", staffMode: null }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
+          <CascadingSelectSheet visible={completionDropdown?.kind === "channel"} title={language === "ar" ? "قناة الصرف والحساب" : "Withdrawal channel & account"} options={EXPENSE_FUNDING_CHANNELS.map((channel) => ({ key: channel, label: expenseFundingChannelLabel(channel, language), icon: channel === "vault-cash" ? ("point-of-sale" as const) : channel === "cliq" ? ("bolt" as const) : ("account-balance" as const) }))} selectedKey={completion.fundingChannel || null} onSelect={(key) => { setChannelError(false); const channel = key as ExpenseFundingChannel; const account = channel !== "vault-cash" ? resolveOwnerAccount(channel) : undefined; setCompletion({ ...completion, fundingChannel: channel, fundingSourceId: account?.id ?? "", fundingSourceLabel: account?.label ?? "" }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
+          <CascadingSelectSheet visible={completionDropdown?.kind === "staff"} title={language === "ar" ? "اسم الموظف / الحارس" : "Staff / guard name"} options={fundingStaffFloats.map((account) => ({ key: account.id, label: account.label, icon: "badge" as const }))} selectedKey={completion.fundingSourceId || null} onSelect={(key) => { setStaffError(false); const account = fundingStaffFloats.find((item) => item.id === key); setCompletion({ ...completion, fundingSourceId: key, fundingSourceLabel: account?.label ?? "" }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
+          <CascadingSelectSheet visible={completionDropdown?.kind === "staffMode"} title={language === "ar" ? "طريقة السداد" : "Payment mode"} options={COMPLETION_STAFF_MODES.map((mode) => ({ key: mode.id, label: mode.label[language === "ar" ? 0 : 1], icon: mode.icon }))} selectedKey={completion.staffMode || null} onSelect={(key) => { setStaffModeError(false); setCompletion({ ...completion, staffMode: key as "float" | "reimbursement" }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
           <View style={[styles.completionActions, { flexDirection: row }]}>
             <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} disabled={Boolean(busy)} onPress={() => setCompletion(null)} style={({ pressed }) => [styles.completionSecondary, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13 }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting"} disabled={Boolean(busy) || !completion.performerId || !fundingReady(completion)} onPress={() => void submitCompletion()} style={({ pressed }) => [styles.completionPrimary, { backgroundColor: busy?.kind === "complete" ? colors.muted : colors.success, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name={busy?.kind === "complete" ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{busy?.kind === "complete" ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting")}</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting"} disabled={Boolean(busy)} onPress={() => void submitCompletion()} style={({ pressed }) => [styles.completionPrimary, { backgroundColor: busy?.kind === "complete" ? colors.muted : colors.success, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name={busy?.kind === "complete" ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{busy?.kind === "complete" ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting")}</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -905,5 +980,10 @@ const styles = StyleSheet.create({
   completionActions: { gap: 9, marginTop: 18 },
   completionPrimary: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
   completionSecondary: { minWidth: 96, minHeight: 48, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 },
+  completionField: { borderWidth: 1, borderRadius: 14, padding: 11, marginTop: 11 },
+  completionFieldLabel: { fontSize: 12, fontWeight: "900", marginBottom: 4 },
+  completionFieldHint: { fontSize: 10, marginBottom: 3, fontWeight: "700" },
+  attributionRow: { marginTop: 7, borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, alignItems: "center", gap: 6 },
+  attributionText: { flex: 1, fontSize: 10, fontWeight: "800" },
   saveBtn: { minHeight: 50, borderRadius: 15, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, marginTop: 16 },
 });

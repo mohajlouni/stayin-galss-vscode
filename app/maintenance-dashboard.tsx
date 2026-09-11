@@ -75,14 +75,19 @@ const buildDateRange = (start: string, end: string, cap = 120) => {
   return list;
 };
 
+/** عرض الخلية الثابت (54) + الفجوة (6) = 60px، فيكون تحريك 7 أيام = 420px مضبوطاً تماماً على حدود الأيام. */
+const ROLLER_PILL_STEP = 60;
+
 type TaskDraft = { id?: string; title: string; unitIds: string[]; allUnits: boolean; chaletName?: string; frequency: MaintenanceFrequency; nextDueDate: string; note?: string; cost?: string; customIntervalDays?: string; blockBooking?: boolean; blockPeriod?: MaintenanceBlockPeriod };
-type AssetDraft = { id?: string; name: string; unitIds: string[]; chaletName?: string; category: string; condition: AssetCondition; serialNumber?: string; purchaseCost?: string };
+type AssetDraft = { id?: string; name: string; unitIds: string[]; chaletName?: string; category: string; condition: AssetCondition; serialNumber?: string; purchaseCost?: string; /** ترحيل تكلفة الشراء كقيد مصروف (لأصل جديد فقط). */ linkExpense?: boolean; expenseChannel?: ExpenseFundingChannel | null; expenseAccountId?: string };
+/** أخطاء التحقق الأحمر في نافذة الأصل: الاسم / الوحدات / مصدر الدفع المربوط. */
+type AssetErrors = { name?: boolean; units?: boolean; expense?: boolean };
 /** خيار منفّذ المهمة في نافذة الإتمام: المستخدم الحالي، عهدة موظف/حارس، أو حارس الوحدة. */
 type PerformerOption = { id: string; name: string; role: MaintenancePerformerRole };
 type CompletionDraft = { task: MaintenanceTask; performerId: string; actualCost: string; fundingEntity: "owner" | "staff" | null; fundingChannel: ExpenseFundingChannel | null; fundingSourceId: string; fundingSourceLabel: string; staffMode: "float" | "reimbursement" | null; postExpense: boolean; scheduleNext: boolean; notes: string };
 
 export default function MaintenanceDashboard() {
-  const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
+  const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, addExpense, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
   const { isRTL, language } = useI18n();
   const { triggerHaptic, formatDate } = useAppPreferences();
   const { can, isManager, role, user } = useWorkspaceAccess();
@@ -91,6 +96,7 @@ export default function MaintenanceDashboard() {
   const [taskSheet, setTaskSheet] = useState<{ mode: "create" | "edit"; draft: TaskDraft } | null>(null);
   const [assetSheet, setAssetSheet] = useState<{ mode: "create" | "edit"; draft: AssetDraft } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [assetErrors, setAssetErrors] = useState<AssetErrors>({});
   const [busy, setBusy] = useState<{ kind: "complete" | "start" | "cancel" | "delete-task" | "delete-asset"; id: string } | null>(null);
   const [completion, setCompletion] = useState<CompletionDraft | null>(null);
   const [performerMenuOpen, setPerformerMenuOpen] = useState(false);
@@ -129,11 +135,15 @@ export default function MaintenanceDashboard() {
   const todayISO = localDateISO(new Date(now));
   const stats = useMemo(() => maintenanceStats(maintenanceTasks ?? [], now), [maintenanceTasks, now]);
 
-  /** تواريخ الشريط الزمني الأفقي حسب الأفق المختار؛ الوضع "all" يغطي من أقدم استحقاق متأخر حتى أبعد استحقاق قادم. */
-  /** الشريط الزمني مستمر دائماً: من اليوم حتى +59 يوماً (60 خلية). لا يتقلص أبداً عند تبديل أفاق الفلترة. */
+  /** تواريخ الشريط الزمني الأفقي؛ يسبق اليوم دائماً يومان من الماضي ليبقى أسبوع التصفح مكتملاً، ويمتد حتى +59 يوماً. */
+  /** الشريط الزمني مستمر دائماً: من [قبل يومين] ثم اليوم حتى +59 يوماً (62 خلية). لا يتقلص أبداً عند تبديل أفاق الفلترة. */
   const timelineDates = useMemo(() => {
+    const preStart = addDays(todayISO, -2);
+    const customStart = rollerRange.kind === "custom" && rollerRange.start ? rollerRange.start : "";
+    const start = customStart && customStart < preStart ? customStart : preStart;
     const horizonEnd = rollerRange.kind === "custom" && rollerRange.end ? rollerRange.end : addDays(todayISO, 59);
-    return buildDateRange(todayISO, horizonEnd >= todayISO ? horizonEnd : addDays(todayISO, 59), 120);
+    const end = horizonEnd >= start ? horizonEnd : addDays(todayISO, 59);
+    return buildDateRange(start, end, 120);
   }, [rollerRange, todayISO]);
 
   /** قائمة المنفّذين المحتملين: المستخدم الحالي ثم عهدة الموظفين ثم حرّاس الوحدات، بدون تكرار. */
@@ -331,32 +341,66 @@ export default function MaintenanceDashboard() {
   const openCreateAsset = () => {
     if (!canManage) return;
     triggerHaptic();
-    setAssetSheet({ mode: "create", draft: { name: "", unitIds: chalets.map((chalet) => chalet.id), category: "appliances", condition: "good" } });
+    setAssetErrors({});
+    setAssetSheet({ mode: "create", draft: { name: "", unitIds: chalets.map((chalet) => chalet.id), category: "appliances", condition: "good", linkExpense: false, expenseChannel: null, expenseAccountId: "" } });
   };
   const openEditAssetSheet = (asset: Asset) => {
     if (!canManage) return;
     triggerHaptic();
+    setAssetErrors({});
     setAssetSheet({ mode: "edit", draft: { id: asset.id, name: asset.name, unitIds: [asset.chaletId], chaletName: asset.chaletName, category: asset.category, condition: asset.condition, serialNumber: asset.serialNumber, purchaseCost: asset.purchaseCost !== undefined ? String(asset.purchaseCost) : "" } });
   };
-  const toggleAssetUnit = (id: string) => { if (!assetSheet) return; setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.includes(id) ? assetSheet.draft.unitIds.filter((unitId) => unitId !== id) : [...assetSheet.draft.unitIds, id] } }); };
-  const toggleAllAssetUnits = () => { if (!assetSheet) return; setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.length === chalets.length && chalets.length > 0 ? [] : chalets.map((chalet) => chalet.id) } }); };
-  const closeAssetSheet = () => { if (!saving) setAssetSheet(null); };
+  const toggleAssetUnit = (id: string) => { if (!assetSheet) return; setAssetErrors((prev) => ({ ...prev, units: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.includes(id) ? assetSheet.draft.unitIds.filter((unitId) => unitId !== id) : [...assetSheet.draft.unitIds, id] } }); };
+  const toggleAllAssetUnits = () => { if (!assetSheet) return; setAssetErrors((prev) => ({ ...prev, units: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, unitIds: assetSheet.draft.unitIds.length === chalets.length && chalets.length > 0 ? [] : chalets.map((chalet) => chalet.id) } }); };
+  const closeAssetSheet = () => { if (!saving) { setAssetSheet(null); setAssetErrors({}); } };
+
+  const toggleAssetExpenseLink = () => { if (!assetSheet) return; setAssetErrors((prev) => ({ ...prev, expense: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, linkExpense: !assetSheet.draft.linkExpense } }); };
+  const selectAssetExpenseChannel = (channel: ExpenseFundingChannel) => { if (!assetSheet) return; setAssetErrors((prev) => ({ ...prev, expense: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, expenseChannel: channel, expenseAccountId: channel === "vault-cash" ? "" : assetSheet.draft.expenseAccountId } }); };
+  const selectAssetExpenseAccount = (id: string) => { if (!assetSheet) return; setAssetErrors((prev) => ({ ...prev, expense: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, expenseAccountId: id } }); };
 
   const saveAssetDraft = async () => {
     const sheet = assetSheet;
     if (!sheet || inFlight.current) return;
     const draft = sheet.draft;
-    if (!draft.name.trim() || !draft.unitIds.length) return;
+    if (!draft.name.trim() || !draft.unitIds.length) {
+      setAssetErrors({ name: !draft.name.trim(), units: !draft.unitIds.length });
+      return;
+    }
+    const isEdit = Boolean(draft.id);
+    const rawCost = draft.purchaseCost?.trim() ? Math.max(0, Number(draft.purchaseCost) || 0) : 0;
+    const linking = !isEdit && draft.linkExpense === true && rawCost > 0;
+    if (linking) {
+      const needsAccount = draft.expenseChannel !== "vault-cash";
+      if (!draft.expenseChannel || (needsAccount && !draft.expenseAccountId?.trim())) {
+        setAssetErrors((prev) => ({ ...prev, expense: true }));
+        return;
+      }
+    }
     inFlight.current = true;
     setSaving(true);
     try {
-      const isEdit = Boolean(draft.id);
       const targets = isEdit ? [draft.unitIds[0]] : draft.unitIds;
+      const chaletNameFor = (id: string) => chalets.find((item) => item.id === id)?.name ?? draft.chaletName;
       for (const chaletId of targets) {
-        const chalet = chalets.find((item) => item.id === chaletId);
-        await saveAsset({ id: isEdit ? draft.id : undefined, name: draft.name, chaletId, chaletName: chalet?.name ?? draft.chaletName, category: draft.category, condition: draft.condition, serialNumber: draft.serialNumber?.trim() || undefined, purchaseCost: draft.purchaseCost?.trim() ? Math.max(0, Number(draft.purchaseCost) || 0) : undefined });
+        await saveAsset({ id: isEdit ? draft.id : undefined, name: draft.name, chaletId, chaletName: chaletNameFor(chaletId), category: draft.category, condition: draft.condition, serialNumber: draft.serialNumber?.trim() || undefined, purchaseCost: rawCost || undefined });
+      }
+      if (linking) {
+        const paymentMethod = draft.expenseChannel === "vault-cash" ? "cash" : draft.expenseChannel === "cliq" ? "click" : "iban";
+        const fundingChannel = draft.expenseChannel ?? "vault-cash";
+        const fundingAccount = fundingChannel !== "vault-cash" ? fundingOwnerAccounts.find((acc) => acc.id === draft.expenseAccountId) : undefined;
+        const note = `شراء أصول وتجهيزات: ${draft.name.trim()}`;
+        if (targets.length === 1) {
+          await addExpense({ chaletId: targets[0], chaletName: chaletNameFor(targets[0]), amount: rawCost, date: todayISO, category: "other", note, paymentMethod, fundingEntity: "owner", fundingChannel, fundingSourceId: fundingAccount?.id, fundingSourceLabel: fundingAccount?.label });
+        } else {
+          const base = Math.floor((rawCost * 100) / targets.length) / 100;
+          let remainder = Math.round(rawCost * 100) - Math.round(base * 100) * targets.length;
+          const allocations: { chaletId: string; chaletName: string; amount: number }[] = targets.map((id) => ({ chaletId: id, chaletName: chaletNameFor(id) ?? "", amount: base }));
+          for (const allocation of allocations) { if (remainder > 0) { allocation.amount = Math.round((allocation.amount + 0.01) * 100) / 100; remainder -= 1; } }
+          await addExpense({ amount: rawCost, date: todayISO, category: "other", note, generalAllocations: allocations, paymentMethod, fundingEntity: "owner", fundingChannel, fundingSourceId: fundingAccount?.id, fundingSourceLabel: fundingAccount?.label });
+        }
       }
       setAssetSheet(null);
+      setAssetErrors({});
     } catch {
       Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "حاول مرة أخرى بعد قليل." : "Please try again shortly.");
     } finally {
@@ -397,8 +441,12 @@ export default function MaintenanceDashboard() {
     if (id === "today" || id === "7") rollerRef.current?.scrollTo({ x: 0, animated: true });
     setRangePanelOpen(false);
   };
-  /** يمرر الشريط الزمني أفقياً بمقدار ثابت للتنقل السلس للأمام/الخلف. */
-  const nudgeRoller = (amount: number) => rollerRef.current?.scrollTo({ x: rollerOffsetRef.current + amount, animated: true });
+  /** يمرر الشريط الزمني أفقياً بمقدار أسبوع كامل (7 أيام) لكل ضغطة، ملتصقاً بحدود الأيام دون قصّ خلية. */
+  const nudgeRoller = (weeks: number) => {
+    const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
+    const target = Math.min(Math.max(rollerOffsetRef.current + weeks * 7 * ROLLER_PILL_STEP, 0), max);
+    rollerRef.current?.scrollTo({ x: target, animated: true });
+  };
   const openRangePanel = () => {
     if (!rangePanelOpen) setRangeDraft({ start: todayISO, end: addDays(todayISO, 29) });
     setRangePanelOpen(!rangePanelOpen);
@@ -428,7 +476,7 @@ export default function MaintenanceDashboard() {
         <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? colors.primary + "1F" : colors.surface, borderColor: rollerRange.kind === "custom" ? colors.primary : colors.border }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? colors.primary : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? colors.primary : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={() => nudgeRoller(320)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={() => nudgeRoller(1)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
@@ -445,12 +493,18 @@ export default function MaintenanceDashboard() {
               <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
               <Text style={{ color: dayColor, fontSize: 14, fontWeight: strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
               <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent" }]} />
+              {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: colors.primary }]} /> : null}
             </Pressable>;
           })}
         </ScrollView>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={() => nudgeRoller(-320)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={() => nudgeRoller(-1)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
       </View>
     </View>
+
+    {tab === "assets" ? <View style={[styles.assetHelper, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row, alignItems: "flex-start", gap: 7, marginTop: 10 }]}>
+      <MaterialIcons name="inventory-2" size={14} color="#94A3B8" style={{ marginTop: 2 }} />
+      <Text style={{ color: "#94A3B8", fontSize: 11, fontWeight: "700", lineHeight: 16, flex: 1, textAlign: align }}>{language === "ar" ? "سجل عتاد الشاليهات (مكيفات، مضخات، بويلرات، شاشات) لحصر الأجهزة ومواقعها ومتابعة تكاليف صيانتها دورياً." : "Track chalet assets (ACs, pumps, boilers, screens) — catalogue equipment, locations and recurring maintenance costs."}</Text>
+    </View> : null}
 
     <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen ? 2 : 0 }]}>
       <View style={[styles.searchWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}>
@@ -657,10 +711,12 @@ export default function MaintenanceDashboard() {
         <View style={[styles.sheetHeader, { flexDirection: row }]}><View style={[styles.sheetIcon, { backgroundColor: colors.primary + "1A" }]}><MaterialIcons name="inventory" size={20} color={colors.primary} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align }}>{assetSheet.mode === "create" ? (language === "ar" ? "أصل جديد" : "New asset") : (language === "ar" ? "تعديل الأصل" : "Edit asset")}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={closeAssetSheet} disabled={saving} style={({ pressed }) => [styles.closeBtn, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable></View>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetBody}>
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align }}>{language === "ar" ? "اسم الأصل" : "Asset name"}</Text>
-          <TextInput accessibilityLabel={language === "ar" ? "اسم الأصل" : "Asset name"} value={assetSheet.draft.name} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, name: value } })} placeholder={language === "ar" ? "مثال: مكيف صالة رئيسي" : "e.g. Main hall air conditioner"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <TextInput accessibilityLabel={language === "ar" ? "اسم الأصل" : "Asset name"} value={assetSheet.draft.name} onChangeText={(value) => { setAssetErrors((prev) => ({ ...prev, name: false })); setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, name: value } }); }} placeholder={language === "ar" ? "مثال: مكيف صالة رئيسي" : "e.g. Main hall air conditioner"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: assetErrors.name ? "#F43F5E" : colors.border, color: colors.foreground, textAlign: align }, assetErrors.name ? styles.invalidInputGlow : null]} />
+          {assetErrors.name ? <Text style={styles.fieldError}>{language === "ar" ? "يُرجى إدخال اسم الأصل" : "Please enter an asset name"}</Text> : null}
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الوحدات المستهدفة" : "Target units"}</Text>
-          {chalets.length ? <><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تحديد كافة الوحدات" : "Select all units"} onPress={toggleAllAssetUnits} style={[styles.checkRow, { backgroundColor: assetSheet.draft.unitIds.length === chalets.length ? colors.primary + "14" : colors.surfaceMuted, borderColor: assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.border }]}><MaterialIcons name={assetSheet.draft.unitIds.length === chalets.length ? "check-box" : "check-box-outline-blank"} size={18} color={assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "تحديد كافة الوحدات" : "Select all units"}</Text><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>{chalets.length}</Text></Pressable>
-          {chalets.map((chalet) => { const selected = assetSheet.draft.unitIds.includes(chalet.id); return <Pressable key={chalet.id} accessibilityRole="checkbox" accessibilityLabel={chalet.name} onPress={() => toggleAssetUnit(chalet.id)} style={[styles.checkRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "check-box" : "check-box-outline-blank"} size={18} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /></Pressable>; })}</> : <View style={[styles.unitWarning, { backgroundColor: colors.warning + "14", borderColor: colors.warning + "55" }]}><MaterialIcons name="error-outline" size={17} color={colors.warning} /><Text style={{ color: colors.warning, fontSize: 12, fontWeight: "800", marginLeft: 7, flex: 1, textAlign: align }}>{language === "ar" ? "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل صيانة أو أصول" : "You must add a unit to this property before registering maintenance or assets."}</Text></View>}
+          {chalets.length ? <><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تحديد كافة الوحدات" : "Select all units"} onPress={toggleAllAssetUnits} style={[styles.checkRow, { backgroundColor: assetSheet.draft.unitIds.length === chalets.length ? colors.primary + "14" : colors.surfaceMuted, borderColor: assetErrors.units ? "#F43F5E" : assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.border }]}><MaterialIcons name={assetSheet.draft.unitIds.length === chalets.length ? "check-box" : "check-box-outline-blank"} size={18} color={assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: assetSheet.draft.unitIds.length === chalets.length ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "تحديد كافة الوحدات" : "Select all units"}</Text><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>{chalets.length}</Text></Pressable>
+          {chalets.map((chalet) => { const selected = assetSheet.draft.unitIds.includes(chalet.id); return <Pressable key={chalet.id} accessibilityRole="checkbox" accessibilityLabel={chalet.name} onPress={() => toggleAssetUnit(chalet.id)} style={[styles.checkRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : assetErrors.units ? "#F43F5E" : colors.border }]}><MaterialIcons name={selected ? "check-box" : "check-box-outline-blank"} size={18} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /></Pressable>; })}
+          {assetErrors.units ? <Text style={styles.fieldError}>{language === "ar" ? "يُرجى اختيار وحدة واحدة على الأقل" : "Please select at least one unit"}</Text> : null}</> : <View style={[styles.unitWarning, { backgroundColor: colors.warning + "14", borderColor: colors.warning + "55" }]}><MaterialIcons name="error-outline" size={17} color={colors.warning} /><Text style={{ color: colors.warning, fontSize: 12, fontWeight: "800", marginLeft: 7, flex: 1, textAlign: align }}>{language === "ar" ? "يجب إضافة وحدة أولاً للمنشأة قبل تسجيل صيانة أو أصول" : "You must add a unit to this property before registering maintenance or assets."}</Text></View>}
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "التصنيف" : "Category"}</Text>
           <View style={[styles.chipWrap, { flexDirection: row }]}>{ASSET_CATEGORIES.map((category) => { const selected = assetSheet.draft.category === category.id; return <Pressable key={category.id} onPress={() => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, category: category.id } })} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{category.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "الحالة" : "Condition"}</Text>
@@ -669,7 +725,20 @@ export default function MaintenanceDashboard() {
           <TextInput accessibilityLabel={language === "ar" ? "الرقم التسلسلي" : "Serial number"} value={assetSheet.draft.serialNumber} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, serialNumber: value } })} placeholder={language === "ar" ? "اختياري" : "Optional"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "تكلفة الشراء (اختياري)" : "Purchase cost (optional)"}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "تكلفة الشراء" : "Purchase cost"} value={assetSheet.draft.purchaseCost} onChangeText={(value) => setAssetSheet({ ...assetSheet, draft: { ...assetSheet.draft, purchaseCost: value } })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ الأصل" : "Save asset"} disabled={saving || !assetSheet.draft.name.trim() || !assetSheet.draft.unitIds.length} onPress={() => void saveAssetDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الأصل" : "Save asset")}</Text></Pressable>
+          {assetSheet.mode === "create" && Number(assetSheet.draft.purchaseCost || 0) > 0 ? <>
+            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "ترحيل تكلفة الشراء إلى سجل المصروفات" : "Post purchase cost to expenses ledger"} onPress={toggleAssetExpenseLink} style={[styles.checkRow, { backgroundColor: assetSheet.draft.linkExpense ? colors.success + "12" : colors.surfaceMuted, borderColor: assetSheet.draft.linkExpense ? colors.success : assetErrors.expense ? "#F43F5E" : colors.border }]}><MaterialIcons name={assetSheet.draft.linkExpense ? "check-box" : "check-box-outline-blank"} size={18} color={assetSheet.draft.linkExpense ? colors.success : colors.muted} /><Text style={{ flex: 1, color: assetSheet.draft.linkExpense ? colors.success : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "ترحيل تكلفة الشراء إلى سجل المصروفات" : "Post the purchase cost to the expenses ledger"}</Text></Pressable>
+            {assetSheet.draft.linkExpense ? <>
+              <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 12 }}>{language === "ar" ? "مصدر الدفع (من الخزينة المركزية للمالك)" : "Payment source (owner central treasury)"}</Text>
+              <View style={[styles.chipWrap, { flexDirection: row }]}>{EXPENSE_FUNDING_CHANNELS.map((channel) => { const selected = assetSheet.draft.expenseChannel === channel; return <Pressable key={channel} accessibilityRole="button" accessibilityLabel={expenseFundingChannelLabel(channel, language)} onPress={() => selectAssetExpenseChannel(channel)} style={[styles.chip, { backgroundColor: selected ? colors.primary : colors.surfaceMuted, borderColor: selected ? colors.primary : assetErrors.expense ? "#F43F5E" : colors.border }]}><Text style={{ color: selected ? "#FFFFFF" : colors.foreground, fontSize: 11, fontWeight: "900" }}>{expenseFundingChannelLabel(channel, language)}</Text></Pressable>; })}</View>
+              {assetSheet.draft.expenseChannel && assetSheet.draft.expenseChannel !== "vault-cash" ? (() => { const accounts = fundingOwnerAccounts.filter((account) => (assetSheet.draft.expenseChannel === "cliq" && account.kind === "cliq") || (assetSheet.draft.expenseChannel === "iban" && account.kind === "bank")); return accounts.length ? <View style={[styles.chipWrap, { flexDirection: row }]}>{accounts.map((account) => { const selected = assetSheet.draft.expenseAccountId === account.id; return <Pressable key={account.id} accessibilityRole="button" accessibilityLabel={account.label} onPress={() => selectAssetExpenseAccount(account.id)} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{account.label}</Text></Pressable>; })}</View> : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "لا توجد حسابات مفعلة لهذه القناة — أضفها من «طرق الدفع والحسابات المالية»." : "No active accounts for this channel — add them in payment settings."}</Text>; })() : null}
+              {assetErrors.expense ? <Text style={styles.fieldError}>{!assetSheet.draft.expenseChannel ? (language === "ar" ? "يُرجى اختيار مصدر الدفع" : "Please choose a payment source") : (language === "ar" ? "يُرجى اختيار الحساب المالي المفعل" : "Please choose an active financial account")}</Text> : null}
+              <View style={[styles.scheduleHint, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "55", marginTop: 8 }]}>
+                <MaterialIcons name="info-outline" size={15} color={colors.primary} />
+                <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "700", flex: 1, textAlign: align }}>{language === "ar" ? `سيُسجَّل قيد مصروف بند «أخرى / شراء أصول وتجهيزات» بقيمة ${Number(assetSheet.draft.purchaseCost).toLocaleString()} د.أ.` : `A general expense under "Other / Asset Purchase" will be recorded for ${Number(assetSheet.draft.purchaseCost).toLocaleString()} JOD.`}</Text>
+              </View>
+            </> : null}
+          </> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حفظ الأصل" : "Save asset"} disabled={saving} onPress={() => void saveAssetDraft()} style={({ pressed }) => [styles.saveBtn, { backgroundColor: saving ? colors.muted : colors.primary, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name="save" size={18} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{saving ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الأصل" : "Save asset")}</Text></Pressable>
         </ScrollView>
       </View>
     </View> : null}
@@ -782,8 +851,12 @@ const styles = StyleSheet.create({
   rollerScroller: { alignItems: "center", gap: 6 },
   rollerArrow: { width: 34, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", borderWidth: 1, flexShrink: 0 },
   rollerStrip: { flexDirection: "row", gap: 6, paddingVertical: 3, paddingHorizontal: 2 },
-  rollerChip: { minWidth: 50, maxWidth: 54, height: 60, borderRadius: 14, borderWidth: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center", gap: 2 },
+  rollerChip: { width: 54, minWidth: 50, maxWidth: 54, height: 60, borderRadius: 14, borderWidth: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center", gap: 2 },
   rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2 },
+  rollerTodayUnderline: { position: "absolute", bottom: 5, left: 9, right: 9, height: 2.5, borderRadius: 2 },
+  invalidInputGlow: { borderWidth: 2, shadowColor: "#F43F5E", shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 0 }, elevation: 6 },
+  fieldError: { color: "#F43F5E", fontSize: 10, fontWeight: "800", marginTop: 5, textAlign: "right" },
+  assetHelper: { minHeight: 36, borderRadius: 12, borderWidth: 1, padding: 10 },
   filterDot: { width: 8, height: 8, borderRadius: 4 },
   searchWrap: { flex: 1, minWidth: 0, maxWidth: 480, alignItems: "center", gap: 6, minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700", padding: 0 },

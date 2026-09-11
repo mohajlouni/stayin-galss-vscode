@@ -329,9 +329,11 @@ describe("STEP 8 RTL tabs, single-row toolbar & recurring generation", () => {
     expect(source).toContain('targetScope: resolved ? undefined : "all_units"');
   });
 
-  it("duplicates assets per selected unit and gates saving on at least one selection", () => {
+  it("duplicates assets per selected unit and gates saving on at least one selection with red inline errors", () => {
     expect(source).toContain("const targets = isEdit ? [draft.unitIds[0]] : draft.unitIds;");
-    expect(source).toContain("if (!draft.name.trim() || !draft.unitIds.length) return;");
+    expect(source).toContain('if (!draft.name.trim() || !draft.unitIds.length)');
+    expect(source).toContain('setAssetErrors({ name: !draft.name.trim(), units: !draft.unitIds.length })');
+    expect(source).toContain("يُرجى إدخال اسم الأصل");
   });
 
   it("schedules the next occurrence on completion when the toggle is active (one-time tasks never recur)", () => {
@@ -587,9 +589,11 @@ describe("ROLLER STEP: unified tiles, floating popover & card flow polish", () =
     expect(source).not.toContain("rollerTodayBadge");
   });
 
-  it("adds smooth forward/backward scroll arrows that nudge the strip", () => {
-    expect(source).toContain("nudgeRoller(320)");
-    expect(source).toContain("nudgeRoller(-320)");
+  it("adds smooth forward/backward scroll arrows that step the strip by exactly a full week (7 days)", () => {
+    expect(source).toContain("nudgeRoller(1)");
+    expect(source).toContain("nudgeRoller(-1)");
+    expect(source).toContain("weeks * 7 * ROLLER_PILL_STEP");
+    expect(source).toContain("ROLLER_PILL_STEP = 60");
     expect(source).toContain("rollerArrow");
     expect(source).toContain("onScroll={(event) =>");
     expect(source).toContain("rollerOffsetRef.current = event.nativeEvent.contentOffset.x");

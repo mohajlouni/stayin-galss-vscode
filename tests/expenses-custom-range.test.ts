@@ -33,7 +33,7 @@ describe("expenses custom period filter", () => {
   });
 
   it("formats all displayed dates and labels through the centralized app date formatter", () => {
-    expect(screen).toContain("const { triggerHaptic, formatDate } = useAppPreferences();");
+    expect(screen).toContain("const { triggerHaptic, formatDate, formatMonth } = useAppPreferences();");
     expect(screen).toContain("weekdayLabel");
     expect(screen).not.toContain("formatExpenseDate");
   });

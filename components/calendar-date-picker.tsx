@@ -99,7 +99,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visi
         </View>
 
         <View style={[styles.monthControls, { flexDirection: row }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? "السنوات التالية" : "الشهر التالي") : (yearMode ? "Next years" : "Next month")} onPress={() => shiftCursor(isRTL ? 1 : -1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات التالية" : "السنوات السابقة") : (isRTL ? "الشهر التالي" : "الشهر السابق")) : (yearMode ? (isRTL ? "Next years" : "Previous years") : (isRTL ? "Next month" : "Previous month"))} onPress={() => shiftCursor(isRTL ? 1 : -1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
             <MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={23} color={colors.primary} />
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح اختيار السنة" : "Open year selector"} onPress={() => setYearMode((current) => !current)} style={({ pressed }) => [styles.monthLabel, { backgroundColor: yearMode ? colors.primary + "16" : colors.glassInset, opacity: pressed ? 0.72 : 1 }]}>
@@ -107,7 +107,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visi
             <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900" }}>{yearMode ? `${years[0]} – ${years[years.length - 1]}` : formatMonth(cursor.year, cursor.month)}</Text>
             <MaterialIcons name={yearMode ? "expand-less" : "expand-more"} size={18} color={colors.primary} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? "السنوات السابقة" : "الشهر السابق") : (yearMode ? "Previous years" : "Previous month")} onPress={() => shiftCursor(isRTL ? -1 : 1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات السابقة" : "السنوات التالية") : (isRTL ? "الشهر السابق" : "الشهر التالي")) : (yearMode ? (isRTL ? "Previous years" : "Next years") : (isRTL ? "Previous month" : "Next month"))} onPress={() => shiftCursor(isRTL ? -1 : 1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
             <MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={23} color={colors.primary} />
           </Pressable>
         </View>

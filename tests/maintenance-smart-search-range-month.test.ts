@@ -8,7 +8,7 @@ const dashboard = () => read("app/maintenance-dashboard.tsx");
 const picker = () => read("components/calendar-date-picker.tsx");
 const highlight = () => read("components/ui/HighlightedText.tsx");
 
-describe("maintenance universal smart search with yellow highlight", () => {
+describe("maintenance universal smart search with amber underline highlight", () => {
   it("uses the comprehensive smart-search placeholder and accessibility label", () => {
     const source = dashboard();
     expect(source).toContain("بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)");
@@ -25,7 +25,9 @@ describe("maintenance universal smart search with yellow highlight", () => {
     expect(source).toContain("task.nextDueDate");
     expect(source).toContain("task.note");
     expect(source).toContain("task.completionNotes");
-    expect(source).toContain("String(task.actualCost)");
+    expect(source).toContain('`${task.actualCost} د.أ JOD`');
+    expect(source).toContain("maintenancePerformerRoleLabel(task.performedByRole, language)");
+    expect(source).toContain('"مكتملة" : "Completed"');
     expect(source).toContain("expenseFundingEntityLabel(task.expenseFundingEntity, language)");
     expect(source).toContain("expenseFundingChannelLabel(task.expenseFundingChannel, language)");
     expect(source).toContain("expenseFundingModeLabel(task.expenseFundingMode, language)");
@@ -40,18 +42,40 @@ describe("maintenance universal smart search with yellow highlight", () => {
     expect(source).toContain(", searchQuery, unitFilter, language]");
   });
 
-  it("renders matched text segments with a vibrant amber highlight", () => {
+  it("renders matched text segments with a subtle bold + amber underline (no yellow box)", () => {
     const source = highlight();
     expect(source).toContain("export function highlightSegments(text: string, query: string)");
-    expect(source).toContain("backgroundColor: \"#FBBF24\"");
-    expect(source).toContain("color: \"#0F172A\"");
-    expect(source).toContain("fontWeight: \"900\"");
+    expect(source).not.toContain("backgroundColor: \"#FBBF24\"");
+    expect(source).not.toContain("color: \"#0F172A\"");
+    expect(source).toContain('textDecorationLine: "underline"');
+    expect(source).toContain('textDecorationColor: "#F59E0B"');
+    expect(source).toContain('fontWeight: "700"');
     const cards = dashboard();
     expect(cards).toContain("<HighlightedText text={task.title}");
     expect(cards).toContain("<HighlightedText text={unitLabel}");
     expect(cards).toContain('text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost');
     expect(cards).toContain("<HighlightedText text={attribution.label}");
     expect(cards).toContain("<HighlightedText text={asset.name}");
+  });
+
+  it("normalizes Arabic searches (tashkeel, alef, alef-maqsura) end to end", () => {
+    const source = highlight();
+    expect(source).toContain("export function normalizeArabic(input: string): string");
+    expect(source).toContain("replace(/[أإآ]/g, \"ا\")");
+    expect(source).toContain("replace(/ى/g, \"ي\")");
+    expect(source).toContain("ARABIC_DIACRITICS_RE");
+    const cards = dashboard();
+    expect(source).toContain("normalizeWithMap");
+    expect(cards).toContain("normalizeArabic(searchQuery)");
+    expect(cards).toContain("query={searchQuery}");
+  });
+
+  it("shows a search feedback chip with the live result count and a clear button", () => {
+    const source = dashboard();
+    expect(source).toContain('"نتيجة مطابقة"');
+    expect(source).toContain('"مسح البحث"');
+    expect(source).toContain('onPress={() => setSearchQuery("")');
+    expect(source).toContain("styles.feedbackChip");
   });
 });
 
@@ -116,7 +140,7 @@ describe("custom range: no forced +1 month, amber pill, amber strip band", () =>
     expect(source).toContain("const isCustomEdge = Boolean(customRange");
     expect(source).toContain("const isCustomInside = Boolean(customRange");
     expect(source).toContain('isCustomEdge ? { backgroundColor: "#F59E0B"');
-    expect(source).toContain('isCustomInside ? { backgroundColor: "#F59E0B26"');
+    expect(source).toContain('isCustomInside ? { backgroundColor: "#F59E0B33"');
     expect(source).toContain('"#F59E0B4D"');
     expect(source).toContain('isCustomInside ? "#FCD34D"');
     expect(source).toContain("rollerRange.kind === \"custom\" && rollerRange.start && rollerRange.end");

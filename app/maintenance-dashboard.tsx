@@ -5,7 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
 import { CalendarDateField } from "@/components/calendar-date-picker";
-import { HighlightedText } from "@/components/ui/HighlightedText";
+import { HighlightedText, normalizeArabic } from "@/components/ui/HighlightedText";
 import { CascadingSelectField, CascadingSelectSheet } from "@/components/ui/cascading-select";
 import { useColors } from "@/hooks/use-colors";
 import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, activeOwnerTreasuryAccounts, EXPENSE_FUNDING_CHANNELS, EXPENSE_FUNDING_ENTITIES, expenseFundingChannelLabel, expenseFundingEntityLabel, expenseFundingModeLabel, maintenanceAuditActionLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type ExpenseFundingChannel, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
@@ -111,37 +111,39 @@ const maintenanceAttribution = (task: MaintenanceTask, language: "ar" | "en") =>
   return null;
 };
 
-/** نص قابل للبحث لكل مهمة: العنوان، الأصل، المنفذ، الشاليه، التكاليف، التمويل والقنوات، التواريخ، الملاحظات، وطريقة الصرف. */
-const taskSearchText = (task: MaintenanceTask, language: "ar" | "en") => [
+/** نص قابل للبحث لكل مهمة (موحّد عربيًا): العنوان، الأصل، الشاليه، المنفذ ودوره، الحالة، التكاليف بد.أ JOD، التمويل والقنوات، التواريخ والملاحظات. */
+const taskSearchText = (task: MaintenanceTask, language: "ar" | "en") => normalizeArabic([
   task.title,
   task.assetName,
+  task.chaletName,
   task.performedByName,
   task.assignedToStaffName,
-  task.chaletName,
   task.note,
   task.completionNotes,
   task.nextDueDate,
   task.completedAt?.slice(0, 10),
   task.lastCompletedDate,
-  task.actualCost !== undefined ? String(task.actualCost) : undefined,
-  task.cost !== undefined ? String(task.cost) : undefined,
+  task.actualCost !== undefined ? `${task.actualCost} د.أ JOD` : undefined,
+  task.cost !== undefined ? `${task.cost} د.أ JOD` : undefined,
   maintenanceFrequencyLabel(task.frequency, language),
+  task.performedByRole ? maintenancePerformerRoleLabel(task.performedByRole, language) : undefined,
+  task.status === "scheduled" ? (language === "ar" ? "مجدولة" : "Scheduled") : task.status === "in_progress" ? (language === "ar" ? "قيد التنفيذ" : "In progress") : task.status === "completed" ? (language === "ar" ? "مكتملة" : "Completed") : (language === "ar" ? "ملغاة" : "Cancelled"),
   task.expenseFundingEntity ? expenseFundingEntityLabel(task.expenseFundingEntity, language) : undefined,
   task.expenseFundingChannel ? expenseFundingChannelLabel(task.expenseFundingChannel, language) : undefined,
   task.expenseFundingMode ? expenseFundingModeLabel(task.expenseFundingMode, language) : undefined,
   task.expenseFundingSourceLabel,
   maintenanceAttribution(task, language)?.label,
-].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" ").toLowerCase();
+].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" "));
 
-/** نص قابل للبحث لكل أصل ضمن المخزون: الاسم، الشاليه، الرقم التسلسلي، سعر الشراء، التصنيف والحالة. */
-const assetSearchText = (asset: Asset, language: "ar" | "en") => [
+/** نص قابل للبحث لكل أصل ضمن المخزون (موحّد عربيًا): الاسم، الشاليه، الرقم التسلسلي، سعر الشراء، التصنيف والحالة. */
+const assetSearchText = (asset: Asset, language: "ar" | "en") => normalizeArabic([
   asset.name,
   asset.chaletName,
   asset.serialNumber,
-  asset.purchaseCost !== undefined ? String(asset.purchaseCost) : undefined,
+  asset.purchaseCost !== undefined ? `${asset.purchaseCost} د.أ JOD` : undefined,
   ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1],
   assetConditionLabel(asset.condition, language),
-].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" ").toLowerCase();
+].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" "));
 
 export default function MaintenanceDashboard() {
   const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, addExpense, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
@@ -256,7 +258,7 @@ export default function MaintenanceDashboard() {
 
   const visibleTasks = useMemo(() => {
     const pool = tab === "archive" ? archiveTasks : activeTasks;
-    const query = searchQuery.trim().toLowerCase();
+    const query = normalizeArabic(searchQuery);
     const matchesDate = (task: MaintenanceTask) => {
       if (dateFilter !== null) return task.nextDueDate === dateFilter;
       if (horizon === "today") return task.nextDueDate === todayISO;
@@ -268,7 +270,7 @@ export default function MaintenanceDashboard() {
   }, [tab, activeTasks, archiveTasks, dateFilter, horizon, todayISO, unitFilter, cadenceFilter, searchQuery, language]);
 
   const visibleAssets = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = normalizeArabic(searchQuery);
     return (assets ?? []).filter((asset) => (query === "" || assetSearchText(asset, language).includes(query)) && (unitFilter === null || asset.chaletId === unitFilter));
   }, [assets, searchQuery, unitFilter, language]);
 
@@ -589,10 +591,10 @@ export default function MaintenanceDashboard() {
             const hasTaskOnDate = activeTasks.some((task) => task.nextDueDate === date);
             const weekday = ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()];
             const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;
-            const strong = framed || inWindow || isCustomInside;
+            const strong = framed || inWindow || isCustomInside || isCustomEdge;
             const topColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
             const dayColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }, isCustomEdge ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderTopWidth: 1, borderBottomWidth: 1 } : isCustomInside ? { backgroundColor: "#F59E0B26", borderColor: "#F59E0B4D", borderTopWidth: 1, borderBottomWidth: 1 } : null]}>
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }, isCustomEdge ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 9 } : isCustomInside ? { backgroundColor: "#F59E0B33", borderColor: "#F59E0B4D", borderTopWidth: 1, borderBottomWidth: 1 } : null]}>
               <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
               <Text style={{ color: dayColor, fontSize: 14, fontWeight: strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
               <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent" }]} />
@@ -615,6 +617,11 @@ export default function MaintenanceDashboard() {
         <TextInput accessibilityLabel="بحث ذكي شامل" value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)" : "Smart search (task, asset, performer, unit, cost, notes, date...)"} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
         {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={16} color={colors.muted} /></Pressable> : null}
       </View>
+      {searchActive ? <View style={[styles.feedbackChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "44", flexDirection: row, marginTop: 6 }]}>
+        <MaterialIcons name="info-outline" size={13} color={colors.primary} />
+        <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "700", textAlign: align }}>{tab === "assets" ? `${visibleAssets.length} ${language === "ar" ? "نتيجة مطابقة" : "matching assets"}: "${searchQuery.trim()}"` : `${visibleTasks.length} ${language === "ar" ? "نتيجة مطابقة" : "matching tasks"}: "${searchQuery.trim()}"}`}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={14} color={colors.muted} /></Pressable>
+      </View> : null}
       <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
         {unitMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "كافة الوحدات" : "All units"} onPress={() => { setUnitFilter(null); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: unitFilter === null ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={unitFilter === null ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: unitFilter === null ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "كافة الوحدات" : "All units"}</Text></Pressable>
@@ -647,16 +654,16 @@ export default function MaintenanceDashboard() {
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.taskIcon, { backgroundColor: tone.color + "18" }]}><MaterialIcons name={tone.icon} size={20} color={tone.color} /></View>
             <View style={styles.flex}>
-              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{allUnits ? <View style={[styles.badgePill, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "تشمل كافة الوحدات" : "All units"}</Text></View> : null}{posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "#مصروف" : "#Expense"}</Text></View> : null}</View>
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{allUnits ? <View style={[styles.badgePill, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "تشمل كافة الوحدات" : "All units"}</Text></View> : null}{posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "#مصروف" : "#Expense"}</Text></View> : null}</View>
               <View style={[styles.badgeRow, { flexDirection: row }]}>
-                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="holiday-village" size={11} color={colors.muted} /><HighlightedText text={unitLabel} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
-                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="refresh" size={11} color={colors.muted} /><HighlightedText text={maintenanceFrequencyLabel(task.frequency, language)} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
-                <View style={[styles.badgePill, { backgroundColor: dueColor + "18", borderColor: dueColor + "44" }]}><MaterialIcons name="event" size={11} color={dueColor} /><HighlightedText text={`${language === "ar" ? "استحقاق:" : "Due:"} ${formatDate(task.nextDueDate) ?? task.nextDueDate}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: dueColor, fontSize: 9, fontWeight: "800" }} /></View>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="holiday-village" size={11} color={colors.muted} /><HighlightedText text={unitLabel} query={searchQuery} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="refresh" size={11} color={colors.muted} /><HighlightedText text={maintenanceFrequencyLabel(task.frequency, language)} query={searchQuery} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
+                <View style={[styles.badgePill, { backgroundColor: dueColor + "18", borderColor: dueColor + "44" }]}><MaterialIcons name="event" size={11} color={dueColor} /><HighlightedText text={`${language === "ar" ? "استحقاق:" : "Due:"} ${formatDate(task.nextDueDate) ?? task.nextDueDate}`} query={searchQuery} numberOfLines={1} style={{ color: dueColor, fontSize: 9, fontWeight: "800" }} /></View>
                 {posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18", borderColor: colors.success + "44" }]}><MaterialIcons name="receipt-long" size={11} color={colors.success} /><Text numberOfLines={1} style={{ color: colors.success, fontSize: 9, fontWeight: "800" }}>{language === "ar" ? "مُرحَّل للمصروفات" : "Expense posted"}</Text></View> : null}
               </View>
-              {task.actualCost !== undefined || task.cost ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost ?? task.cost} ${language === "ar" ? "د.أ" : "JOD"}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
-              {task.status === "completed" && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
-              {attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery.trim().toLowerCase()} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
+              {task.actualCost !== undefined || task.cost ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost ?? task.cost} ${language === "ar" ? "د.أ" : "JOD"}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {task.status === "completed" && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
             </View>
             <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
               <View style={[styles.cardSideTop, { flexDirection: row }]}>
@@ -688,12 +695,12 @@ export default function MaintenanceDashboard() {
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.archiveIcon, { backgroundColor: (settled ? colors.success : colors.muted) + "1A" }]}><MaterialIcons name={settled ? "done-all" : "cancel"} size={18} color={settled ? colors.success : colors.muted} /></View>
             <View style={styles.flex}>
-              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{!settled ? <View style={[styles.badgePill, { backgroundColor: colors.muted + "18" }]}><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "ملغاة" : "Cancelled"}</Text></View> : posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سند صرف مرتبط" : "Receipt linked"}</Text></View> : null}</View>
-              <HighlightedText text={`${unitLabel} · ${maintenanceFrequencyLabel(task.frequency, language)}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
-              {settled && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
-              {settled && task.actualCost !== undefined ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost} ${language === "ar" ? "د.أ" : "JOD"}${posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
-              {settled && attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery.trim().toLowerCase()} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
-              {settledDate ? <HighlightedText text={`${language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: ${formatDate(settledDate) ?? settledDate}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{!settled ? <View style={[styles.badgePill, { backgroundColor: colors.muted + "18" }]}><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "ملغاة" : "Cancelled"}</Text></View> : posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سند صرف مرتبط" : "Receipt linked"}</Text></View> : null}</View>
+              <HighlightedText text={`${unitLabel} · ${maintenanceFrequencyLabel(task.frequency, language)}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
+              {settled && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {settled && task.actualCost !== undefined ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost} ${language === "ar" ? "د.أ" : "JOD"}${posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {settled && attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
+              {settledDate ? <HighlightedText text={`${language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: ${formatDate(settledDate) ?? settledDate}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
             </View>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "سجل الإجراءات" : "Action log"} onPress={() => setAuditFor(task.id)} style={({ pressed }) => [styles.archiveLogBtn, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="history" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "800" }}>{language === "ar" ? "سجل الإجراءات" : "Action log"}</Text></Pressable>
@@ -706,9 +713,9 @@ export default function MaintenanceDashboard() {
         return <Pressable key={asset.id} accessibilityRole="button" accessibilityLabel={asset.name} onPress={() => openEditAssetSheet(asset)} disabled={!canManage || Boolean(busy)} style={({ pressed }) => [styles.card, { backgroundColor: colors.surface, borderColor: asset.condition === "needs_service" ? colors.error + "66" : colors.border, opacity: pressed ? 0.72 : 1 }]}>
           <View style={[styles.taskIcon, { backgroundColor: conditionColor + "18" }]}><MaterialIcons name={condition?.icon ?? "inventory"} size={20} color={conditionColor} /></View>
           <View style={styles.flex}>
-            <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={asset.name} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} /><View style={[styles.badgePill, { backgroundColor: conditionColor + "18" }]}><Text style={{ color: conditionColor, fontSize: 9, fontWeight: "900" }}>{assetConditionLabel(asset.condition, language)}</Text></View></View>
-            <HighlightedText text={`${asset.chaletName ?? "—"} · ${ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1] ?? asset.category}${asset.serialNumber ? ` · ${asset.serialNumber}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
-            {asset.purchaseCost !== undefined ? <HighlightedText text={`${language === "ar" ? "تكلفة الشراء" : "Purchase cost"}: ${asset.purchaseCost} ${language === "ar" ? "د.أ" : "JOD"}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+            <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={asset.name} query={searchQuery} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} /><View style={[styles.badgePill, { backgroundColor: conditionColor + "18" }]}><Text style={{ color: conditionColor, fontSize: 9, fontWeight: "900" }}>{assetConditionLabel(asset.condition, language)}</Text></View></View>
+            <HighlightedText text={`${asset.chaletName ?? "—"} · ${ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1] ?? asset.category}${asset.serialNumber ? ` · ${asset.serialNumber}` : ""}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
+            {asset.purchaseCost !== undefined ? <HighlightedText text={`${language === "ar" ? "تكلفة الشراء" : "Purchase cost"}: ${asset.purchaseCost} ${language === "ar" ? "د.أ" : "JOD"}`} query={searchQuery} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف الأصل" : "Delete asset"} onPress={() => removeAsset(asset)} disabled={Boolean(busy)} style={({ pressed }) => [styles.iconDanger, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={18} color={colors.muted} /></Pressable>
         </Pressable>;
@@ -982,6 +989,7 @@ const styles = StyleSheet.create({
   filterDot: { width: 8, height: 8, borderRadius: 4 },
   searchWrap: { flex: 1, minWidth: 0, maxWidth: 480, alignItems: "center", gap: 6, minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700", padding: 0 },
+  feedbackChip: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, alignItems: "center", gap: 6 },
   toolbarMenuAnchor: { position: "relative", flexShrink: 1, maxWidth: 175, minWidth: 110 },
   toolbarSelect: { minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", gap: 5 },
   toolbarMenu: { position: "absolute", top: "100%", marginTop: 8, minWidth: 200, maxWidth: 280, borderRadius: 12, borderWidth: 1, overflow: "hidden", zIndex: 50 },

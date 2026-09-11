@@ -8,12 +8,12 @@ const reports = readFileSync(resolve(process.cwd(), "app/(tabs)/reports.tsx"), "
 describe("expenses management", () => {
   it("opens a full expense form with general scope and required financial fields", () => {
     expect(screen).toContain("إضافة مصروف");
-    expect(screen).toContain("جميع الشاليهات / مصروف عام");
+    expect(screen).toContain("كافة الشاليهات / مصروف عام");
     expect(screen).toContain("رواتب ومكافآت");
     expect(screen).toContain("كهرباء ومياه");
     expect(screen).toContain("تحويل CliQ");
     expect(screen).toContain("البيان / ملاحظات المصروف");
-    expect(screen).toContain("اختر نطاق المصروف أولًا");
+    expect(screen).toContain("المبلغ (د.أ)");
     expect(screen).toContain("اختر نطاق المصروف");
   });
 
@@ -35,7 +35,7 @@ describe("expenses management", () => {
     expect(screen).toContain("rtlChoiceRow");
     expect(screen).toContain("alignSelf: \"flex-end\"");
     expect(screen).toContain('name="check-circle"');
-    expect(screen).toContain("editable={Boolean(scope)}");
+    expect(screen).toContain('accessibilityRole="checkbox"');
     expect(screen).toContain('useState<"cash" | "click" | null>(null)');
     expect(screen).toContain("اختر طريقة الصرف");
     expect(screen).toContain("حدد كاش أو تحويل CliQ قبل حفظ المصروف");

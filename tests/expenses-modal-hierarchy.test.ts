@@ -32,13 +32,13 @@ describe("expenses modal hierarchy and validation", () => {
     expect(screen).toContain("styles.amountInput");
     expect(screen).toContain('"د.أ"');
     expect(screen).toContain("setAmountError(false)");
-    expect(screen).toContain("اختر نطاق المصروف أولًا");
+    expect(screen).toContain("يرجى اختيار شاليه واحد على الأقل");
   });
 
   it("highlights invalid mandatory fields in rose-500 with inline helper text and never fails silently", () => {
     expect(screen).toContain("#F43F5E");
     expect(screen).toContain("يرجى كتابة بيان المصروف");
-    expect(screen).toContain("يرجى تحديد الشاليه");
+    expect(screen).toContain("يرجى اختيار شاليه واحد على الأقل");
     expect(screen).toContain("يرجى اختيار طريقة السداد");
     expect(screen).toContain("أدخل مبلغ المصروف (أكبر من صفر)");
     expect(screen).toContain('scrollToField("scope")');

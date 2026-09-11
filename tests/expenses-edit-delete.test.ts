@@ -13,8 +13,8 @@ describe("expenses UI/UX overhaul: zero-default form, cascading dropdowns, edit,
   it("starts with zero pre-selection: no default category or implicit funding", () => {
     expect(screen).toContain("useState<ExpenseCategory | null>(null)");
     expect(screen).toContain('setCategory(null);');
-    expect(screen).toMatch(/useState<ExpenseScope>\(null\)/);
-    expect(screen).toContain("اختر الشاليه...");
+    expect(screen).toMatch(/useState<string\[\]>\(\[\]\)/);
+    expect(screen).toContain("كافة الشاليهات / مصروف عام");
     expect(screen).toContain("اختر التصنيف...");
     expect(screen).toContain("اختر مصدر التمويل...");
   });
@@ -28,13 +28,13 @@ describe("expenses UI/UX overhaul: zero-default form, cascading dropdowns, edit,
     expect(screen).toContain("ExpenseDropdownSheet");
     expect(screen).toContain("ExpenseDropdownField");
     expect(screen).toContain('name="check-circle"');
-    expect(screen).toContain('setDropdown({ kind: "scope" })');
+    expect(screen).toContain('toggleAllChalets');
     expect(screen).toContain('setDropdown({ kind: "staffMode" })');
   });
 
   it("validates every mandatory field in rose with inline errors and auto-scroll to the first invalid field", () => {
     expect(screen).toContain("#F43F5E");
-    expect(screen).toContain("يرجى تحديد الشاليه");
+    expect(screen).toContain("يرجى اختيار شاليه واحد على الأقل");
     expect(screen).toContain("يرجى اختيار تصنيف المصروف");
     expect(screen).toContain("يرجى تحديد مصدر التمويل");
     expect(screen).toContain("يرجى اختيار قناة الصرف والحساب");

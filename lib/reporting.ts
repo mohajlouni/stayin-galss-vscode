@@ -135,6 +135,73 @@ export function staffFloatStatements(data: Pick<AppData, "bookings" | "staffFloa
   }).filter((statement) => statement.collectedTotal > 0 || statement.settledTotal > 0 || statement.outstanding > 0 || statement.reimbursementDue > 0 || statement.float.isActive);
 }
 
+/** عزل الموظف: يُرجع فقط كشوف العُهد المرتبطة بمعرّف المستخدم نفسه (memberUserId) ولا يجلب عُهد الموظفين الآخرين أبدًا. */
+export function staffFloatStatementsForUser(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, userId: number | undefined): StaffFloatStatement[] {
+  if (!Number.isInteger(userId) || !userId) return [];
+  return staffFloatStatements(data).filter((statement) => statement.float.memberUserId === userId);
+}
+
+/** نوع حركة في كشف حساب الموظف الشخصي (سجل حركات العهدة المستقّل). */
+export type StaffFloatLedgerEntryKind = "rental-collected" | "deposit-collected" | "float-expense" | "settled-transfer";
+
+/** سطر فردي في كشف الحساب مع رصيد جارٍ تراكمي يعادل الذمة الفعلية. */
+export type StaffFloatLedgerEntry = {
+  id: string;
+  kind: StaffFloatLedgerEntryKind;
+  /** تاريخ الفرز (YYYY-MM-DD) لعرضه في السجل. */
+  date: string;
+  /** طابع زمني دقيق لترتيب الحركات كرونولوجيًا. */
+  at: string;
+  label: string;
+  /** موجب (+) إلى العهدة أو سالب (-) خرج منها. */
+  amount: number;
+  /** الرصيد الجاري بعد هذه الحركة. */
+  runningBalance: number;
+};
+
+/** كشف حساب الموظف: تحصيل إيجار (+)، تأمين بحوزته (+)، مصروفات عهدة (-)، توريدات مؤكدة للمالك (-) — بترتيب كرونولوجي ورصيد جارٍ. */
+export function staffFloatLedgerForUser(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, userId: number | undefined): { float: StaffFloatAccount | undefined; entries: StaffFloatLedgerEntry[]; netBalance: number } {
+  if (!Number.isInteger(userId) || !userId) return { float: undefined, entries: [], netBalance: 0 };
+  const float = staffFloatAccounts(data.settings).find((account) => account.memberUserId === userId);
+  if (!float) return { float: undefined, entries: [], netBalance: 0 };
+  const floatId = float.id;
+  const target = `float-${floatId}`;
+  const entries: Array<Omit<StaffFloatLedgerEntry, "runningBalance">> = [];
+  for (const booking of data.bookings ?? []) {
+    for (const payment of booking.payments ?? []) {
+      if (payment.voidedAt || payment.recipientTargetId !== target) continue;
+      const amount = Math.max(0, Number(payment.amount || 0));
+      if (amount <= 0) continue;
+      entries.push({ id: payment.id, kind: "rental-collected", date: payment.date, at: payment.recordedAt ?? booking.createdAt ?? payment.date, label: `${booking.customerName}${booking.chaletName ? ` · ${booking.chaletName}` : ""}`, amount });
+    }
+    const deposit = booking.depositCollection;
+    if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target) {
+      const amount = Math.max(0, Number(deposit.amount || 0));
+      if (amount > 0) entries.push({ id: deposit.id ?? `deposit-${booking.id}`, kind: "deposit-collected", date: deposit.date, at: deposit.recordedAt ?? booking.createdAt ?? deposit.date, label: `${booking.customerName}${booking.chaletName ? ` · ${booking.chaletName}` : ""}`, amount });
+    }
+  }
+  for (const expense of data.expenses ?? []) {
+    if (expense.isFloatExpense !== true || expense.fundingSourceId !== floatId) continue;
+    const amount = Math.max(0, Number(expense.amount || 0));
+    if (amount <= 0) continue;
+    entries.push({ id: expense.id, kind: "float-expense", date: expense.date, at: expense.createdAt ?? expense.date, label: expense.note ?? expense.category, amount: -amount });
+  }
+  for (const settlement of data.staffFloatSettlements ?? []) {
+    if (settlement.floatId !== floatId || settlement.status === "PENDING_APPROVAL" || settlement.status === "REJECTED") continue;
+    const amount = Math.max(0, Number(settlement.amount || 0));
+    if (amount <= 0) continue;
+    entries.push({ id: settlement.id, kind: "settled-transfer", date: settlement.settlementDate ?? settlement.settledAt.slice(0, 10), at: settlement.settledAt, label: settlement.recipientAccountLabel ?? "الخزينة المركزية", amount: -amount });
+  }
+  entries.sort((left, right) => left.at.localeCompare(right.at) || left.date.localeCompare(right.date) || left.id.localeCompare(right.id));
+  let running = 0;
+  const ledgerEntries: StaffFloatLedgerEntry[] = entries.map((entry) => {
+    const runningBalance = Math.round((running += entry.amount) * 100) / 100;
+    return { ...entry, runningBalance } satisfies StaffFloatLedgerEntry;
+  });
+  const netBalance = ledgerEntries.length ? ledgerEntries[ledgerEntries.length - 1].runningBalance : 0;
+  return { float, entries: ledgerEntries, netBalance: Math.round(netBalance * 100) / 100 };
+}
+
 function summarizeCollectionSettlements(bookings: Booking[]): CollectionSettlement[] {
   const groups = new Map<string, CollectionSettlement>();
   collectionPaymentEvents(bookings).forEach((payment) => {

@@ -42,7 +42,7 @@ export default function SettingsScreen() {
   const { settings, updateSettings, exportBackup, openBackupForPreview } = useBookings();
   const { isRTL, language } = useI18n();
   const { deviceSettings, deviceLanguage, deviceTimezone, formatDate, formatTime, updateDeviceSettings, triggerHaptic, languageChangeStatus, acknowledgeLanguageChange, restartApp } = useAppPreferences();
-  const { isManager, activeWorkspaceId } = useWorkspaceAccess();
+  const { isManager, activeWorkspaceId, can } = useWorkspaceAccess();
   const globalFlags = useGlobalFeatureFlags();
   const featureFlags = useWorkspaceFeatureFlags(activeWorkspaceId);
   const [loadingDemo, setLoadingDemo] = useState(false);
@@ -257,7 +257,7 @@ export default function SettingsScreen() {
           {sectionTitle(language === "ar" ? "الفريق والصلاحيات" : "Staff & permissions")}
           <SettingsRow icon="group" title={language === "ar" ? "إدارة الأدوار والموظفين" : "Staff & RBAC management"} subtitle={language === "ar" ? "حراس ومديري حجوزات وضبط الصلاحيات والدعوات" : "Guards, booking managers, invitations, and permissions"} onPress={() => router.push("/user-management" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} />
           <SettingsRow icon="health-and-safety" title={language === "ar" ? "أدوات متقدمة وطوارئ" : "Advanced tools & recovery"} subtitle={language === "ar" ? "نقل الحجوزات وفك التعليق والاستعادة برقابة PIN" : "Move bookings, release holds, and recover data with owner PIN"} onPress={() => router.push("/settings/advanced-tools" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} />
-          <SettingsRow icon="history" title={language === "ar" ? "سجل إجراءات النظام" : "System activity log"} subtitle={language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions"} onPress={() => router.push("/audit-log" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} />
+          {can("view_audit_logs") ? <SettingsRow icon="history" title={language === "ar" ? "سجل إجراءات النظام" : "System activity log"} subtitle={language === "ar" ? "متابعة الحذف والإلغاء والتحويل والحركات المؤثرة" : "Track deletions, cancellations, promotions, and critical actions"} onPress={() => router.push("/audit-log" as never)} trailing={<MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.primary} />} /> : null}
 
           <View style={styles.divider} />
 

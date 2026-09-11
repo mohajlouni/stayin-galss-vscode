@@ -1017,6 +1017,8 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!isAuthenticated || isGuest) throw new Error("float-request-forbidden");
       const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
       if (!account) throw new Error("float-account-not-found");
+      const ownsFloat = Number.isInteger(account.memberUserId) && account.memberUserId === user?.id;
+      if (!isManager && !ownsFloat) throw new Error("float-request-forbidden");
       const outstanding = staffFloatOutstanding(data, floatId);
       if (outstanding <= 0.005) throw new Error("float-nothing-to-settle");
       const amount = Number(input.amount);

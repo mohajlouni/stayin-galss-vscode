@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 
 import { ScreenBackButton } from "@/components/screen-back-button";
@@ -64,6 +64,9 @@ const ROLLER_RANGE_OPTIONS: { id: "today" | "7" | "30" | "all"; label: [string, 
   { id: "30", label: ["خلال 30 يوماً", "Next 30 days"] },
   { id: "all", label: ["الكل", "All"] },
 ];
+/** يرجع تاريخاً أسبوعياً سابقاً عن التاريخ المعطى (نسخة معكوسة من addDays للأسهم العكسية). */
+const subDays = (date: string, amount: number) => addDays(date, -amount);
+
 /** يبني قائمة تواريخ متسلسلة ضمن [start..end] مع سقف أمان ضد الأفق الضخم. */
 const buildDateRange = (start: string, end: string, cap = 120) => {
   const list: string[] = [];
@@ -189,6 +192,8 @@ export default function MaintenanceDashboard() {
   const rollerRef = useRef<ScrollView | null>(null);
   const rollerOffsetRef = useRef(0);
   const inFlight = useRef(false);
+  /** مرساة الشريط الزمني: تقدمها أسهم التنقل أسبوعاً كاملاً (7 أيام) وتقود تمرير النافذة. */
+  const [anchorDate, setAnchorDate] = useState(() => localDateISO(new Date()));
 
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
@@ -209,14 +214,22 @@ export default function MaintenanceDashboard() {
 
   /** تواريخ الشريط الزمني الأفقي؛ يسبق اليوم دائماً يومان من الماضي ليبقى أسبوع التصفح مكتملاً، ويمتد حتى +59 يوماً. */
   /** الشريط الزمني مستمر دائماً: من [قبل يومين] ثم اليوم حتى +59 يوماً (62 خلية). لا يتقلص أبداً عند تبديل أفاق الفلترة. */
+  /** نافذة مخصصة كاملة: تُبقي 14 يوماً صامتة قبل الفترة وبعدها لتظل أيام قبل/بعد المجال ظاهرة للتنقل، وتمتد مع مرساة الأسهم عند الحاجة. */
   const timelineDates = useMemo(() => {
     const preStart = addDays(todayISO, -2);
-    const customStart = rollerRange.kind === "custom" && rollerRange.start ? rollerRange.start : "";
-    const start = customStart && customStart < preStart ? customStart : preStart;
-    const horizonEnd = rollerRange.kind === "custom" && rollerRange.end ? rollerRange.end : addDays(todayISO, 59);
-    const end = horizonEnd >= start ? horizonEnd : addDays(todayISO, 59);
-    return buildDateRange(start, end, 120);
-  }, [rollerRange, todayISO]);
+    const defaultEnd = addDays(todayISO, 59);
+    let start = preStart;
+    let end = defaultEnd;
+    if (rollerRange.kind === "custom" && rollerRange.start && rollerRange.end) {
+      const padStart = addDays(rollerRange.start, -14);
+      const padEnd = addDays(rollerRange.end, 14);
+      if (padStart < start) start = padStart;
+      if (padEnd > end) end = padEnd;
+    }
+    const anchorEnd = addDays(anchorDate, 7);
+    if (anchorEnd > end) end = anchorEnd;
+    return buildDateRange(start, end, 160);
+  }, [rollerRange, todayISO, anchorDate]);
 
   /** قائمة المنفّذين المحتملين: المستخدم الحالي ثم عهدة الموظفين ثم حرّاس الوحدات، بدون تكرار. */
   const performerOptions = useMemo<PerformerOption[]>(() => {
@@ -543,12 +556,22 @@ export default function MaintenanceDashboard() {
     if (id === "today" || id === "7") rollerRef.current?.scrollTo({ x: 0, animated: true });
     setRangePanelOpen(false);
   };
-  /** يمرر الشريط الزمني أفقياً بمقدار أسبوع كامل (7 أيام) لكل ضغطة، ملتصقاً بحدود الأيام دون قصّ خلية. */
+  /** يحوّل مرساة الشريط أسبوعاً كاملاً (7 أيام) لكل ضغطة ويتبعها بتمرير نافذة عرض الشريط — تحدث حالة حتى لو لم يتغير مدى القائمة. */
   const nudgeRoller = (weeks: number) => {
+    setAnchorDate((prev) => (weeks > 0 ? addDays(prev, 7) : subDays(prev, 7)));
     const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
     const target = Math.min(Math.max(rollerOffsetRef.current + weeks * 7 * ROLLER_PILL_STEP, 0), max);
     rollerRef.current?.scrollTo({ x: target, animated: true });
   };
+  /** يُبقي مرساة اليوم/الفترة المختارة في مقدمة النافذة بعد كل تنقّل حتى لا تضيع الأيام خارج الشاشة. */
+  useEffect(() => {
+    if (!rollerRef.current) return;
+    const index = timelineDates.indexOf(anchorDate);
+    if (index < 0) return;
+    const raw = index * ROLLER_PILL_STEP;
+    const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
+    rollerRef.current?.scrollTo({ x: Math.min(Math.max(raw - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
+  }, [anchorDate, timelineDates]);
   const openRangePanel = () => {
     if (!rangePanelOpen) setRangeDraft(rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? { start: rollerRange.start, end: rollerRange.end } : { start: todayISO, end: "" });
     setRangePanelOpen(!rangePanelOpen);
@@ -559,6 +582,7 @@ export default function MaintenanceDashboard() {
     if (start && end && start <= end) setRollerRange({ kind: "custom", start, end });
     else if (start) setRollerRange({ kind: "custom", start, end: start });
     else setRollerRange({ kind: "all" });
+    if (start) setAnchorDate(start);
     setRangePanelOpen(false);
   };
 
@@ -578,7 +602,7 @@ export default function MaintenanceDashboard() {
         <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? "#F59E0B" : colors.surface, borderColor: rollerRange.kind === "custom" ? "#F59E0B" : colors.border, shadowColor: rollerRange.kind === "custom" ? "#F59E0B" : "transparent", shadowOpacity: rollerRange.kind === "custom" ? 0.4 : 0, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: rollerRange.kind === "custom" ? 4 : 0 }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? "#0F172A" : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? "#0F172A" : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 40, elevation: 40, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
@@ -592,17 +616,17 @@ export default function MaintenanceDashboard() {
             const weekday = ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()];
             const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;
             const strong = framed || inWindow || isCustomInside || isCustomEdge;
-            const topColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
-            const dayColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }, isCustomEdge ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 9 } : isCustomInside ? { backgroundColor: "#F59E0B33", borderColor: "#F59E0B4D", borderTopWidth: 1, borderBottomWidth: 1 } : null]}>
+            const topColor = singleSelected ? "#0F172A" : isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
+            const dayColor = singleSelected ? "#0F172A" : isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, isCustomEdge ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 9 } : isCustomInside ? { backgroundColor: "#F59E0B33", borderColor: "#F59E0B4D", borderTopWidth: 1, borderBottomWidth: 1 } : singleSelected ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderRadius: 12 } : framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, singleSelected ? { shadowColor: "#F59E0B", shadowOpacity: 0.26, shadowRadius: 9, shadowOffset: { width: 0, height: 2 } } : framed ? { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } } : null]}>
               <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
-              <Text style={{ color: dayColor, fontSize: 14, fontWeight: strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
+              <Text style={{ color: dayColor, fontSize: 14, fontWeight: singleSelected ? "900" : strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
               <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent" }]} />
               {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : colors.primary }]} /> : null}
             </Pressable>;
           })}
         </ScrollView>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 40, elevation: 40, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
       </View>
     </View>
 
@@ -622,6 +646,7 @@ export default function MaintenanceDashboard() {
         <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "700", textAlign: align }}>{tab === "assets" ? `${visibleAssets.length} ${language === "ar" ? "نتيجة مطابقة" : "matching assets"}: "${searchQuery.trim()}"` : `${visibleTasks.length} ${language === "ar" ? "نتيجة مطابقة" : "matching tasks"}: "${searchQuery.trim()}"}`}</Text>
         <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={14} color={colors.muted} /></Pressable>
       </View> : null}
+      {tab !== "assets" && searchActive && dateFilter !== null && visibleTasks.length === 0 ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "عرض النتائج ضمن الكل" : "Show results in All"} onPress={() => selectHorizon("all")} style={({ pressed }) => [styles.zeroHitShortcut, { backgroundColor: "#F59E0B" + "14", borderColor: "#F59E0B" + "55", flexDirection: row, opacity: pressed ? 0.75 : 1, marginTop: 6 }]}><MaterialIcons name="search" size={13} color="#F59E0B" /><Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "800", textAlign: align }}>{language === "ar" ? "لم يتم العثور على نتائج ضمن هذه الفترة — عرض النتائج في (الكل)" : "No results within this period — show results in (All)"}</Text><MaterialIcons name="chevron-right" size={15} color="#F59E0B" /></Pressable> : null}
       <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
         {unitMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "كافة الوحدات" : "All units"} onPress={() => { setUnitFilter(null); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: unitFilter === null ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={unitFilter === null ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: unitFilter === null ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "كافة الوحدات" : "All units"}</Text></Pressable>
@@ -990,6 +1015,7 @@ const styles = StyleSheet.create({
   searchWrap: { flex: 1, minWidth: 0, maxWidth: 480, alignItems: "center", gap: 6, minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10 },
   searchInput: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700", padding: 0 },
   feedbackChip: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, alignItems: "center", gap: 6 },
+  zeroHitShortcut: { borderRadius: 11, borderWidth: 1, maxWidth: 480, alignSelf: "stretch", minHeight: 34, paddingHorizontal: 11, alignItems: "center", gap: 6 },
   toolbarMenuAnchor: { position: "relative", flexShrink: 1, maxWidth: 175, minWidth: 110 },
   toolbarSelect: { minHeight: 40, borderRadius: 12, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", gap: 5 },
   toolbarMenu: { position: "absolute", top: "100%", marginTop: 8, minWidth: 200, maxWidth: 280, borderRadius: 12, borderWidth: 1, overflow: "hidden", zIndex: 50 },

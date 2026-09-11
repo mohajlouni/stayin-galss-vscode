@@ -153,7 +153,51 @@ describe("interactive strip chevrons", () => {
     expect(source).toContain("event?.stopPropagation?.(); nudgeRoller(1);");
     expect(source).toContain("event?.stopPropagation?.(); nudgeRoller(-1);");
     expect(source).toContain('pointerEvents="auto"');
-    expect(source).toContain("zIndex: 30");
+    expect(source).toContain("zIndex: 40");
     expect(source).toContain('cursor: "pointer", userSelect: "none"');
+  });
+});
+
+describe("roller anchor stepping (week chevrons move the strip)", () => {
+  it("drives the chevrons through a real anchorDate state stepping exactly 7 days", () => {
+    const source = dashboard();
+    expect(source).toContain("const [anchorDate, setAnchorDate] = useState(");
+    expect(source).toContain("setAnchorDate((prev) => (weeks > 0 ? addDays(prev, 7) : subDays(prev, 7)));");
+    expect(source).toContain("const subDays = (date: string, amount: number) => addDays(date, -amount);");
+    expect(source).toContain("عرض النتائج في (الكل)");
+  });
+
+  it("re-anchors the strip when applying a custom range so the window sits around it", () => {
+    const source = dashboard();
+    expect(source).toContain("if (start) setAnchorDate(start);");
+  });
+});
+
+describe("single-selected date chip in brand amber", () => {
+  it("paints the picked day solid amber with slate-950 text and font-black weight", () => {
+    const source = dashboard();
+    expect(source).toContain("const topColor = singleSelected ? \"#0F172A\" : isCustomEdge ? \"#0F172A\"");
+    expect(source).toContain("singleSelected ? { backgroundColor: \"#F59E0B\", borderColor: \"#F59E0B\", borderRadius: 12 }");
+    expect(source).toContain('fontWeight: singleSelected ? "900"');
+  });
+});
+
+describe("strip stays full-window around a custom range (no truncation)", () => {
+  it("always spans the default today-window and pads ±14 days around custom bounds", () => {
+    const source = dashboard();
+    expect(source).toContain("const preStart = addDays(todayISO, -2);");
+    expect(source).toContain("const defaultEnd = addDays(todayISO, 59);");
+    expect(source).toContain("const padStart = addDays(rollerRange.start, -14);");
+    expect(source).toContain("const padEnd = addDays(rollerRange.end, 14);");
+    expect(source).toContain("return buildDateRange(start, end, 160);");
+  });
+});
+
+describe("the calendar single-day selection matches the amber day strip", () => {
+  it("uses solid amber for the selected day instead of the app primary colour", () => {
+    const source = picker();
+    expect(source).toContain('isSelected ? "#F59E0B" : isToday');
+    expect(source).toContain('isSelected ? "#0F172A" : isToday');
+    expect(source).toContain('isSelected ? "#0F172A" : colors.primary');
   });
 });

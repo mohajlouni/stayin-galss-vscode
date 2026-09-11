@@ -156,11 +156,11 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect, range }:
             const isToday = date === today;
             const isRangeEdge = Boolean(range && range.start && range.end && (date === range.start || date === range.end));
             const isInRange = Boolean(range && range.start && range.end && date > range.start && date < range.end);
-            const dayBackground = isRangeEdge ? "#F59E0B" : isInRange ? "#F59E0B33" : isSelected ? colors.primary : isToday ? colors.primary + "16" : colors.glassInset;
-            const dayText = isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? colors.background : isToday ? colors.primary : colors.foreground;
+            const dayBackground = isRangeEdge ? "#F59E0B" : isInRange ? "#F59E0B33" : isSelected ? "#F59E0B" : isToday ? colors.primary + "16" : colors.glassInset;
+            const dayText = isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? "#0F172A" : isToday ? colors.primary : colors.foreground;
             return <Pressable key={date} accessibilityRole="button" accessibilityLabel={`${weekdayLabel(date, language)} ${formatDate(date)}${isToday ? ` · ${language === "ar" ? "اليوم" : "today"}` : ""}`} onPress={() => onSelect(date)} style={({ pressed }) => [styles.day, { backgroundColor: dayBackground, borderTopWidth: isInRange ? 1 : 0, borderBottomWidth: isInRange ? 1 : 0, borderColor: isInRange ? "#F59E0B4D" : "transparent", shadowColor: isRangeEdge ? "#F59E0B" : "transparent", shadowOpacity: isRangeEdge ? 0.5 : 0, shadowRadius: isRangeEdge ? 6 : 0, shadowOffset: isRangeEdge ? { width: 0, height: 2 } : { width: 0, height: 0 }, elevation: isRangeEdge ? 4 : 0, opacity: pressed ? 0.68 : 1 }]}>
               <Text style={{ color: dayText, fontSize: 13, fontWeight: "900" }}>{Number(date.slice(-2))}</Text>
-              {isToday ? <View style={[styles.todayDot, { backgroundColor: isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? colors.background : colors.primary }]} /> : null}
+              {isToday ? <View style={[styles.todayDot, { backgroundColor: isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? "#0F172A" : colors.primary }]} /> : null}
             </Pressable>;
           })}</View>
         </>}

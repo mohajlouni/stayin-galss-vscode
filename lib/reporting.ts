@@ -2,7 +2,7 @@ import { type Booking, type Chalet, type Expense, refundableDepositAmount, remai
 
 import { expenseAmountForChalet, ledgerPaymentMethod, type Payment, type PaymentMethod, type PaymentRecipientType } from "./booking-model";
 
-import { type AppData, type FloatSettlementStatus, type StaffFloatAccount, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal, staffFloatReimbursementTotal, staffFloatReimbursementPaidTotal, staffFloatCommissionEarned } from "./booking-model";
+import { type AppData, type FloatSettlementStatus, type StaffFloatAccount, type StaffFloatSettlement, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal, staffFloatReimbursementTotal, staffFloatReimbursementPaidTotal, staffFloatCommissionEarned } from "./booking-model";
 
 export type ReportRange = "today" | "month" | "all";
 export const REPORT_PAYMENT_METHODS = ["cash-guardian", "cash-owner", "click"] as const;
@@ -159,12 +159,11 @@ export type StaffFloatLedgerEntry = {
   runningBalance: number;
 };
 
-/** كشف حساب الموظف: تحصيل إيجار (+)، تأمين بحوزته (+)، مصروفات عهدة (-)، توريدات مؤكدة للمالك (-) — بترتيب كرونولوجي ورصيد جارٍ. */
-export function staffFloatLedgerForUser(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, userId: number | undefined): { float: StaffFloatAccount | undefined; entries: StaffFloatLedgerEntry[]; netBalance: number } {
-  if (!Number.isInteger(userId) || !userId) return { float: undefined, entries: [], netBalance: 0 };
-  const float = staffFloatAccounts(data.settings).find((account) => account.memberUserId === userId);
+/** كشف حساب عهدة صدام/أحمد: تحصيل إيجار (+)، تأمين بحوزته (+)، مصروفات عهدة (-)، توريدات مؤكدة للمالك (-) — بترتيب كرونولوجي ورصيد جارٍ. */
+export function staffFloatLedgerForFloat(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, floatId: string | undefined): { float: StaffFloatAccount | undefined; entries: StaffFloatLedgerEntry[]; netBalance: number } {
+  if (!floatId) return { float: undefined, entries: [], netBalance: 0 };
+  const float = staffFloatAccounts(data.settings).find((account) => account.id === floatId);
   if (!float) return { float: undefined, entries: [], netBalance: 0 };
-  const floatId = float.id;
   const target = `float-${floatId}`;
   const entries: Array<Omit<StaffFloatLedgerEntry, "runningBalance">> = [];
   for (const booking of data.bookings ?? []) {
@@ -200,6 +199,58 @@ export function staffFloatLedgerForUser(data: Pick<AppData, "bookings" | "staffF
   });
   const netBalance = ledgerEntries.length ? ledgerEntries[ledgerEntries.length - 1].runningBalance : 0;
   return { float, entries: ledgerEntries, netBalance: Math.round(netBalance * 100) / 100 };
+}
+
+/** كشف حساب الموظف الشخصي (مستعار): يردّد عهدة المستخدم ذاتها عبر معرّف العهدة المرتبطة بعضوّيته. */
+export function staffFloatLedgerForUser(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, userId: number | undefined): { float: StaffFloatAccount | undefined; entries: StaffFloatLedgerEntry[]; netBalance: number } {
+  if (!Number.isInteger(userId) || !userId) return { float: undefined, entries: [], netBalance: 0 };
+  const float = staffFloatAccounts(data.settings).find((account) => account.memberUserId === userId);
+  if (!float) return { float: undefined, entries: [], netBalance: 0 };
+  return staffFloatLedgerForFloat(data, float.id);
+}
+
+/** حجز مغلق (حجوزات وتأمينات) ضُمَّ إلى سند توريد في الأرشيف. */
+export type SettlementArchiveBooking = { bookingId: string; customerName: string; date: string; amount: number };
+
+/** مصروف عهدة ضُمَّ إلى سند توريد في الأرشيف. */
+export type SettlementArchiveExpense = { expenseId: string; note?: string; category: string; amount: number };
+
+/** سطر في أرشيف سجل التسويات العامة: سند التوريد + بيانات الموظف + الحجوزات والمصروفات المشمولة. */
+export type SettlementArchiveEntry = {
+  settlement: StaffFloatSettlement;
+  floatId: string;
+  floatLabel: string;
+  memberName?: string;
+  staffUserId?: number;
+  bookings: SettlementArchiveBooking[];
+  expenses: SettlementArchiveExpense[];
+};
+
+/** يبني سجل أرشيف التسويات العامة (كاشف لكل الموظفين) بالحجوزات المغلقة والمصروفات المشمولة في كل سند توريد. */
+export function settlementArchiveEntries(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">): SettlementArchiveEntry[] {
+  const floatById = new Map(staffFloatAccounts(data.settings).map((account) => [account.id, account]));
+  const paymentById = new Map<string, SettlementArchiveBooking>();
+  for (const booking of data.bookings ?? []) {
+    for (const payment of booking.payments ?? []) {
+      if (payment.voidedAt) continue;
+      paymentById.set(payment.id, { bookingId: booking.id, customerName: booking.customerName, date: booking.startDate, amount: Math.max(0, Number(payment.amount || 0)) });
+    }
+    const deposit = booking.depositCollection;
+    if (deposit && !deposit.voidedAt) paymentById.set(deposit.id ?? `deposit-${booking.id}`, { bookingId: booking.id, customerName: booking.customerName, date: booking.startDate, amount: Math.max(0, Number(deposit.amount || 0)) });
+  }
+  const expenseById = new Map((data.expenses ?? []).map((expense) => [expense.id, expense]));
+  return (data.staffFloatSettlements ?? []).map((settlement) => {
+    const float = floatById.get(settlement.floatId);
+    const bookings = (settlement.coveredPaymentIds ?? []).flatMap((id) => {
+      const row = paymentById.get(id);
+      return row ? [{ ...row }] : [];
+    });
+    const expenses = (settlement.coveredExpenseIds ?? []).flatMap((id) => {
+      const expense = expenseById.get(id);
+      return expense ? [{ expenseId: id, note: expense.note, category: expense.category, amount: Math.max(0, Number(expense.amount || 0)) }] : [];
+    });
+    return { settlement, floatId: settlement.floatId, floatLabel: float?.label ?? settlement.floatId, memberName: float?.memberName, staffUserId: float?.memberUserId, bookings, expenses };
+  }).sort((left, right) => right.settlement.settledAt.localeCompare(left.settlement.settledAt));
 }
 
 function summarizeCollectionSettlements(bookings: Booking[]): CollectionSettlement[] {

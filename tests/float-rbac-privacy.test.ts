@@ -97,18 +97,23 @@ describe("CRITICAL RBAC & PRIVACY ENFORCEMENT: عزل عهدة الموظف ول
     expect(store).toContain('if (!can("manage_payments")) throw new Error("manage-payments-forbidden")');
   });
 
-  it("يخفي شاشة العُهد النظرة العامة عن الموظف ويعرض بطاقته فقط مع زرّي التوريد وكشف الحساب", () => {
+  it("يخفي شاشة العُهد النظرة العامة عن الموظف ويعرض بطاقته فقط مع زرّي التوريد وكشف الحساب والانتقال لأرشيف المالك", () => {
     const screen = readFileSync("app/float-settlements.tsx", "utf8");
-    const personal = readFileSync("app/staff-my-float.tsx", "utf8");
+    const ledger = readFileSync("app/staff-float-ledger/[staffId].tsx", "utf8");
+    const history = readFileSync("app/settlements-history.tsx", "utf8");
     expect(screen).toContain("isGlobalView");
     expect(screen).toContain("staffFloatStatementsForUser");
     expect(screen).toContain("طلب توريد وتسليم نقدية للمالك 📤");
-    expect(screen).toContain("كشف حسابي وسجل الحركات 📑");
-    expect(screen).toContain('router.push("/staff-my-float")');
+    expect(screen).toContain("سجل الحركات وكشف الحساب 📋");
+    expect(screen).toContain('router.push({ pathname: "/staff-float-ledger/[staffId]", params: { staffId: account.id } } as never)');
+    expect(screen).toContain("أرشيف وسجل التسويات العامة 🗄️");
     expect(screen).toContain("إجمالي العُهد المعلقة");
-    expect(personal).toContain("staffFloatLedgerForUser");
-    expect(personal).toContain("runningBalance");
-    expect(personal).toContain("رصيدك الحالي (ذمة معلقة)");
+    expect(ledger).toContain("staffFloatLedgerForFloat");
+    expect(ledger).toContain("runningBalance");
+    expect(ledger).toContain("الرصيد الحالي (ذمة معلقة)");
+    expect(ledger).toContain("لا يمكنك الاطلاع على كشف حساب موظف آخر");
+    expect(history).toContain('can("view_audit_logs")');
+    expect(history).toContain("settlementArchiveEntries");
   });
 
   it("يحجب الوصول إلى سجل الإجراءات العام (audit-log) عن غير المديرين على كل نقاط الدخول", () => {

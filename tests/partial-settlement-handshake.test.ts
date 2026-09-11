@@ -134,7 +134,7 @@ describe("المرحلة الخامسة: التوريد الجزئي وطلبا�
     expect(screen).toContain("طلبات توريد عهدة معلقة");
     expect(screen).toContain("طلب توريد العهدة للمالك");
     expect(screen).toContain("عمولات مستحقة للموظف (Commissions Earned)");
-    expect(screen).toContain("[عرض الحجوزات والمصروفات المشمولة]");
+    expect(screen).toContain("معاينة الحركات المشمولة في شاشة مستقلة ↗");
     expect(screen).toContain("المتبقي كعهدة معلقة بذمة الموظف");
     expect(screen).toContain("requestStaffFloatSettlement");
     expect(screen).toContain("approveStaffFloatSettlement");

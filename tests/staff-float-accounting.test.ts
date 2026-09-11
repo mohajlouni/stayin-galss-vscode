@@ -91,7 +91,7 @@ describe("العُهد النقدية ومحاسبة التأمين", () => {
     expect(store).toContain("float-account-not-found");
     expect(store).toContain("float-nothing-to-settle");
     expect(store).toContain('action: "deposit-compensation-recorded" as AuditAction');
-    expect(store).toContain("تسوية وتوريد عهدة");
+    expect(store).toContain("قام المالك بتسجيل توريد عهدة بقيمة");
     expect(backup).toContain("staffFloats");
     expect(backup).toContain("staffFloatSettlements");
     expect(backup).toContain('.regex(/^(?:owner|member-\\d+|float-[a-zA-Z0-9-]{1,64})$/)');

@@ -91,7 +91,8 @@ describe("دورة تسوية العهدة وبيع الاتجاه الثاني 
     expect(backup).toContain("clearsReimbursementForFloatId");
     expect(backup).toContain('"staff-reimbursement-paid"');
     expect(screen).toContain("settleStaffReimbursement");
-    expect(screen).toContain("سجل التسويات السابقة");
+    expect(screen).toContain("أرشيف وسجل التسويات العامة 🗄️");
+    expect(screen).toContain("/settlements-history");
     expect(screen).toContain("صرف تعويض للموظف / تصفية الذمة");
     expect(screen).toContain("إجمالي المحصل");
     expect(screen).toContain("المخصوم كفواتير مصاريف");

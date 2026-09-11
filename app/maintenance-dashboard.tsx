@@ -129,6 +129,7 @@ export default function MaintenanceDashboard() {
   const [channelError, setChannelError] = useState(false);
   const [staffError, setStaffError] = useState(false);
   const [staffModeError, setStaffModeError] = useState(false);
+  const [notesError, setNotesError] = useState(false);
   /** إعادة فتح اللوحة نفسها عند ضغط الحقل مكرراً (إغلاق/فتح)، مع الحفاظ على آخر لوحة مفتوحة عند الإغلاق الكامل. */
   const toggleCompletionDropdown = (kind: NonNullable<CompletionDropdown>["kind"]) => setCompletionDropdown((current) => current?.kind === kind ? null : { kind });
   const completionScrollRef = useRef<ScrollView>(null);
@@ -315,6 +316,7 @@ export default function MaintenanceDashboard() {
     setChannelError(false);
     setStaffError(false);
     setStaffModeError(false);
+    setNotesError(false);
     setCompletionDropdown(null);
   };
 
@@ -322,7 +324,9 @@ export default function MaintenanceDashboard() {
     if (!canOperate || busy || !completion) return;
     const performer = performerOptions.find((option) => option.id === completion.performerId);
     const needsFunding = completion.postExpense && hasPositiveActualCost(completion);
-    if (!performer || (needsFunding && !fundingReady(completion))) {
+    const needsNotes = hasPositiveActualCost(completion);
+    const notesValid = !needsNotes || completion.notes.trim().length >= 3;
+    if (!performer || (needsFunding && !fundingReady(completion)) || !notesValid) {
       let firstInvalid: string | null = null;
       if (!performer) { setPerformerError(true); firstInvalid = "performer"; }
       if (needsFunding) {
@@ -334,6 +338,7 @@ export default function MaintenanceDashboard() {
           if (!completion.staffMode) { if (!firstInvalid) firstInvalid = "staffMode"; setStaffModeError(true); }
         }
       }
+      if (!notesValid) { if (!firstInvalid) firstInvalid = "notes"; setNotesError(true); }
       if (firstInvalid) scrollToCompletionField(firstInvalid);
       else if (!performer) scrollToCompletionField("performer");
       return;
@@ -731,8 +736,11 @@ export default function MaintenanceDashboard() {
             {performerOptions.length === 0 ? <Text style={styles.fieldError}>{language === "ar" ? "لا يوجد منفّذون متاحون" : "No performers available"}</Text> : null}
             {performerError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى تحديد منفّذ المهمة" : "Please select the task performer"}</Text> : null}
           </View>
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "التكلفة الفعلية" : "Actual cost"} · {settings.currency}</Text>
-          <TextInput accessibilityLabel={language === "ar" ? "التكلفة الفعلية" : "Actual cost"} value={completion.actualCost} onChangeText={(value) => setCompletion({ ...completion, actualCost: value, postExpense: value.trim() !== "" && Number(value) > 0 })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "التكلفة الفعلية" : "Actual cost"}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginTop: 5 }}>
+            <TextInput accessibilityLabel={language === "ar" ? "التكلفة الفعلية" : "Actual cost"} value={completion.actualCost} onChangeText={(value) => setCompletion({ ...completion, actualCost: value, postExpense: value.trim() !== "" && Number(value) > 0 })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { flex: 1, backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: "right", writingDirection: "rtl" }]} />
+            <View style={{ height: 42, minWidth: 38, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 }}><Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800" }}>{language === "ar" ? "د.أ" : "JOD"}</Text></View>
+          </View>
           {hasPositiveActualCost(completion) ? <>
             <View onLayout={registerCompletionField("funding")} style={[styles.completionField, { borderColor: fundingError ? "#F43F5E" : colors.border, backgroundColor: fundingError ? "#F43F5E0D" : colors.surface }, fundingError ? styles.invalidInputGlow : null]}>
               <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "مصدر الدفع والتمويل" : "Payment & funding source"}</Text>
@@ -763,8 +771,11 @@ export default function MaintenanceDashboard() {
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "الترحيل التلقائي للمصروفات" : "Auto post expense"} disabled={!hasPositiveActualCost(completion)} onPress={() => setCompletion({ ...completion, postExpense: !completion.postExpense })} style={[styles.checkRow, { backgroundColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success + "12" : colors.surfaceMuted, borderColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.border, opacity: hasPositiveActualCost(completion) ? 1 : 0.45 }]}><MaterialIcons name={hasPositiveActualCost(completion) && completion.postExpense ? "check-box" : "check-box-outline-blank"} size={18} color={hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.muted} /><Text style={{ flex: 1, color: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "ترحيل تلقائي إلى سجل المصروفات تحت بند (صيانة وتشغيل)" : "Auto post to the expenses ledger under (Maintenance & operations)"}</Text></Pressable>
           {hasPositiveActualCost(completion) ? null : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "أدخل تكلفة فعلية أكبر من صفر لتفعيل الترحيل التلقائي للمصروفات." : "Enter an actual cost greater than zero to enable automatic expense posting."}</Text>}
           {completion.task.frequency !== "once" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "جدولة الاستحقاق القادم" : "Schedule next occurrence"} onPress={() => setCompletion({ ...completion, scheduleNext: !completion.scheduleNext })} style={[styles.checkRow, { backgroundColor: completion.scheduleNext ? colors.primary + "12" : colors.surfaceMuted, borderColor: completion.scheduleNext ? colors.primary : colors.border }]}><MaterialIcons name={completion.scheduleNext ? "check-box" : "check-box-outline-blank"} size={18} color={completion.scheduleNext ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: completion.scheduleNext ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? `جدولة الاستحقاق القادم تلقائياً (تاريخ: ${formatDate(completionNextDate) ?? completionNextDate})` : `Automatically schedule the next occurrence (date: ${formatDate(completionNextDate) ?? completionNextDate})`}</Text></Pressable> : null}
-          <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "ملاحظات الإتمام (اختياري)" : "Completion notes (optional)"}</Text>
-          <TextInput accessibilityLabel={language === "ar" ? "ملاحظات الإتمام" : "Completion notes"} value={completion.notes} onChangeText={(value) => setCompletion({ ...completion, notes: value })} multiline placeholder={language === "ar" ? "ما تم إنجازه، قطع الغيار، ملاحظات إضافية..." : "What was done, parts, extra notes..."} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+          <View onLayout={registerCompletionField("notes")} style={[styles.completionField, { borderColor: notesError ? "#F43F5E" : colors.border, backgroundColor: notesError ? "#F43F5E0D" : colors.surface }, notesError ? styles.invalidInputGlow : null]}>
+            <Text style={[styles.completionFieldLabel, { color: colors.foreground, textAlign: align }]}>{hasPositiveActualCost(completion) ? (language === "ar" ? "ملاحظات الإتمام وقطع الغيار" : "Completion notes & parts") : (language === "ar" ? "ملاحظات الإتمام (اختياري)" : "Completion notes (optional)")}</Text>
+            <TextInput accessibilityLabel={language === "ar" ? "ملاحظات الإتمام" : "Completion notes"} value={completion.notes} onChangeText={(value) => { setNotesError(false); setCompletion({ ...completion, notes: value }); }} multiline placeholder={language === "ar" ? "ما تم إنجازه، قطع الغيار، ملاحظات إضافية..." : "What was done, parts, extra notes..."} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: notesError ? "#F43F5E" : colors.border, color: colors.foreground, textAlign: align }, notesError ? styles.invalidInputGlow : null]} />
+            {notesError ? <Text style={styles.fieldError}>{language === "ar" ? "يرجى كتابة بيان الصيانة وقطع الغيار (٣ أحرف على الأقل)" : "Please enter maintenance details & parts (min 3 characters)"}</Text> : null}
+          </View>
           <CascadingSelectSheet visible={completionDropdown?.kind === "performer"} title={language === "ar" ? "منفّذ المهمة" : "Performed by"} options={performerOptions.map((option) => ({ key: option.id, label: option.name, icon: "person-outline" as const }))} selectedKey={completion.performerId || null} onSelect={(key) => { setPerformerError(false); setCompletion({ ...completion, performerId: key }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
           <CascadingSelectSheet visible={completionDropdown?.kind === "entity"} title={language === "ar" ? "مصدر الدفع والتمويل" : "Payment & funding source"} options={EXPENSE_FUNDING_ENTITIES.map((entity) => ({ key: entity, label: expenseFundingEntityLabel(entity, language), icon: entity === "owner" ? ("account-balance" as const) : ("account-balance-wallet" as const) }))} selectedKey={completion.fundingEntity || null} onSelect={(key) => { setFundingError(false); setChannelError(false); setStaffError(false); setStaffModeError(false); setCompletion({ ...completion, fundingEntity: key as "owner" | "staff", fundingChannel: null, fundingSourceId: "", fundingSourceLabel: "", staffMode: null }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />
           <CascadingSelectSheet visible={completionDropdown?.kind === "channel"} title={language === "ar" ? "قناة الصرف والحساب" : "Withdrawal channel & account"} options={EXPENSE_FUNDING_CHANNELS.map((channel) => ({ key: channel, label: expenseFundingChannelLabel(channel, language), icon: channel === "vault-cash" ? ("point-of-sale" as const) : channel === "cliq" ? ("bolt" as const) : ("account-balance" as const) }))} selectedKey={completion.fundingChannel || null} onSelect={(key) => { setChannelError(false); const channel = key as ExpenseFundingChannel; const account = channel !== "vault-cash" ? resolveOwnerAccount(channel) : undefined; setCompletion({ ...completion, fundingChannel: channel, fundingSourceId: account?.id ?? "", fundingSourceLabel: account?.label ?? "" }); setCompletionDropdown(null); }} onCancel={() => setCompletionDropdown(null)} colors={colors} language={language} />

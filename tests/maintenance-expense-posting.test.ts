@@ -271,4 +271,10 @@ describe("completion funding wiring (store + dashboard)", () => {
     expect(model).toContain("خصم من العهدة النقدية المعلقة");
     expect(model).toContain("دفع من جيبه الخاص - ذمة مستحقة");
   });
+
+  it("requires completion notes (min 3 chars) when actual cost is positive", () => {
+    expect(source).toContain("يرجى كتابة بيان الصيانة وقطع الغيار");
+    expect(source).toContain("notesError");
+    expect(source).toContain("registerCompletionField(\"notes\")");
+  });
 });

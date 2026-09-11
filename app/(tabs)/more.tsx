@@ -33,6 +33,7 @@ type MenuRoute =
   | "/payment-methods"
   | "/float-settlements"
   | "/maintenance-dashboard"
+  | "/expenses"
   | "/notifications"
   | "/(tabs)/crm"
   | "/loyalty"
@@ -54,6 +55,7 @@ type MenuIcon =
   | "payments"
   | "account-balance-wallet"
   | "build"
+  | "receipt-long"
   | "notifications"
   | "workspace-premium"
   | "tune";
@@ -167,6 +169,7 @@ export default function MoreScreen() {
       <CompactScreenHeader title={t("more")} icon="more-horiz" plain showDateTime={false} />
       {isAuthenticated && currentUser ? <BentoGlassCard radius={24} elevated accentColor={colors.primary} style={styles.profileCard} contentStyle={styles.profileCardContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح ملفي الشخصي" : "Open my profile"} onPress={() => router.push("/profile")} style={({ pressed }) => [styles.profileMain, { flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><View style={[styles.profileAvatar, { backgroundColor: colors.primary + "16" }]}>{currentUser.avatarUrl ? <Image source={{ uri: currentUser.avatarUrl }} contentFit="cover" style={styles.profileImage} /> : <MaterialIcons name="person" size={30} color={colors.primary} />}</View><View style={styles.flex}><Text style={{ color: colors.primary, fontSize: 11, fontWeight: "900", textAlign: align }}>{language === "ar" ? "ملفي الشخصي" : "My profile"}</Text><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 3, textAlign: align }}>{currentUser.fullName}</Text><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{currentUser.email ?? (language === "ar" ? "لا يوجد بريد إلكتروني موثق" : "No verified email")}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={25} color={colors.primary} /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تبديل مجموعة المنشآت" : "Switch property group"} onPress={() => (isSuperAdminUserAccount && !activeGroupName ? router.push("/admin/master-control") : router.push("/workspace-hub"))} style={({ pressed }) => [styles.workspaceBadge, { backgroundColor: colors.glassInset, flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={isSuperAdminUserAccount ? "admin-panel-settings" : "business"} size={17} color={colors.primary} /><View style={styles.flex}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{workspaceBadgeLabel}</Text><View style={[styles.workspaceBadgeValue, { flexDirection: row }]}>{isSuperAdminUserAccount ? <View style={[styles.superAdminChip, { backgroundColor: colors.primary + "14", borderColor: colors.primary + "55" }]}><MaterialIcons name="shield" size={10} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سوبر أدمن" : "Super Admin"}</Text></View> : null}<Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontWeight: "900", textAlign: align }}>{workspaceSubLabel}</Text></View></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color={colors.muted} /></Pressable></BentoGlassCard> : null}
 
+      {can("view_financial_reports") ? <BentoGlassCard radius={22} elevated accentColor="#F59E0B" style={styles.expensesQuickCard} contentStyle={styles.expensesQuickContent}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "المصروفات التشغيلية" : "Operational expenses"} onPress={() => openMoreRoute("/expenses" as MenuRoute)} style={({ pressed }) => [styles.menuRow, { flexDirection: row, opacity: pressed ? 0.68 : 1 }]}><View style={[styles.iconBox, { backgroundColor: "#F59E0B" + "16" }]}><MaterialIcons name="receipt-long" size={21} color="#F59E0B" /></View><View style={styles.flex}><Text style={[styles.menuTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "المصروفات التشغيلية" : "Operational expenses"}</Text><Text numberOfLines={1} style={[styles.menuDescription, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تسجيل فواتير الشاليهات، مصروفات الصيانة، وسندات الصرف" : "Chalet invoices, maintenance expenses, and payment vouchers"}</Text></View><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={22} color="#F59E0B" /></Pressable></BentoGlassCard> : null}
       {showPropertyOps && propertyOpsItems.length ? <MenuSection title={language === "ar" ? "المنشأة والعمليات" : "Property & operations"} items={propertyOpsItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
       {showFinance && financeItems.length ? <MenuSection title={language === "ar" ? "المالية والمدفوعات" : "Finance & payments"} items={financeItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
       {showTeamSecurity && teamSecurityItems.length ? <MenuSection title={language === "ar" ? "الفريق والأمان" : "Team & security"} items={teamSecurityItems} colors={colors} row={row} align={align} isRTL={isRTL} /> : null}
@@ -201,6 +204,8 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, padding: 16, paddingBottom: 36 },
   profileCard: { borderRadius: 24, marginTop: 10 },
   profileCardContent: { padding: 12, gap: 10 },
+  expensesQuickCard: { borderRadius: 22, marginTop: 10 },
+  expensesQuickContent: { padding: 0 },
   profileMain: { minHeight: 58, alignItems: "center", gap: 11 },
   profileAvatar: { width: 58, height: 58, borderRadius: 18, overflow: "hidden", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   profileImage: { width: "100%", height: "100%" },

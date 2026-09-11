@@ -42,7 +42,7 @@ describe("expenses management", () => {
   });
 
   it("links the reports screen to expenses and net profit", () => {
-    expect(reports).toContain("إدارة المصروفات والربح الصافي");
+    expect(reports).toContain("إدارة وتسجيل المصروفات ↗");
     expect(reports).toContain("الربح الصافي");
   });
 

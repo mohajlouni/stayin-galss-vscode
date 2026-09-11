@@ -12,7 +12,7 @@ describe("expenses calendar navigation chevrons", () => {
     expect(screen).toContain("const [monthAnchor, setMonthAnchor] = useState(todayISO().slice(0, 7));");
     expect(screen).toContain('if (period === "today") return date === todayAnchor;');
     expect(screen).toContain("return date.startsWith(monthAnchor);");
-    expect(screen).toContain("todayAnchor, monthAnchor");
+    expect(screen).toContain("todayAnchor, weekAnchor, monthAnchor, searchQuery");
   });
 
   it("advances the day anchor by one with addDays and the month anchor with moveGregorianMonth", () => {

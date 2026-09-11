@@ -1,4 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -116,8 +117,11 @@ export default function AuditLogScreen() {
   const { deviceSettings, updateDeviceSettings } = useAppPreferences();
   const { can } = useWorkspaceAccess();
   const colors = useColors();
+  const { action } = useLocalSearchParams<{ action?: string | string[] }>();
+  const requestedAction = Array.isArray(action) ? action[0] : action;
+  const initialFilter: AuditAction | "all" = requestedAction && requestedAction !== "all" && ACTIONS.includes(requestedAction as AuditAction) ? (requestedAction as AuditAction) : "all";
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<AuditAction | "all">("all");
+  const [filter, setFilter] = useState<AuditAction | "all">(initialFilter);
   const [timeRange, setTimeRange] = useState<TimeRange>(deviceSettings.auditLogDefaultRange);
   const [filterOpen, setFilterOpen] = useState(false);
   const align = isRTL ? "right" : "left";

@@ -104,6 +104,8 @@ describe("المرحلة الخامسة: التوريد الجزئي وطلبا�
     const store = readFileSync("lib/booking-store.tsx", "utf8");
     const backup = readFileSync("lib/backup-import.ts", "utf8");
     const screen = readFileSync("app/float-settlements.tsx", "utf8");
+    const settleModal = readFileSync("components/settlements/SettlementModal.tsx", "utf8");
+    const drawer = readFileSync("components/settlements/StaffLedgerDrawer.tsx", "utf8");
     const audit = readFileSync("app/audit-log.tsx", "utf8");
     expect(model).toContain("FloatSettlementStatus");
     expect(model).toContain('"PENDING_APPROVAL"');
@@ -134,8 +136,11 @@ describe("المرحلة الخامسة: التوريد الجزئي وطلبا�
     expect(screen).toContain("طلبات توريد عهدة معلقة");
     expect(screen).toContain("طلب توريد العهدة للمالك");
     expect(screen).toContain("عمولات مستحقة للموظف (Commissions Earned)");
-    expect(screen).toContain("معاينة الحركات المشمولة في شاشة مستقلة ↗");
-    expect(screen).toContain("المتبقي كعهدة معلقة بذمة الموظف");
+    expect(settleModal).toContain("معاينة الحركات المشمولة في شاشة مستقلة ↗");
+    expect(settleModal).toContain("المتبقي كعهدة معلقة بذمة الموظف");
+    expect(settleModal).toContain("activeOwnerTreasuryAccounts");
+    expect(drawer).toContain("[ إغلاق والعودة للتوريد ✕ ]");
+    expect(drawer).toContain("staffFloatLedgerForFloat");
     expect(screen).toContain("requestStaffFloatSettlement");
     expect(screen).toContain("approveStaffFloatSettlement");
     expect(screen).toContain("rejectStaffFloatSettlement");

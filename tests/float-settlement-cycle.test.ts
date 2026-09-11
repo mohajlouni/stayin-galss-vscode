@@ -74,6 +74,7 @@ describe("دورة تسوية العهدة وبيع الاتجاه الثاني 
     const store = readFileSync("lib/booking-store.tsx", "utf8");
     const backup = readFileSync("lib/backup-import.ts", "utf8");
     const screen = readFileSync("app/float-settlements.tsx", "utf8");
+    const settleModal = readFileSync("components/settlements/SettlementModal.tsx", "utf8");
     const expenses = readFileSync("app/expenses.tsx", "utf8");
     const audit = readFileSync("app/audit-log.tsx", "utf8");
     expect(model).toContain("FloatSettlementRecord");
@@ -94,11 +95,11 @@ describe("دورة تسوية العهدة وبيع الاتجاه الثاني 
     expect(screen).toContain("أرشيف وسجل التسويات العامة 🗄️");
     expect(screen).toContain("/settlements-history");
     expect(screen).toContain("صرف تعويض للموظف / تصفية الذمة");
-    expect(screen).toContain("إجمالي المحصل");
-    expect(screen).toContain("المخصوم كفواتير مصاريف");
-    expect(screen).toContain("صافي المبلغ المطلوب توريده");
-    expect(screen).toContain("تاريخ التسوية");
     expect(screen).toContain("تاريخ الصرف");
+    expect(settleModal).toContain("إجمالي المحصل");
+    expect(settleModal).toContain("المخصوم كفواتير مصاريف");
+    expect(settleModal).toContain("صافي المبلغ المطلوب توريده");
+    expect(settleModal).toContain("تاريخ التسوية");
     expect(expenses).toContain("أخرى / تصفية ذمة موظف");
     expect(expenses).toContain("تصفية ذمة موظف");
     expect(audit).toContain('"staff-reimbursement-paid"');

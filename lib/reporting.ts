@@ -209,6 +209,51 @@ export function staffFloatLedgerForUser(data: Pick<AppData, "bookings" | "staffF
   return staffFloatLedgerForFloat(data, float.id);
 }
 
+/** تسميات أنواع حركات كشف العهدة المشتركة بين الشاشات وكشف PDF. */
+export const FLOAT_LEDGER_KIND_LABELS: Record<StaffFloatLedgerEntryKind, { ar: string; en: string }> = {
+  "rental-collected": { ar: "تحصيل إيجار", en: "Rental collected" },
+  "deposit-collected": { ar: "تأمين بحوزته", en: "Deposit held in hand" },
+  "float-expense": { ar: "مصروف من العهدة", en: "Float expense receipt" },
+  "settled-transfer": { ar: "توريد مؤكد للمالك", en: "Approved transfer to owner" },
+};
+
+/** نطاق فترة زمنية لكشف العهدة (تواريخ YYYY-MM-DD شاملة الطرفين). */
+export type LedgerPeriodRange = { start: string; end: string };
+
+/** مؤشرات مالية لكشف عهدة ضمن فترة زمنية مع رصيد افتتاحي دقيق. */
+export type LedgerPeriodMetrics = {
+  openingBalance: number;
+  closingBalance: number;
+  collected: number;
+  expenses: number;
+  handedOver: number;
+  entries: StaffFloatLedgerEntry[];
+};
+
+/** يصفّي كشف العهدة ضمن فترة (أو الكل) ويرصد المؤشرات: المحصل، المصروفات، المورَّد، والرصيد الجاري الفعلي عبر كل الفترات. */
+export function staffFloatLedgerForPeriod(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">, floatId: string | undefined, range: LedgerPeriodRange | null): LedgerPeriodMetrics {
+  const full = staffFloatLedgerForFloat(data, floatId);
+  const round = (value: number) => Math.round(value * 100) / 100;
+  if (!full.float || !range) {
+    return {
+      openingBalance: 0,
+      closingBalance: full.netBalance,
+      collected: full.entries.filter((entry) => entry.amount > 0).reduce((sum, entry) => sum + entry.amount, 0),
+      expenses: full.entries.filter((entry) => entry.kind === "float-expense").reduce((sum, entry) => sum + Math.abs(entry.amount), 0),
+      handedOver: full.entries.filter((entry) => entry.kind === "settled-transfer").reduce((sum, entry) => sum + Math.abs(entry.amount), 0),
+      entries: full.entries,
+    };
+  }
+  const within = full.entries.filter((entry) => entry.date >= range.start && entry.date <= range.end);
+  const prior = full.entries.filter((entry) => entry.date < range.start);
+  const openingBalance = prior.length ? prior[prior.length - 1].runningBalance : 0;
+  const closingBalance = within.length ? within[within.length - 1].runningBalance : openingBalance;
+  const collected = within.filter((entry) => entry.amount > 0).reduce((sum, entry) => sum + entry.amount, 0);
+  const expenses = within.filter((entry) => entry.kind === "float-expense").reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
+  const handedOver = within.filter((entry) => entry.kind === "settled-transfer").reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
+  return { openingBalance: round(openingBalance), closingBalance: round(closingBalance), collected: round(collected), expenses: round(expenses), handedOver: round(handedOver), entries: within };
+}
+
 /** حجز مغلق (حجوزات وتأمينات) ضُمَّ إلى سند توريد في الأرشيف. */
 export type SettlementArchiveBooking = { bookingId: string; customerName: string; date: string; amount: number };
 

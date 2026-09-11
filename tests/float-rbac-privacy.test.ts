@@ -110,7 +110,7 @@ describe("CRITICAL RBAC & PRIVACY ENFORCEMENT: عزل عهدة الموظف ول
     expect(screen).toContain("إجمالي العُهد المعلقة");
     expect(ledger).toContain("staffFloatLedgerForFloat");
     expect(ledger).toContain("runningBalance");
-    expect(ledger).toContain("الرصيد الحالي (ذمة معلقة)");
+    expect(ledger).toContain("الرصيد المعلق الحالي");
     expect(ledger).toContain("لا يمكنك الاطلاع على كشف حساب موظف آخر");
     expect(history).toContain('can("view_audit_logs")');
     expect(history).toContain("settlementArchiveEntries");

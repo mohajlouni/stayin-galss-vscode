@@ -11,6 +11,8 @@ import { useAppPreferences } from "@/lib/app-preferences";
 
 const WEEKDAYS_AR = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
 const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS_AR = ["كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران", "تموز", "آب", "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول"];
+const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function currentDateKey() {
   const now = new Date();
@@ -54,34 +56,47 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect, range }:
   const { formatDate, formatMonth } = useAppPreferences();
   const seed = useMemo(() => dateParts(value), [value]);
   const [cursor, setCursor] = useState(seed);
-  const [yearMode, setYearMode] = useState(false);
+  const [pickerMode, setPickerMode] = useState<"days" | "month" | "year">("days");
+  const yearMode = pickerMode === "year";
+  const monthMode = pickerMode === "month";
   const today = currentDateKey();
   const selectedParts = dateParts(value);
   const grid = gregorianMonthGrid(cursor.year, cursor.month);
   const weekdays = language === "ar" ? WEEKDAYS_AR : WEEKDAYS_EN;
   const row = isRTL ? "row-reverse" : "row";
   const years = yearChoices(cursor.year);
-  const title = yearMode ? (language === "ar" ? "اختيار السنة" : "Choose year") : (language === "ar" ? "اختيار التاريخ" : "Choose date");
+  const months = language === "ar" ? MONTHS_AR : MONTHS_EN;
+  const title = yearMode ? (language === "ar" ? "اختيار السنة" : "Choose year") : monthMode ? (language === "ar" ? "اختيار الشهر" : "Choose month") : (language === "ar" ? "اختيار التاريخ" : "Choose date");
   const subtitle = yearMode
     ? (language === "ar" ? "اختر السنة ثم عد لاختيار الشهر واليوم." : "Choose a year, then return to pick month and day.")
-    : value ? `${weekdayLabel(value, language)}، ${formatDate(value)}` : (language === "ar" ? "اختر يومًا من التقويم" : "Select a day from the calendar");
+    : monthMode
+      ? (language === "ar" ? "اختر شهور السنة المعروضة، ثم أضغط على اسم الشهر مباشرة." : "Pick a month from the grid; tapping it opens its days.")
+      : value ? `${weekdayLabel(value, language)}، ${formatDate(value)}` : (language === "ar" ? "اختر يومًا من التقويم" : "Select a day from the calendar");
 
   useEffect(() => {
     if (!visible) return;
     setCursor(dateParts(value));
-    setYearMode(false);
+    setPickerMode("days");
   }, [value, visible]);
 
   const shiftCursor = (direction: -1 | 1) => {
-    if (yearMode) {
+    if (pickerMode === "year") {
       setCursor((current) => ({ ...current, year: current.year + direction * 12 }));
+      return;
+    }
+    if (pickerMode === "month") {
+      setCursor((current) => ({ ...current, year: current.year + direction }));
       return;
     }
     setCursor((current) => moveGregorianMonth(current.year, current.month, direction));
   };
   const chooseYear = (year: number) => {
     setCursor((current) => ({ ...current, year }));
-    setYearMode(false);
+    setPickerMode("month");
+  };
+  const chooseMonth = (month: number) => {
+    setCursor((current) => ({ ...current, month }));
+    setPickerMode("days");
   };
   const selectToday = () => onSelect(today);
   const selectedYear = selectedParts.year;
@@ -101,20 +116,30 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect, range }:
         </View>
 
         <View style={[styles.monthControls, { flexDirection: row }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات التالية" : "السنوات السابقة") : (isRTL ? "الشهر التالي" : "الشهر السابق")) : (yearMode ? (isRTL ? "Next years" : "Previous years") : (isRTL ? "Next month" : "Previous month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? 1 : -1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات التالية" : "السنوات السابقة") : monthMode ? (isRTL ? "السنة التالية" : "السنة السابقة") : (isRTL ? "الشهر التالي" : "الشهر السابق")) : (yearMode ? (isRTL ? "Next years" : "Previous years") : monthMode ? (isRTL ? "Next year" : "Previous year") : (isRTL ? "Next month" : "Previous month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? 1 : -1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
             <MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={23} color={colors.primary} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح اختيار السنة" : "Open year selector"} onPress={() => setYearMode((current) => !current)} style={({ pressed }) => [styles.monthLabel, { backgroundColor: yearMode ? colors.primary + "16" : colors.glassInset, opacity: pressed ? 0.72 : 1 }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={yearMode ? (language === "ar" ? "اختيار السنة" : "Choose year") : monthMode ? (language === "ar" ? "اختيار الشهر" : "Choose month") : (language === "ar" ? "فتح اختيار الشهر" : "Open month selector")} onPress={() => setPickerMode((current) => (current === "days" ? "month" : current === "month" ? "year" : "month"))} style={({ pressed }) => [styles.monthLabel, { backgroundColor: yearMode || monthMode ? colors.primary + "16" : colors.glassInset, opacity: pressed ? 0.72 : 1 }]}>
             <MaterialIcons name={yearMode ? "calendar-view-month" : "calendar-today"} size={16} color={colors.primary} />
-            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900" }}>{yearMode ? `${years[0]} – ${years[years.length - 1]}` : formatMonth(cursor.year, cursor.month)}</Text>
-            <MaterialIcons name={yearMode ? "expand-less" : "expand-more"} size={18} color={colors.primary} />
+            <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900" }}>{yearMode ? `${years[0]} – ${years[years.length - 1]}` : monthMode ? String(cursor.year) : formatMonth(cursor.year, cursor.month)}</Text>
+            <MaterialIcons name={yearMode || monthMode ? "expand-less" : "expand-more"} size={18} color={colors.primary} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات السابقة" : "السنوات التالية") : (isRTL ? "الشهر السابق" : "الشهر التالي")) : (yearMode ? (isRTL ? "Previous years" : "Next years") : (isRTL ? "Previous month" : "Next month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? -1 : 1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات السابقة" : "السنوات التالية") : monthMode ? (isRTL ? "السنة السابقة" : "السنة التالية") : (isRTL ? "الشهر السابق" : "الشهر التالي")) : (yearMode ? (isRTL ? "Previous years" : "Next years") : monthMode ? (isRTL ? "Previous year" : "Next year") : (isRTL ? "Previous month" : "Next month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? -1 : 1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
             <MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={23} color={colors.primary} />
           </Pressable>
         </View>
 
-        {yearMode ? <View style={styles.yearGrid}>
+        {monthMode ? <View style={styles.monthGrid}>
+          {months.map((month, index) => {
+            const monthNumber = index + 1;
+            const isSelectedMonth = selectedParts.year === cursor.year && selectedParts.month === monthNumber;
+            const isThisMonthNow = Number(today.slice(0, 4)) === cursor.year && Number(today.slice(5, 7)) === monthNumber;
+            return <Pressable key={month} accessibilityRole="button" accessibilityLabel={`${language === "ar" ? "شهر" : "Month"} ${month}`} onPress={() => chooseMonth(monthNumber)} style={({ pressed }) => [styles.monthCell, { backgroundColor: isSelectedMonth ? colors.primary : isThisMonthNow ? colors.primary + "16" : colors.surfaceMuted, borderColor: isSelectedMonth ? colors.primary : isThisMonthNow ? colors.primary : colors.border, opacity: pressed ? 0.68 : 1 }]}>
+              <Text style={{ color: isSelectedMonth ? colors.background : isThisMonthNow ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "900", textAlign: "center" }}>{month}</Text>
+              {isThisMonthNow && !isSelectedMonth ? <View style={[styles.yearMarker, { backgroundColor: colors.primary }]} /> : null}
+            </Pressable>;
+          })}
+        </View> : yearMode ? <View style={styles.yearGrid}>
           {years.map((year) => {
             const isSelectedYear = selectedYear === year;
             const isCurrentYear = Number(today.slice(0, 4)) === year;
@@ -167,6 +192,8 @@ const styles = StyleSheet.create({
   yearGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 18 },
   yearCell: { width: "23.65%", minHeight: 52, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   yearMarker: { position: "absolute", bottom: 7, width: 4, height: 4, borderRadius: 2 },
+  monthGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 18 },
+  monthCell: { width: "31.33%", minHeight: 48, borderRadius: 13, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   actions: { gap: 9, marginTop: 19 },
   action: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },
 });

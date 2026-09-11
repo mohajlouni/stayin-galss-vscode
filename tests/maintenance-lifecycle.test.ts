@@ -275,7 +275,7 @@ describe("STEP 7 archive tab & recurrence cadence filters", () => {
   });
 
   it("renders the single-row toolbar: quick search + unit & cadence dropdowns instead of chip strips", () => {
-    expect(source).toContain("بحث سريع باسم المهمة أو الأصل");
+    expect(source).toContain("بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)");
     expect(source).toContain("const [searchQuery, setSearchQuery] = useState");
     expect(source).toContain("const [cadenceFilter, setCadenceFilter] = useState");
     expect(source).toContain("const [unitFilter, setUnitFilter] = useState<string | null>(null);");
@@ -371,7 +371,7 @@ describe("STEP 9 floating action menu, RTL filter bar & compact card", () => {
   });
 
   it("nests the search icon inside the input bar and shows a clear button when text exists", () => {
-    expect(source).toContain("بحث سريع باسم المهمة أو الأصل");
+    expect(source).toContain("بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)");
     expect(source).toContain('name="search"');
     expect(source).toContain("searchInput");
     expect(source).toContain('name="close"');

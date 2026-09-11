@@ -5,6 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
 import { CalendarDateField } from "@/components/calendar-date-picker";
+import { HighlightedText } from "@/components/ui/HighlightedText";
 import { CascadingSelectField, CascadingSelectSheet } from "@/components/ui/cascading-select";
 import { useColors } from "@/hooks/use-colors";
 import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, activeOwnerTreasuryAccounts, EXPENSE_FUNDING_CHANNELS, EXPENSE_FUNDING_ENTITIES, expenseFundingChannelLabel, expenseFundingEntityLabel, expenseFundingModeLabel, maintenanceAuditActionLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type ExpenseFundingChannel, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
@@ -109,6 +110,38 @@ const maintenanceAttribution = (task: MaintenanceTask, language: "ar" | "en") =>
   }
   return null;
 };
+
+/** نص قابل للبحث لكل مهمة: العنوان، الأصل، المنفذ، الشاليه، التكاليف، التمويل والقنوات، التواريخ، الملاحظات، وطريقة الصرف. */
+const taskSearchText = (task: MaintenanceTask, language: "ar" | "en") => [
+  task.title,
+  task.assetName,
+  task.performedByName,
+  task.assignedToStaffName,
+  task.chaletName,
+  task.note,
+  task.completionNotes,
+  task.nextDueDate,
+  task.completedAt?.slice(0, 10),
+  task.lastCompletedDate,
+  task.actualCost !== undefined ? String(task.actualCost) : undefined,
+  task.cost !== undefined ? String(task.cost) : undefined,
+  maintenanceFrequencyLabel(task.frequency, language),
+  task.expenseFundingEntity ? expenseFundingEntityLabel(task.expenseFundingEntity, language) : undefined,
+  task.expenseFundingChannel ? expenseFundingChannelLabel(task.expenseFundingChannel, language) : undefined,
+  task.expenseFundingMode ? expenseFundingModeLabel(task.expenseFundingMode, language) : undefined,
+  task.expenseFundingSourceLabel,
+  maintenanceAttribution(task, language)?.label,
+].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" ").toLowerCase();
+
+/** نص قابل للبحث لكل أصل ضمن المخزون: الاسم، الشاليه، الرقم التسلسلي، سعر الشراء، التصنيف والحالة. */
+const assetSearchText = (asset: Asset, language: "ar" | "en") => [
+  asset.name,
+  asset.chaletName,
+  asset.serialNumber,
+  asset.purchaseCost !== undefined ? String(asset.purchaseCost) : undefined,
+  ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1],
+  assetConditionLabel(asset.condition, language),
+].filter((part): part is string => typeof part === "string" && part.trim() !== "").join(" ").toLowerCase();
 
 export default function MaintenanceDashboard() {
   const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, addExpense, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
@@ -231,13 +264,13 @@ export default function MaintenanceDashboard() {
       if (horizon === "30") return task.nextDueDate >= todayISO && task.nextDueDate <= addDays(todayISO, 29);
       return true;
     };
-    return pool.filter((task) => matchesDate(task) && (unitFilter === null || task.targetScope === "all_units" || task.chaletId === unitFilter) && matchesCadenceFilter(task.frequency, cadenceFilter) && (query === "" || task.title.toLowerCase().includes(query) || (task.assetName ?? "").toLowerCase().includes(query)));
-  }, [tab, activeTasks, archiveTasks, dateFilter, horizon, todayISO, unitFilter, cadenceFilter, searchQuery]);
+    return pool.filter((task) => matchesDate(task) && (unitFilter === null || task.targetScope === "all_units" || task.chaletId === unitFilter) && matchesCadenceFilter(task.frequency, cadenceFilter) && (query === "" || taskSearchText(task, language).includes(query)));
+  }, [tab, activeTasks, archiveTasks, dateFilter, horizon, todayISO, unitFilter, cadenceFilter, searchQuery, language]);
 
   const visibleAssets = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return (assets ?? []).filter((asset) => (query === "" || asset.name.toLowerCase().includes(query)) && (unitFilter === null || asset.chaletId === unitFilter));
-  }, [assets, searchQuery, unitFilter]);
+    return (assets ?? []).filter((asset) => (query === "" || assetSearchText(asset, language).includes(query)) && (unitFilter === null || asset.chaletId === unitFilter));
+  }, [assets, searchQuery, unitFilter, language]);
 
   const switchTab = (next: "active" | "archive" | "assets") => { setTab(next); setMenuFor(null); setUnitMenuOpen(false); setCadenceMenuOpen(false); setDateFilter(null); setHorizon("all"); setRangePanelOpen(false); };
 
@@ -515,14 +548,14 @@ export default function MaintenanceDashboard() {
     rollerRef.current?.scrollTo({ x: target, animated: true });
   };
   const openRangePanel = () => {
-    if (!rangePanelOpen) setRangeDraft({ start: todayISO, end: addDays(todayISO, 29) });
+    if (!rangePanelOpen) setRangeDraft(rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? { start: rollerRange.start, end: rollerRange.end } : { start: todayISO, end: "" });
     setRangePanelOpen(!rangePanelOpen);
   };
   const applyCustomRange = () => {
     const start = /^\d{4}-\d{2}-\d{2}$/.test(rangeDraft.start) ? rangeDraft.start : "";
-    const end = /^\d{4}-\d{2}-\d{2}$/.test(rangeDraft.end) ? rangeDraft.end : "";
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(rangeDraft.end) ? rangeDraft.end : start;
     if (start && end && start <= end) setRollerRange({ kind: "custom", start, end });
-    else if (start) setRollerRange({ kind: "custom", start, end: end >= start ? end : addDays(start, 29) });
+    else if (start) setRollerRange({ kind: "custom", start, end: start });
     else setRollerRange({ kind: "all" });
     setRangePanelOpen(false);
   };
@@ -540,31 +573,34 @@ export default function MaintenanceDashboard() {
     <View style={styles.rollerWrap}>
       <View style={[styles.rollerToolbar, { flexDirection: row }]}>
         <View style={styles.rollerChips}>{ROLLER_RANGE_OPTIONS.map((option) => { const active = horizon === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.label[language === "ar" ? 0 : 1]} onPress={() => selectHorizon(option.id)} style={[styles.rollerRangeChip, { backgroundColor: active ? colors.primary + "1F" : colors.surface, borderColor: active ? colors.primary : colors.border }]}><Text style={{ color: active ? colors.primary : colors.muted, fontSize: 12, fontWeight: active ? "900" : "700" }}>{option.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
-        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? colors.primary + "1F" : colors.surface, borderColor: rollerRange.kind === "custom" ? colors.primary : colors.border }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? colors.primary : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? colors.primary : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
+        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? "#F59E0B" : colors.surface, borderColor: rollerRange.kind === "custom" ? "#F59E0B" : colors.border, shadowColor: rollerRange.kind === "custom" ? "#F59E0B" : "transparent", shadowOpacity: rollerRange.kind === "custom" ? 0.4 : 0, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: rollerRange.kind === "custom" ? 4 : 0 }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? "#0F172A" : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? "#0F172A" : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={() => nudgeRoller(1)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
             const isToday = date === todayISO;
             const inWindow = dateFilter === null && ((horizon === "today" && isToday) || (horizon === "7" && date >= todayISO && date <= addDays(todayISO, 6)) || (horizon === "30" && date >= todayISO && date <= addDays(todayISO, 29)));
+            const customRange = rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? { start: rollerRange.start, end: rollerRange.end } : null;
+            const isCustomEdge = Boolean(customRange && (date === customRange.start || date === customRange.end));
+            const isCustomInside = Boolean(customRange && date > customRange.start && date < customRange.end);
             const framed = isToday || singleSelected;
             const hasTaskOnDate = activeTasks.some((task) => task.nextDueDate === date);
             const weekday = ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()];
             const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;
-            const strong = framed || inWindow;
-            const topColor = strong ? colors.primary : "#94A3B8";
-            const dayColor = strong ? colors.primary : "#94A3B8";
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }]}>
+            const strong = framed || inWindow || isCustomInside;
+            const topColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
+            const dayColor = isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : (strong ? colors.primary : "#94A3B8");
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, framed ? { backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC" } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, framed && { shadowColor: colors.primary, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } }, isCustomEdge ? { backgroundColor: "#F59E0B", borderColor: "#F59E0B", borderTopWidth: 1, borderBottomWidth: 1 } : isCustomInside ? { backgroundColor: "#F59E0B26", borderColor: "#F59E0B4D", borderTopWidth: 1, borderBottomWidth: 1 } : null]}>
               <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
               <Text style={{ color: dayColor, fontSize: 14, fontWeight: strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
               <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent" }]} />
-              {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: colors.primary }]} /> : null}
+              {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: isCustomEdge ? "#0F172A" : isCustomInside ? "#FCD34D" : colors.primary }]} /> : null}
             </Pressable>;
           })}
         </ScrollView>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={() => nudgeRoller(-1)} style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
       </View>
     </View>
 
@@ -576,7 +612,7 @@ export default function MaintenanceDashboard() {
     <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen ? 2 : 0 }]}>
       <View style={[styles.searchWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}>
         <MaterialIcons name="search" size={16} color={colors.muted} />
-        <TextInput accessibilityLabel={language === "ar" ? "بحث سريع" : "Quick search"} value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث سريع باسم المهمة أو الأصل..." : "Quick search by task or asset name..."} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
+        <TextInput accessibilityLabel="بحث ذكي شامل" value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)" : "Smart search (task, asset, performer, unit, cost, notes, date...)"} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
         {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={16} color={colors.muted} /></Pressable> : null}
       </View>
       <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
@@ -611,16 +647,16 @@ export default function MaintenanceDashboard() {
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.taskIcon, { backgroundColor: tone.color + "18" }]}><MaterialIcons name={tone.icon} size={20} color={tone.color} /></View>
             <View style={styles.flex}>
-              <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{task.title}</Text>{allUnits ? <View style={[styles.badgePill, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "تشمل كافة الوحدات" : "All units"}</Text></View> : null}{posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "#مصروف" : "#Expense"}</Text></View> : null}</View>
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{allUnits ? <View style={[styles.badgePill, { backgroundColor: colors.primary + "18" }]}><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "تشمل كافة الوحدات" : "All units"}</Text></View> : null}{posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "#مصروف" : "#Expense"}</Text></View> : null}</View>
               <View style={[styles.badgeRow, { flexDirection: row }]}>
-                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="holiday-village" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{unitLabel}</Text></View>
-                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="refresh" size={11} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }}>{maintenanceFrequencyLabel(task.frequency, language)}</Text></View>
-                <View style={[styles.badgePill, { backgroundColor: dueColor + "18", borderColor: dueColor + "44" }]}><MaterialIcons name="event" size={11} color={dueColor} /><Text numberOfLines={1} style={{ color: dueColor, fontSize: 9, fontWeight: "800" }}>{language === "ar" ? "استحقاق:" : "Due:"} {formatDate(task.nextDueDate) ?? task.nextDueDate}</Text></View>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="holiday-village" size={11} color={colors.muted} /><HighlightedText text={unitLabel} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
+                <View style={[styles.badgePill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><MaterialIcons name="refresh" size={11} color={colors.muted} /><HighlightedText text={maintenanceFrequencyLabel(task.frequency, language)} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: colors.muted, fontSize: 9, fontWeight: "800" }} /></View>
+                <View style={[styles.badgePill, { backgroundColor: dueColor + "18", borderColor: dueColor + "44" }]}><MaterialIcons name="event" size={11} color={dueColor} /><HighlightedText text={`${language === "ar" ? "استحقاق:" : "Due:"} ${formatDate(task.nextDueDate) ?? task.nextDueDate}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={{ color: dueColor, fontSize: 9, fontWeight: "800" }} /></View>
                 {posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18", borderColor: colors.success + "44" }]}><MaterialIcons name="receipt-long" size={11} color={colors.success} /><Text numberOfLines={1} style={{ color: colors.success, fontSize: 9, fontWeight: "800" }}>{language === "ar" ? "مُرحَّل للمصروفات" : "Expense posted"}</Text></View> : null}
               </View>
-              {task.actualCost !== undefined || task.cost ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost ?? task.cost} {language === "ar" ? "د.أ" : "JOD"}{task.assetName ? ` · ${task.assetName}` : ""}</Text> : null}
-              {task.status === "completed" && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
-              {attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><Text numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]}>{attribution.label}</Text></View> : null}
+              {task.actualCost !== undefined || task.cost ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost ?? task.cost} ${language === "ar" ? "د.أ" : "JOD"}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {task.status === "completed" && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery.trim().toLowerCase()} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
             </View>
             <View style={[styles.cardSide, { alignItems: isRTL ? "flex-start" : "flex-end", gap: 7 }]}>
               <View style={[styles.cardSideTop, { flexDirection: row }]}>
@@ -652,12 +688,12 @@ export default function MaintenanceDashboard() {
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.archiveIcon, { backgroundColor: (settled ? colors.success : colors.muted) + "1A" }]}><MaterialIcons name={settled ? "done-all" : "cancel"} size={18} color={settled ? colors.success : colors.muted} /></View>
             <View style={styles.flex}>
-              <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{task.title}</Text>{!settled ? <View style={[styles.badgePill, { backgroundColor: colors.muted + "18" }]}><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "ملغاة" : "Cancelled"}</Text></View> : posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سند صرف مرتبط" : "Receipt linked"}</Text></View> : null}</View>
-              <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{unitLabel} · {maintenanceFrequencyLabel(task.frequency, language)}{task.assetName ? ` · ${task.assetName}` : ""}</Text>
-              {settled && task.performedByName ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: {task.performedByName}{task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}</Text> : null}
-              {settled && task.actualCost !== undefined ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "التكلفة" : "Cost"}: {task.actualCost} {language === "ar" ? "د.أ" : "JOD"}{posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}</Text> : null}
-              {settled && attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><Text numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]}>{attribution.label}</Text></View> : null}
-              {settledDate ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: {formatDate(settledDate) ?? settledDate}</Text> : null}
+              <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={task.title} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} />{!settled ? <View style={[styles.badgePill, { backgroundColor: colors.muted + "18" }]}><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "ملغاة" : "Cancelled"}</Text></View> : posted ? <View style={[styles.badgePill, { backgroundColor: colors.success + "18" }]}><Text style={{ color: colors.success, fontSize: 9, fontWeight: "900" }}>{language === "ar" ? "سند صرف مرتبط" : "Receipt linked"}</Text></View> : null}</View>
+              <HighlightedText text={`${unitLabel} · ${maintenanceFrequencyLabel(task.frequency, language)}${task.assetName ? ` · ${task.assetName}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
+              {settled && task.performedByName ? <HighlightedText text={`${language === "ar" ? "تم التنفيذ بواسطة" : "Performed by"}: ${task.performedByName}${task.performedByRole ? ` (${maintenancePerformerRoleLabel(task.performedByRole, language)})` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {settled && task.actualCost !== undefined ? <HighlightedText text={`${language === "ar" ? "التكلفة" : "Cost"}: ${task.actualCost} ${language === "ar" ? "د.أ" : "JOD"}${posted ? ` · ${language === "ar" ? "سند صرف مرتبط" : "linked receipt"}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
+              {settled && attribution ? <View style={[styles.attributionRow, { backgroundColor: attribution.amber ? "#F59E0B14" : colors.surfaceMuted, borderColor: attribution.amber ? "#F59E0B55" : colors.border, flexDirection: row }]}><MaterialIcons name={attribution.amber ? "payments" : "account-balance-wallet"} size={12} color={attribution.amber ? "#F59E0B" : colors.muted} /><HighlightedText text={attribution.label} query={searchQuery.trim().toLowerCase()} numberOfLines={2} style={[styles.attributionText, { color: attribution.amber ? "#F59E0B" : colors.muted, textAlign: align }]} /></View> : null}
+              {settledDate ? <HighlightedText text={`${language === "ar" ? (settled ? "تاريخ الإنجاز" : "تاريخ الإغلاق") : (settled ? "Settled on" : "Closed on")}: ${formatDate(settledDate) ?? settledDate}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
             </View>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "سجل الإجراءات" : "Action log"} onPress={() => setAuditFor(task.id)} style={({ pressed }) => [styles.archiveLogBtn, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="history" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "800" }}>{language === "ar" ? "سجل الإجراءات" : "Action log"}</Text></Pressable>
@@ -670,9 +706,9 @@ export default function MaintenanceDashboard() {
         return <Pressable key={asset.id} accessibilityRole="button" accessibilityLabel={asset.name} onPress={() => openEditAssetSheet(asset)} disabled={!canManage || Boolean(busy)} style={({ pressed }) => [styles.card, { backgroundColor: colors.surface, borderColor: asset.condition === "needs_service" ? colors.error + "66" : colors.border, opacity: pressed ? 0.72 : 1 }]}>
           <View style={[styles.taskIcon, { backgroundColor: conditionColor + "18" }]}><MaterialIcons name={condition?.icon ?? "inventory"} size={20} color={conditionColor} /></View>
           <View style={styles.flex}>
-            <View style={[styles.cardTitleRow, { flexDirection: row }]}><Text numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]}>{asset.name}</Text><View style={[styles.badgePill, { backgroundColor: conditionColor + "18" }]}><Text style={{ color: conditionColor, fontSize: 9, fontWeight: "900" }}>{assetConditionLabel(asset.condition, language)}</Text></View></View>
-            <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{asset.chaletName ?? "—"} · {ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1] ?? asset.category}{asset.serialNumber ? ` · ${asset.serialNumber}` : ""}</Text>
-            {asset.purchaseCost !== undefined ? <Text numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "تكلفة الشراء" : "Purchase cost"}: {asset.purchaseCost} {language === "ar" ? "د.أ" : "JOD"}</Text> : null}
+            <View style={[styles.cardTitleRow, { flexDirection: row }]}><HighlightedText text={asset.name} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardTitle, { color: colors.foreground, textAlign: align, flex: 1 }]} /><View style={[styles.badgePill, { backgroundColor: conditionColor + "18" }]}><Text style={{ color: conditionColor, fontSize: 9, fontWeight: "900" }}>{assetConditionLabel(asset.condition, language)}</Text></View></View>
+            <HighlightedText text={`${asset.chaletName ?? "—"} · ${ASSET_CATEGORIES.find((item) => item.id === asset.category)?.label[language === "ar" ? 0 : 1] ?? asset.category}${asset.serialNumber ? ` · ${asset.serialNumber}` : ""}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} />
+            {asset.purchaseCost !== undefined ? <HighlightedText text={`${language === "ar" ? "تكلفة الشراء" : "Purchase cost"}: ${asset.purchaseCost} ${language === "ar" ? "د.أ" : "JOD"}`} query={searchQuery.trim().toLowerCase()} numberOfLines={1} style={[styles.cardMeta, { color: colors.muted, textAlign: align }]} /> : null}
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف الأصل" : "Delete asset"} onPress={() => removeAsset(asset)} disabled={Boolean(busy)} style={({ pressed }) => [styles.iconDanger, { opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={18} color={colors.muted} /></Pressable>
         </Pressable>;
@@ -871,8 +907,8 @@ export default function MaintenanceDashboard() {
           <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", textAlign: align, flex: 1 }}>{language === "ar" ? "تحديد الفترة الزمنية" : "Set time range"}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => setRangePanelOpen(false)} style={({ pressed }) => [styles.rangeModalClose, { backgroundColor: colors.surfaceMuted, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="close" size={19} color={colors.foreground} /></Pressable>
         </View>
-        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "من تاريخ" : "From date"} value={rangeDraft.start} onChange={(value) => setRangeDraft({ ...rangeDraft, start: value })} /></View>
-        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "إلى تاريخ" : "To date"} value={rangeDraft.end} onChange={(value) => setRangeDraft({ ...rangeDraft, end: value })} /></View>
+        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "من تاريخ" : "From date"} value={rangeDraft.start} onChange={(value) => setRangeDraft({ ...rangeDraft, start: value })} range={{ start: rangeDraft.start, end: rangeDraft.end }} /></View>
+        <View style={styles.rangeModalField}><CalendarDateField label={language === "ar" ? "إلى تاريخ" : "To date"} value={rangeDraft.end} onChange={(value) => setRangeDraft({ ...rangeDraft, end: value })} range={{ start: rangeDraft.start, end: rangeDraft.end }} /></View>
         <View style={[styles.rangeModalNote, { backgroundColor: colors.surfaceMuted + "80", borderColor: colors.border + "AA" }]}><MaterialIcons name="info-outline" size={15} color={colors.muted} /><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700", flex: 1, textAlign: align }}>{language === "ar" ? "تحصر الفلترة المهام ضمن هذا النطاق على الشريط وقائمة المهام." : "Filters the strip and task list within this range."}</Text></View>
         <View style={[styles.rangeModalActions, { flexDirection: row }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} onPress={() => setRangePanelOpen(false)} style={({ pressed }) => [styles.rangeModalCancel, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "800" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>

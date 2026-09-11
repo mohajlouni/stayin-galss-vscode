@@ -42,8 +42,8 @@ export function DateRangePicker({ visible, start, end, onApply, onClose }: { vis
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={onClose} style={[styles.close, { backgroundColor: colors.surfaceMuted }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable>
         </View>
-        <View style={[styles.field, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "من تاريخ" : "From"} value={draftStart} onChange={setDraftStart} /></View>
-        <View style={[styles.field, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "إلى تاريخ" : "To"} value={draftEnd} onChange={setDraftEnd} /></View>
+        <View style={[styles.field, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "من تاريخ" : "From"} value={draftStart} range={{ start: draftStart, end: draftEnd }} onChange={setDraftStart} /></View>
+        <View style={[styles.field, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}><CalendarDateField label={language === "ar" ? "إلى تاريخ" : "To"} value={draftEnd} range={{ start: draftStart, end: draftEnd }} onChange={setDraftEnd} /></View>
         <Text style={{ color: colors.muted, fontSize: 10, marginTop: 2, textAlign: align }}>{language === "ar" ? "النطاق الحالي" : "Current range"}: {longDate(draftStart, language, formatDate)} — {longDate(draftEnd, language, formatDate)}</Text>
         <View style={[styles.actions, { flexDirection: row }]}>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} onPress={onClose} style={[styles.cancel, { borderColor: colors.border }]}><MaterialIcons name="close" size={15} color={colors.muted} /><Text style={{ color: colors.foreground, fontWeight: "800" }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>

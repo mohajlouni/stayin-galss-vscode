@@ -27,7 +27,9 @@ function yearChoices(centerYear: number) {
   return Array.from({ length: 12 }, (_, index) => start + index);
 }
 
-export function CalendarDateField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+export type CalendarRange = { start: string; end: string };
+
+export function CalendarDateField({ label, value, onChange, placeholder, range }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; range?: CalendarRange }) {
   const colors = useColors();
   const { language, isRTL } = useI18n();
   const { formatDate } = useAppPreferences();
@@ -42,11 +44,11 @@ export function CalendarDateField({ label, value, onChange, placeholder }: { lab
         <Text numberOfLines={1} style={{ color: value ? colors.foreground : colors.muted, fontSize: 12, fontWeight: "800", marginTop: 2, textAlign: isRTL ? "right" : "left" }}>{display}</Text>
       </View>
     </Pressable>
-    <CalendarDatePicker visible={visible} value={value} onClose={() => setVisible(false)} onSelect={(date) => { onChange(date); setVisible(false); }} />
+    <CalendarDatePicker visible={visible} value={value} range={range} onClose={() => setVisible(false)} onSelect={(date) => { onChange(date); setVisible(false); }} />
   </>;
 }
 
-export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visible: boolean; value: string; onClose: () => void; onSelect: (value: string) => void }) {
+export function CalendarDatePicker({ visible, value, onClose, onSelect, range }: { visible: boolean; value: string; onClose: () => void; onSelect: (value: string) => void; range?: CalendarRange }) {
   const colors = useColors();
   const { language, isRTL } = useI18n();
   const { formatDate, formatMonth } = useAppPreferences();
@@ -99,7 +101,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visi
         </View>
 
         <View style={[styles.monthControls, { flexDirection: row }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات التالية" : "السنوات السابقة") : (isRTL ? "الشهر التالي" : "الشهر السابق")) : (yearMode ? (isRTL ? "Next years" : "Previous years") : (isRTL ? "Next month" : "Previous month"))} onPress={() => shiftCursor(isRTL ? 1 : -1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات التالية" : "السنوات السابقة") : (isRTL ? "الشهر التالي" : "الشهر السابق")) : (yearMode ? (isRTL ? "Next years" : "Previous years") : (isRTL ? "Next month" : "Previous month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? 1 : -1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
             <MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={23} color={colors.primary} />
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فتح اختيار السنة" : "Open year selector"} onPress={() => setYearMode((current) => !current)} style={({ pressed }) => [styles.monthLabel, { backgroundColor: yearMode ? colors.primary + "16" : colors.glassInset, opacity: pressed ? 0.72 : 1 }]}>
@@ -107,7 +109,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visi
             <Text style={{ color: colors.foreground, fontSize: 15, fontWeight: "900" }}>{yearMode ? `${years[0]} – ${years[years.length - 1]}` : formatMonth(cursor.year, cursor.month)}</Text>
             <MaterialIcons name={yearMode ? "expand-less" : "expand-more"} size={18} color={colors.primary} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات السابقة" : "السنوات التالية") : (isRTL ? "الشهر السابق" : "الشهر التالي")) : (yearMode ? (isRTL ? "Previous years" : "Next years") : (isRTL ? "Previous month" : "Next month"))} onPress={() => shiftCursor(isRTL ? -1 : 1)} style={[styles.iconButton, { backgroundColor: colors.glassInset }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? (yearMode ? (isRTL ? "السنوات السابقة" : "السنوات التالية") : (isRTL ? "الشهر السابق" : "الشهر التالي")) : (yearMode ? (isRTL ? "Previous years" : "Next years") : (isRTL ? "Previous month" : "Next month"))} onPress={(event) => { event.stopPropagation(); shiftCursor(isRTL ? -1 : 1); }} pointerEvents="auto" style={[styles.iconButton, { backgroundColor: colors.glassInset, position: "relative", zIndex: 20, elevation: 20, cursor: "pointer", userSelect: "none" }]}>
             <MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={23} color={colors.primary} />
           </Pressable>
         </View>
@@ -127,9 +129,13 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect }: { visi
             if (!date) return <View key={`blank-${index}`} style={[styles.blankDay, { backgroundColor: colors.surfaceMuted + "45", borderColor: colors.border + "88" }]} />;
             const isSelected = value === date;
             const isToday = date === today;
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={`${weekdayLabel(date, language)} ${formatDate(date)}${isToday ? ` · ${language === "ar" ? "اليوم" : "today"}` : ""}`} onPress={() => onSelect(date)} style={({ pressed }) => [styles.day, { backgroundColor: isSelected ? colors.primary : isToday ? colors.primary + "16" : colors.glassInset, opacity: pressed ? 0.68 : 1 }]}>
-              <Text style={{ color: isSelected ? colors.background : isToday ? colors.primary : colors.foreground, fontSize: 13, fontWeight: "900" }}>{Number(date.slice(-2))}</Text>
-              {isToday ? <View style={[styles.todayDot, { backgroundColor: isSelected ? colors.background : colors.primary }]} /> : null}
+            const isRangeEdge = Boolean(range && range.start && range.end && (date === range.start || date === range.end));
+            const isInRange = Boolean(range && range.start && range.end && date > range.start && date < range.end);
+            const dayBackground = isRangeEdge ? "#F59E0B" : isInRange ? "#F59E0B33" : isSelected ? colors.primary : isToday ? colors.primary + "16" : colors.glassInset;
+            const dayText = isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? colors.background : isToday ? colors.primary : colors.foreground;
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={`${weekdayLabel(date, language)} ${formatDate(date)}${isToday ? ` · ${language === "ar" ? "اليوم" : "today"}` : ""}`} onPress={() => onSelect(date)} style={({ pressed }) => [styles.day, { backgroundColor: dayBackground, borderTopWidth: isInRange ? 1 : 0, borderBottomWidth: isInRange ? 1 : 0, borderColor: isInRange ? "#F59E0B4D" : "transparent", shadowColor: isRangeEdge ? "#F59E0B" : "transparent", shadowOpacity: isRangeEdge ? 0.5 : 0, shadowRadius: isRangeEdge ? 6 : 0, shadowOffset: isRangeEdge ? { width: 0, height: 2 } : { width: 0, height: 0 }, elevation: isRangeEdge ? 4 : 0, opacity: pressed ? 0.68 : 1 }]}>
+              <Text style={{ color: dayText, fontSize: 13, fontWeight: "900" }}>{Number(date.slice(-2))}</Text>
+              {isToday ? <View style={[styles.todayDot, { backgroundColor: isRangeEdge ? "#0F172A" : isInRange ? "#FCD34D" : isSelected ? colors.background : colors.primary }]} /> : null}
             </Pressable>;
           })}</View>
         </>}

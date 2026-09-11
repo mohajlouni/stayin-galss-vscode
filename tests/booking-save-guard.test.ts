@@ -22,8 +22,10 @@ describe("booking save regression guards", () => {
     expect(form).toContain('<ActivityIndicator size="small" color="#FFFFFF" />');
   });
 
-  it("announces success and closes the form after the booking is written", () => {
-    expect(form).toContain('ToastAndroid.show(language === "ar" ? "تم تسجيل الحجز بنجاح" : "Booking saved successfully", ToastAndroid.SHORT)');
+  it("announces success across platforms and closes the form after the booking is written", () => {
+    expect(form).toContain('const message = language === "ar" ? "تم حفظ الحجز بنجاح" : "Booking saved successfully"');
+    expect(form).toContain('if (Platform.OS === "android") ToastAndroid.show(message, ToastAndroid.SHORT)');
+    expect(form).toContain('else Alert.alert(language === "ar" ? "تم الحفظ" : "Saved", message)');
     expect(form).toContain("notifyBookingSaved();");
     expect(form).toContain("router.back();");
   });

@@ -2,7 +2,7 @@ import { type Booking, type Chalet, type Expense, refundableDepositAmount, remai
 
 import { expenseAmountForChalet, ledgerPaymentMethod, type Payment, type PaymentMethod, type PaymentRecipientType } from "./booking-model";
 
-import { type AppData, type StaffFloatAccount, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal } from "./booking-model";
+import { type AppData, type FloatSettlementStatus, type StaffFloatAccount, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal, staffFloatReimbursementTotal, staffFloatReimbursementPaidTotal, staffFloatCommissionEarned } from "./booking-model";
 
 export type ReportRange = "today" | "month" | "all";
 export const REPORT_PAYMENT_METHODS = ["cash-guardian", "cash-owner", "click"] as const;
@@ -57,6 +57,8 @@ export type FinancialReportSummary = {
   staffFloatCollected: number;
   /* كشوف عهد الموظفين (كل ما لم يُسلّم للخزينة العامة). */
   staffFloatStatements: StaffFloatStatement[];
+  /** إجمالي ذمم المالك للموظفين عند صرف مصروفات من جيوبهم الخاصة. */
+  staffReimbursementDue: number;
   /* بند خصوم الأضرار التفصيلي. */
   depositCompensations: DepositCompensationRow[];
   expenses: number;
@@ -79,7 +81,13 @@ export type StaffFloatStatement = {
   paidOutTotal: number;
   settledTotal: number;
   outstanding: number;
-  settlements: { id: string; amount: number; settledAt: string; note?: string; settledByName?: string }[];
+  /** عمولات الموظف المستحقة على تحصيلات العهدة (تُخصم من صافي التوريد). */
+  commissionEarned: number;
+  /** ذمة المالك للموظف: مصروفات دفعها الموظف من جيبه الخاص ولم تُردّ بعد. */
+  reimbursementDue: number;
+  /** إجمالي التعويضات المصروفة للموظف حتى الآن (تصفية ذمم سابقة). */
+  reimbursementPaid: number;
+  settlements: { id: string; amount: number; settledAt: string; settlementDate?: string; recipientAccountLabel?: string; channel?: "vault" | "cliq" | "bank"; note?: string; settledByName?: string; status?: FloatSettlementStatus }[];
 };
 
 function collectionPaymentEvents(bookings: Booking[]): Payment[] {
@@ -110,18 +118,21 @@ export function depositCompensationRows(bookings: Booking[]): DepositCompensatio
   }).sort((left, right) => right.date.localeCompare(left.date));
 }
 
-export function staffFloatStatements(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings">): StaffFloatStatement[] {
+export function staffFloatStatements(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "settings" | "expenses">): StaffFloatStatement[] {
   return staffFloatAccounts(data.settings).map((account) => {
-    const settlements = (data.staffFloatSettlements ?? []).filter((entry) => entry.floatId === account.id).map((entry) => ({ id: entry.id, amount: entry.amount, settledAt: entry.settledAt, note: entry.note, settledByName: entry.settledByName })).sort((left, right) => right.settledAt.localeCompare(left.settledAt));
+    const settlements = (data.staffFloatSettlements ?? []).filter((entry) => entry.floatId === account.id && entry.status !== "PENDING_APPROVAL" && entry.status !== "REJECTED").map((entry) => ({ id: entry.id, amount: entry.amount, settledAt: entry.settledAt, settlementDate: entry.settlementDate, recipientAccountLabel: entry.recipientAccountLabel, channel: entry.channel, note: entry.note, settledByName: entry.settledByName, status: entry.status })).sort((left, right) => right.settledAt.localeCompare(left.settledAt));
     return {
       float: account,
       collectedTotal: staffFloatCollectedTotal(data, account.id),
       paidOutTotal: staffFloatPaidOutTotal(data, account.id),
       settledTotal: staffFloatSettledTotal(data, account.id),
       outstanding: staffFloatOutstanding(data, account.id),
+      commissionEarned: staffFloatCommissionEarned(data, account.id),
+      reimbursementDue: staffFloatReimbursementTotal(data, account.id),
+      reimbursementPaid: staffFloatReimbursementPaidTotal(data, account.id),
       settlements,
     };
-  }).filter((statement) => statement.collectedTotal > 0 || statement.settledTotal > 0 || statement.outstanding > 0 || statement.float.isActive);
+  }).filter((statement) => statement.collectedTotal > 0 || statement.settledTotal > 0 || statement.outstanding > 0 || statement.reimbursementDue > 0 || statement.float.isActive);
 }
 
 function summarizeCollectionSettlements(bookings: Booking[]): CollectionSettlement[] {
@@ -176,8 +187,9 @@ export function summarizeFinancialReport(bookings: Booking[], chalets: Chalet[],
   const compensations = depositCompensationRows(bookings);
   const compensationRevenue = compensations.reduce((sum, row) => sum + row.amount, 0);
   const ownerReceived = ownerDirectReceived(bookings);
-  const statements = staffFloatStatements({ bookings, staffFloatSettlements: extra.settlements ?? [], settings: extra.settings ?? DEFAULT_SETTINGS });
+  const statements = staffFloatStatements({ bookings, staffFloatSettlements: extra.settlements ?? [], settings: extra.settings ?? DEFAULT_SETTINGS, expenses });
   const staffFloatCollected = statements.reduce((sum, statement) => sum + statement.collectedTotal, 0);
+  const staffReimbursementDue = statements.reduce((sum, statement) => sum + statement.reimbursementDue, 0);
   return {
     bookingCount: bookings.length,
     rentalTotal: rentalTotalValue,
@@ -189,6 +201,7 @@ export function summarizeFinancialReport(bookings: Booking[], chalets: Chalet[],
     compensationRevenue,
     ownerDirectReceived: ownerReceived,
     staffFloatCollected,
+    staffReimbursementDue,
     staffFloatStatements: statements,
     depositCompensations: compensations,
     expenses: totalExpenses,

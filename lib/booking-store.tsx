@@ -9,8 +9,8 @@ import { parseBackupData, parseStoredAppData, serializeBackup } from "./backup-i
 import { persistChaletImage, removeManagedChaletImage } from "./chalet-image";
 import { persistPaymentReceipt } from "./payment-receipt";
 import { syncCheckoutNotifications } from "./checkout-notifications";
-import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, effectiveLoyaltyProgram, effectiveUtilityTracking, EMPTY_DATA, Expense, expireElapsedRecords, getBookingOperationalState, getChaletShift, isValidChaletReferenceCode, isValidPaymentMethod, isValidUnitCode, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, shiftCodeForShift, smartBookingReference, SpecialPriceRule, staffFloatAccounts, staffFloatCollectedTotal, staffFloatOutstanding, TurnoverTask, WaitlistEntry } from "./booking-model";
-import { type Asset, type AssetInspectionItem, type AuditLogEntry, type Customer, type DepositCompensation, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenancePaymentSource, type MaintenancePerformerRole, type MaintenanceTask, type NotificationRecipient, type NotificationType, type StaffFloatSettlement, type UtilityReading, type WeatherLog } from "./booking-model";
+import { AppData, AuditAction, Booking, Chalet, CheckInConfirmation, CheckoutConfirmation, DEFAULT_DEVICE_SETTINGS, DEFAULT_SETTINGS, DepositRefund, effectiveLoyaltyProgram, effectiveUtilityTracking, EMPTY_DATA, Expense, ExpenseFundingChannel, ExpensePaymentMethod, expireElapsedRecords, getBookingOperationalState, getChaletShift, isValidChaletReferenceCode, isValidPaymentMethod, isValidUnitCode, isWaitlistExpired, localDateISO, ManualStayCorrection, normalizeAppData, expenseFundingEntityLabel, normalizeChaletColor, normalizeChaletLatitude, normalizeChaletLongitude, normalizeChaletReferenceCode, normalizeChaletVisibility, normalizeOptionalText, normalizePaymentMethodOptions, normalizePropertyType, Payment, paymentMethodLabel, refundableDepositAmount, remainingAmount, remainingRefundableDeposit, rentalBalance, Settings, shiftCodeForShift, smartBookingReference, SpecialPriceRule, staffFloatAccounts, staffFloatCollectedTotal, staffFloatOutstanding, staffFloatReimbursementTotal, bookingEarnedCommission, staffFloatCommissionEarned, TurnoverTask, WaitlistEntry } from "./booking-model";
+import { type Asset, type AssetInspectionItem, type AuditLogEntry, type Customer, type DepositCompensation, type FloatSettlementChannel, type FloatSettlementStatus, type InAppNotification, type LeaseContract, type LoyaltyAccount, type LoyaltyTransaction, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenancePaymentSource, type MaintenancePerformerRole, type MaintenanceTask, type NotificationRecipient, type NotificationType, type StaffFloatSettlement, type UtilityReading, type WeatherLog } from "./booking-model";
 import { findCustomerByPhone, phoneE164, upsertCustomerFromBooking } from "./customers";
 import { deriveLoyaltyTier, pointsEarned } from "./loyalty";
 import { computeUtilityCost, findOpenUtilityReading, UTILITY_RATES, utilityTypeLabel } from "./utility-readings";
@@ -53,7 +53,9 @@ type BookingContextValue = AppData & {
   correctBookingStay: (id: string, correction: ManualStayCorrection) => Promise<void>;
   updateTurnoverTask: (task: TurnoverTask) => Promise<void>;
   addExpense: (expense: Omit<Expense, "id" | "createdAt" | "createdByName">) => Promise<void>;
+  updateExpense: (id: string, patch: Omit<Expense, "id" | "createdAt" | "createdByName">) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
+  createExpense: (input: Omit<Expense, "id" | "createdAt" | "createdByName"> & { id?: string }) => Promise<Expense>;
   acknowledgeWaitlistPriority: (bookingId: string, waitlistId: string) => Promise<void>;
   cancelBooking: (id: string, reason?: string) => Promise<void>;
   deleteBooking: (id: string) => Promise<void>;
@@ -68,7 +70,7 @@ type BookingContextValue = AppData & {
   deleteAsset: (id: string) => Promise<void>;
   saveMaintenanceTask: (task: Omit<MaintenanceTask, "id" | "createdAt"> & { id?: string }) => Promise<void>;
   startMaintenanceTask: (id: string) => Promise<void>;
-  completeMaintenanceTaskWithExpense: (id: string, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; paymentSource?: MaintenancePaymentSource; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean }) => Promise<void>;
+  completeMaintenanceTaskWithExpense: (id: string, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean; funding?: { entity: "owner" | "staff"; channel?: ExpenseFundingChannel; sourceId?: string; sourceLabel?: string; mode?: "float" | "reimbursement" } }) => Promise<void>;
   cancelMaintenanceTask: (id: string, mode?: "instance" | "series") => Promise<void>;
   deleteMaintenanceTask: (id: string) => Promise<void>;
   signContract: (input: { bookingId: string; guestSignatureBase64?: string; termsSnapshot: string; signedByName?: string }) => Promise<void>;
@@ -80,7 +82,11 @@ type BookingContextValue = AppData & {
   updatePayment: (bookingId: string, paymentId: string, update: Pick<Payment, "amount" | "note" | "paymentMethod">) => Promise<void>;
   voidPayment: (bookingId: string, paymentId: string, reason?: string) => Promise<void>;
   addDepositRefund: (bookingId: string, refund: DepositRefund) => Promise<void>;
-  settleStaffFloat: (floatId: string, note?: string) => Promise<void>;
+  settleStaffFloat: (floatId: string, note?: string, options?: { recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; settlementDate?: string; amount?: number }) => Promise<void>;
+  requestStaffFloatSettlement: (floatId: string, input: { amount: number; recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; settlementDate?: string; note?: string; receiptUri?: string }) => Promise<void>;
+  approveStaffFloatSettlement: (settlementId: string, note?: string) => Promise<void>;
+  rejectStaffFloatSettlement: (settlementId: string, reason?: string) => Promise<void>;
+  settleStaffReimbursement: (floatId: string, input: { recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; paymentDate?: string; note?: string }) => Promise<void>;
   recordDepositCompensation: (bookingId: string, input: { amount: number; note?: string }) => Promise<void>;
   addWaitlist: (entry: WaitlistEntry) => Promise<void>;
   deleteWaitlist: (id: string) => Promise<void>;
@@ -448,6 +454,22 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     void AsyncStorage.setItem(scopedStorageKey, JSON.stringify(next));
   }, [data.maintenanceTasks, data.notifications, data.settings.device?.language, hydrated, scopedStorageKey]);
 
+  const createExpense = async (expense: Omit<Expense, "id" | "createdAt" | "createdByName"> & { id?: string }): Promise<Expense> => {
+      if (isEmployee) throw new Error("expense-forbidden");
+      const amount = Number(expense.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("invalid-expense");
+      const generalAllocations = expense.generalAllocations?.map((allocation) => ({ chaletId: allocation.chaletId.trim(), chaletName: allocation.chaletName.trim(), amount: Number(allocation.amount) })).filter((allocation) => allocation.chaletId && allocation.chaletName && Number.isFinite(allocation.amount) && allocation.amount > 0);
+      if (generalAllocations?.length) {
+        const allocated = Math.round(generalAllocations.reduce((sum, allocation) => sum + allocation.amount, 0) * 100);
+        if (allocated !== Math.round(amount * 100)) throw new Error("invalid-general-expense-allocation");
+      }
+      const createdAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const savedExpense: Expense = { ...expense, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, id: expense.id?.trim() || `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, amount, date: expense.date, note: expense.note?.trim() || undefined, createdAt, createdByName: actorName };
+      await persist({ ...data, expenses: [savedExpense, ...(data.expenses ?? [])], auditLog: [{ id: `audit-expense-${Date.now()}`, action: "expense-added" as AuditAction, subjectName: savedExpense.chaletName ?? (savedExpense.generalAllocations?.length ? "مصروف عام (مشترك)" : "مصروف عام"), details: `${savedExpense.category} · ${savedExpense.amount} ${data.settings.currency}${savedExpense.note ? ` · ${savedExpense.note}` : ""}`, createdAt, actorName }, ...data.auditLog] });
+      return savedExpense;
+    };
+
   const value = useMemo<BookingContextValue>(() => ({
     ...data,
     hydrated,
@@ -494,11 +516,11 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
     },
     pendingBackupImport,
     lastDeleted,
-    addBooking: async (booking) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); const creatorCode = (user as { userCode?: string | null } | null | undefined)?.userCode ?? "U000"; const workspaceCode = typeof data.settings.workspaceCode === "string" && data.settings.workspaceCode.trim() ? data.settings.workspaceCode : "E01"; const referencedChalet = data.chalets.find((chalet) => chalet.id === booking.chaletId); const referencedShift = referencedChalet ? getChaletShift(referencedChalet, booking.shiftId, booking.bookingType) : undefined; const createdBooking: Booking = { ...booking, bookingReference: smartBookingReference({ creatorCode, workspaceCode, unitCode: referencedChalet?.referenceCode, date: booking.startDate, shiftCode: shiftCodeForShift(referencedShift, booking.bookingType) }), createdByUserId: user?.id, createdByName: user?.name ?? undefined, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined }; const customerUpsert = upsertCustomerFromBooking(data.customers ?? [], createdBooking); const language = data.settings.device?.language ?? "ar"; const bookingNotification = buildInAppNotification({ type: "new_booking", recipients: ["owner", "manager"], dataPayload: { bookingId: createdBooking.id }, ...buildNewBookingNotification(createdBooking, language, data.settings.businessName) }); await persist({ ...data, bookings: [createdBooking, ...data.bookings], customers: customerUpsert.customers, notifications: [bookingNotification, ...(data.notifications ?? [])] }); },
+    addBooking: async (booking) => { if (!can("create_bookings")) throw new Error("create-booking-forbidden"); const creatorCode = (user as { userCode?: string | null } | null | undefined)?.userCode ?? "U000"; const workspaceCode = typeof data.settings.workspaceCode === "string" && data.settings.workspaceCode.trim() ? data.settings.workspaceCode : "E01"; const referencedChalet = data.chalets.find((chalet) => chalet.id === booking.chaletId); const referencedShift = referencedChalet ? getChaletShift(referencedChalet, booking.shiftId, booking.bookingType) : undefined; const createdBooking: Booking = { ...booking, earnedCommission: bookingEarnedCommission(data.settings, booking), bookingReference: smartBookingReference({ creatorCode, workspaceCode, unitCode: referencedChalet?.referenceCode, date: booking.startDate, shiftCode: shiftCodeForShift(referencedShift, booking.bookingType) }), createdByUserId: user?.id, createdByName: user?.name ?? undefined, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined }; const customerUpsert = upsertCustomerFromBooking(data.customers ?? [], createdBooking); const language = data.settings.device?.language ?? "ar"; const bookingNotification = buildInAppNotification({ type: "new_booking", recipients: ["owner", "manager"], dataPayload: { bookingId: createdBooking.id }, ...buildNewBookingNotification(createdBooking, language, data.settings.businessName) }); await persist({ ...data, bookings: [createdBooking, ...data.bookings], customers: customerUpsert.customers, notifications: [bookingNotification, ...(data.notifications ?? [])] }); },
     updateBooking: async (booking) => {
       const existing = data.bookings.find((item) => item.id === booking.id);
       if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
-      await persist({ ...data, bookings: data.bookings.map((item) => item.id === booking.id ? { ...booking, updatedByUserId: user?.id, updatedByName: user?.name ?? undefined } : item) });
+      await persist({ ...data, bookings: data.bookings.map((item) => item.id === booking.id ? { ...booking, earnedCommission: bookingEarnedCommission(data.settings, booking), updatedByUserId: user?.id, updatedByName: user?.name ?? undefined } : item) });
     },
     markBookingCheckedIn: async (id, confirmation) => {
       if (!can("edit_bookings")) throw new Error("check-in-forbidden");
@@ -619,25 +641,38 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       await persist({ ...data, turnoverTasks: [...data.turnoverTasks.filter((item) => item.id !== task.id), savedTask], auditLog: [{ id: `audit-turnover-${Date.now()}`, action: "turnover-task-updated" as AuditAction, subjectName: task.chaletName ?? "الشاليه", details, createdAt: new Date().toISOString(), actorName }, ...data.auditLog] });
     },
     addExpense: async (expense) => {
+      await createExpense(expense);
+    },
+    createExpense: async (expense) => createExpense(expense),
+    updateExpense: async (id, patch) => {
       if (isEmployee) throw new Error("expense-forbidden");
-      const amount = Number(expense.amount);
+      const existing = (data.expenses ?? []).find((item) => item.id === id);
+      if (!existing) throw new Error("expense-not-found");
+      const amount = Number(patch.amount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("invalid-expense");
-      const generalAllocations = expense.generalAllocations?.map((allocation) => ({ chaletId: allocation.chaletId.trim(), chaletName: allocation.chaletName.trim(), amount: Number(allocation.amount) })).filter((allocation) => allocation.chaletId && allocation.chaletName && Number.isFinite(allocation.amount) && allocation.amount > 0);
+      const generalAllocations = patch.generalAllocations?.map((allocation) => ({ chaletId: allocation.chaletId.trim(), chaletName: allocation.chaletName.trim(), amount: Number(allocation.amount) })).filter((allocation) => allocation.chaletId && allocation.chaletName && Number.isFinite(allocation.amount) && allocation.amount > 0);
       if (generalAllocations?.length) {
         const allocated = Math.round(generalAllocations.reduce((sum, allocation) => sum + allocation.amount, 0) * 100);
         if (allocated !== Math.round(amount * 100)) throw new Error("invalid-general-expense-allocation");
       }
-      const createdAt = new Date().toISOString();
       const actorName = auditActorName ?? "مستخدم التطبيق";
-      const savedExpense: Expense = { ...expense, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, id: `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, amount, date: expense.date, note: expense.note?.trim() || undefined, createdAt, createdByName: actorName };
-      await persist({ ...data, expenses: [savedExpense, ...(data.expenses ?? [])], auditLog: [{ id: `audit-expense-${Date.now()}`, action: "expense-added" as AuditAction, subjectName: savedExpense.chaletName ?? (savedExpense.generalAllocations?.length ? "مصروف عام (مشترك)" : "مصروف عام"), details: `${savedExpense.category} · ${savedExpense.amount} ${data.settings.currency}${savedExpense.note ? ` · ${savedExpense.note}` : ""}`, createdAt, actorName }, ...data.auditLog] });
+      const editedAt = new Date().toISOString();
+      const savedExpense: Expense = { ...existing, ...patch, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, amount, note: patch.note?.trim() || undefined, receiptUri: patch.receiptUri, id: existing.id, createdAt: existing.createdAt, createdByName: existing.createdByName, expenseSource: existing.expenseSource, maintenanceTaskId: existing.maintenanceTaskId, isSettled: existing.isSettled, settlementId: existing.settlementId, isStaffReimbursementSettled: existing.isStaffReimbursementSettled, clearsReimbursementForFloatId: existing.clearsReimbursementForFloatId, reimbursementChannel: existing.reimbursementChannel, reimbursementSettled: existing.reimbursementSettled, reimbursementSettledById: existing.reimbursementSettledById };
+      const maintenanceTasks = existing.maintenanceTaskId && Array.isArray(data.maintenanceTasks) ? data.maintenanceTasks.map((task) => task.id === existing.maintenanceTaskId ? { ...task, cost: amount, actualCost: amount } : task) : data.maintenanceTasks;
+      const fromLabel = expenseFundingEntityLabel(existing.fundingEntity, "ar");
+      const toLabel = expenseFundingEntityLabel(patch.fundingEntity, "ar");
+      const details = `تم تعديل المصروف #${existing.id} من ${existing.amount} ${data.settings.currency} إلى ${amount} ${data.settings.currency} / ${fromLabel} ➔ ${toLabel} بواسطة ${actorName}`;
+      await persist({ ...data, expenses: (data.expenses ?? []).map((item) => item.id === id ? savedExpense : item), maintenanceTasks, auditLog: [{ id: `audit-expense-update-${Date.now()}`, action: "expense-updated" as AuditAction, subjectName: existing.chaletName ?? "مصروف عام", details, createdAt: editedAt, actorName }, ...data.auditLog] });
     },
     deleteExpense: async (id) => {
       if (isEmployee) throw new Error("expense-forbidden");
       const expense = (data.expenses ?? []).find((item) => item.id === id);
       if (!expense) throw new Error("expense-not-found");
       const actorName = auditActorName ?? "مستخدم التطبيق";
-      await persist({ ...data, expenses: (data.expenses ?? []).filter((item) => item.id !== id), auditLog: [{ id: `audit-expense-delete-${Date.now()}`, action: "expense-deleted" as AuditAction, subjectName: expense.chaletName ?? "مصروف عام", details: `${expense.category} · ${expense.amount} ${data.settings.currency}`, createdAt: new Date().toISOString(), actorName }, ...data.auditLog] });
+      const maintenanceTasks = expense.maintenanceTaskId && Array.isArray(data.maintenanceTasks) ? data.maintenanceTasks.map((task) => task.id === expense.maintenanceTaskId ? { ...task, expenseId: undefined, cost: 0, actualCost: 0 } : task) : data.maintenanceTasks;
+      const staffFloatSettlements = (data.staffFloatSettlements ?? []).some((settlement) => (settlement.coveredExpenseIds ?? []).includes(id)) ? (data.staffFloatSettlements ?? []).map((settlement) => (settlement.coveredExpenseIds ?? []).includes(id) ? { ...settlement, coveredExpenseIds: (settlement.coveredExpenseIds ?? []).filter((expenseId) => expenseId !== id), amount: Math.max(0, Math.round((Number(settlement.amount || 0) - expense.amount) * 100) / 100) } : settlement) : data.staffFloatSettlements;
+      const auditDetails = `${expense.category} · ${expense.amount} ${data.settings.currency}${expense.maintenanceTaskId ? " · فُصِل عن مهمة الصيانة وصُفِّرت تكلفتها إلى 0.00" : ""}`;
+      await persist({ ...data, expenses: (data.expenses ?? []).filter((item) => item.id !== id), maintenanceTasks, staffFloatSettlements, auditLog: [{ id: `audit-expense-delete-${Date.now()}`, action: "expense-deleted" as AuditAction, subjectName: expense.chaletName ?? "مصروف عام", details: auditDetails, createdAt: new Date().toISOString(), actorName }, ...data.auditLog] });
     },
     acknowledgeWaitlistPriority: async (bookingId, waitlistId) => {
       if (!can("edit_bookings")) throw new Error("edit-booking-forbidden");
@@ -757,7 +792,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const startedAt = new Date().toISOString();
       await persist({ ...data, maintenanceTasks: (data.maintenanceTasks ?? []).map((item) => item.id === id ? { ...item, status: "in_progress" as const } : item), maintenanceAuditLog: [maintenanceAuditEntry(id, "started", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: startedAt, details: `${maintenanceTaskUnitLabel(task)} · بدء العمل على المهمة` }), ...(data.maintenanceAuditLog ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "maintenance-task-updated" as AuditAction, subjectName: task.title, details: `${maintenanceTaskUnitLabel(task)} · بدء تنفيذ المهمة`, createdAt: startedAt, actorName }, ...data.auditLog] });
     },
-    completeMaintenanceTaskWithExpense: async (id, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; paymentSource?: MaintenancePaymentSource; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean }) => {
+    completeMaintenanceTaskWithExpense: async (id, input: { performedByName: string; performedByRole: MaintenancePerformerRole; actualCost?: number; completionNotes?: string; postExpense: boolean; scheduleNext?: boolean; funding?: { entity: "owner" | "staff"; channel?: ExpenseFundingChannel; sourceId?: string; sourceLabel?: string; mode?: "float" | "reimbursement" } }) => {
       if (!can("edit_bookings") && !isCaretaker) throw new Error("maintenance-management-forbidden");
       const task = (data.maintenanceTasks ?? []).find((item) => item.id === id);
       if (!task) throw new Error("maintenance-task-not-found");
@@ -765,21 +800,25 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const completedAt = new Date().toISOString();
       const actualCost = Number.isFinite(Number(input.actualCost)) && Number(input.actualCost) >= 0 ? Math.round(Number(input.actualCost) * 100) / 100 : undefined;
       const cost = actualCost ?? task.actualCost ?? task.cost ?? 0;
+      const funding = input.funding;
+      const fundingReady = funding?.entity === "owner" ? (funding?.channel === "vault-cash" ? true : funding?.channel === "cliq" || funding?.channel === "iban" ? Boolean(funding?.sourceId) : false) : funding?.entity === "staff" ? Boolean(funding?.sourceId && (funding?.mode === "float" || funding?.mode === "reimbursement")) : false;
       const shouldPost = input.postExpense && cost > 0 && !task.expenseId;
-      const completedTask: MaintenanceTask = { ...task, status: "completed", lastCompletedDate: completedAt.slice(0, 10), nextDueDate: nextMaintenanceDueDate({ ...task, lastCompletedDate: completedAt.slice(0, 10) }), completedAt, completedByName: actorName, performedById: user?.id, performedByName: input.performedByName.trim(), performedByRole: input.performedByRole, actualCost: cost, paymentSource: input.paymentSource, completionNotes: input.completionNotes?.trim() || undefined, expenseId: !shouldPost ? task.expenseId : undefined };
+      const derivedSource: MaintenancePaymentSource = !funding || funding.entity === "owner" ? "owner_account" : "staff_custody";
+      const completedTask: MaintenanceTask = { ...task, status: "completed", lastCompletedDate: completedAt.slice(0, 10), nextDueDate: nextMaintenanceDueDate({ ...task, lastCompletedDate: completedAt.slice(0, 10) }), completedAt, completedByName: actorName, performedById: user?.id, performedByName: input.performedByName.trim(), performedByRole: input.performedByRole, actualCost: cost, paymentSource: derivedSource, completionNotes: input.completionNotes?.trim() || undefined, expenseId: !shouldPost ? task.expenseId : undefined };
       let postedExpense: Expense | undefined;
       let auditTrail: MaintenanceAuditEntry[] = [maintenanceAuditEntry(id, "completed", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: shouldPost ? "" : `أتم ${actorName} (${actorRole === "owner" ? "المالك" : actorRole === "staff" ? "موظف المنشأة" : "الحارس"}) المهمة بتكلفة ${cost} ${data.settings.currency} (دون ترحيل للمصروفات)` })];
       let auditEntries: AuditLogEntry[] = [{ id: `audit-${Date.now()}`, action: "maintenance-task-completed" as AuditAction, subjectName: task.title, details: `${maintenanceTaskUnitLabel(task)} · اكتملت المهمة، الاستحقاق القادم ${completedTask.nextDueDate}`, createdAt: completedAt, actorName }];
       if (shouldPost) {
-        postedExpense = buildMaintenanceExpense({ id: `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, task, source: expenseSourceForPaymentSource(input.paymentSource ?? "owner_account"), amount: cost, performedByName: input.performedByName, createdByName: actorName, createdAt: completedAt });
+        if (!fundingReady) throw new Error("maintenance-funding-required");
+        postedExpense = await createExpense(buildMaintenanceExpense({ id: `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, task, source: expenseSourceForPaymentSource(derivedSource), amount: cost, performedByName: input.performedByName, createdByName: actorName, createdAt: completedAt, fundingEntity: funding?.entity, fundingChannel: funding?.entity === "owner" ? funding?.channel : undefined, fundingSourceId: funding?.sourceId, fundingSourceLabel: funding?.sourceLabel ?? (funding?.entity === "staff" ? (data.settings.paymentRouting?.staffFloats ?? []).find((account) => account.id === funding?.sourceId)?.label : undefined), staffMode: funding?.entity === "staff" ? funding?.mode : undefined }));
         completedTask.expenseId = postedExpense.id;
         auditTrail = [maintenanceAuditEntry(id, "expense_posted", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: `أتم ${actorName} (${actorRole === "owner" ? "المالك" : actorRole === "staff" ? "موظف المنشأة" : "الحارس"}) المهمة بتكلفة ${cost} ${data.settings.currency} - مُرحّل برقم #${postedExpense.id}` }), ...auditTrail];
-        auditEntries = [{ id: `audit-expense-${Date.now()}`, action: "expense-added" as AuditAction, subjectName: task.chaletName ?? "مصروف صيانة", details: `${postedExpense.category} · ${postedExpense.amount} ${data.settings.currency} · ${postedExpense.note}`, createdAt: completedAt, actorName }, ...auditEntries];
       }
       const notifications = (data.notifications ?? []).map((notification) => notification.dataPayload?.taskId === id && !notification.isRead ? { ...notification, isRead: true, readByIds: [...(notification.readByIds ?? []), user?.id ? String(user.id) : "local"] } : notification);
       const recurringTask: MaintenanceTask | undefined = input.scheduleNext === true && task.frequency !== "once" ? { id: `maintenance-${Date.now()}-recur-${Math.random().toString(36).slice(2, 6)}`, chaletId: task.chaletId, chaletName: task.chaletName, targetScope: task.targetScope, assetId: task.assetId, assetName: task.assetName, title: task.title, frequency: task.frequency, nextDueDate: completedTask.nextDueDate, lastCompletedDate: task.lastCompletedDate, assignedToStaffId: task.assignedToStaffId, assignedToStaffName: task.assignedToStaffName, status: "scheduled" as const, cost: task.cost, note: task.note, customIntervalDays: task.customIntervalDays, createdAt: completedAt, blockBooking: task.blockBooking === true && task.targetScope !== "all_units", blockPeriod: task.blockPeriod } : undefined;
       const recurringAudit: MaintenanceAuditEntry[] = recurringTask ? [maintenanceAuditEntry(recurringTask.id, "created", { userName: actorName, userRole: actorRole, userId: user?.id, timestamp: completedAt, details: `أُنشئت الدورة القادمة تلقائيًا · ${maintenanceTaskUnitLabel(recurringTask)} · استحقاق ${recurringTask.nextDueDate}` })] : [];
-      await persist({ ...data, maintenanceTasks: [...(recurringTask ? [recurringTask] : []), ...(data.maintenanceTasks ?? []).map((item) => item.id === id ? completedTask : item)], expenses: postedExpense ? [postedExpense, ...(data.expenses ?? [])] : data.expenses, maintenanceAuditLog: [...recurringAudit, ...auditTrail, ...(data.maintenanceAuditLog ?? [])], notifications, auditLog: [...auditEntries, ...data.auditLog] });
+      const current = dataRef.current ?? data;
+      await persist({ ...current, maintenanceTasks: [...(recurringTask ? [recurringTask] : []), ...(current.maintenanceTasks ?? []).map((item) => item.id === id ? completedTask : item)], maintenanceAuditLog: [...recurringAudit, ...auditTrail, ...(current.maintenanceAuditLog ?? [])], notifications, auditLog: [...auditEntries, ...(current.auditLog ?? [])] });
     },
     cancelMaintenanceTask: async (id, mode = "instance") => {
       if (!can("edit_bookings") && !isCaretaker) throw new Error("maintenance-cancel-forbidden");
@@ -901,16 +940,199 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const savedRefund: DepositRefund = { ...refund, sourceFloatId: refund.sourceFloatId ?? (typeof booking.depositCollection?.recipientTargetId === "string" && booking.depositCollection.recipientTargetId.startsWith("float-") ? booking.depositCollection.recipientTargetId.slice("float-".length) : undefined), returnedByUserId: refund.returnedByUserId ?? user?.id, returnedByName: refund.returnedByName ?? (user?.name?.trim() || undefined), recordedAt: refund.recordedAt ?? new Date().toISOString(), note: refund.note?.trim() || undefined };
       await persist({ ...data, bookings: data.bookings.map((item) => item.id === bookingId ? { ...item, depositRefunds: [...(item.depositRefunds ?? []), savedRefund] } : item) });
     },
-    settleStaffFloat: async (floatId, note) => {
+    settleStaffFloat: async (floatId, note, options) => {
       if (!can("manage_payments")) throw new Error("manage-payments-forbidden");
       const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
       if (!account) throw new Error("float-account-not-found");
       const outstanding = staffFloatOutstanding(data, floatId);
       if (outstanding <= 0.005) throw new Error("float-nothing-to-settle");
+      const requestedAmount = Number(options?.amount);
+      const hasRequestedAmount = Number.isFinite(requestedAmount) && requestedAmount > 0;
+      if (hasRequestedAmount && requestedAmount > outstanding + 0.005) throw new Error("float-settlement-amount-invalid");
+      const settleAmount = hasRequestedAmount && requestedAmount < outstanding - 0.005 ? Math.max(0.01, Math.round(requestedAmount * 100) / 100) : outstanding;
+      const isFull = Math.abs(settleAmount - outstanding) <= 0.005;
+      if (settleAmount <= 0.005) throw new Error("float-settlement-amount-invalid");
       const settledAt = new Date().toISOString();
+      const settlementId = `float-settlement-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const target = `float-${floatId}`;
+      const coveredPaymentIds: string[] = [];
+      const bookings = data.bookings.map((booking) => {
+        if (isFull) {
+          const payments = booking.payments.map((payment) => {
+            if (!payment.voidedAt && payment.recipientTargetId === target && !payment.settlementId) {
+              coveredPaymentIds.push(payment.id);
+              return { ...payment, settlementId };
+            }
+            return payment;
+          });
+          let deposit = booking.depositCollection;
+          if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target && !deposit.settlementId) {
+            coveredPaymentIds.push(deposit.id);
+            deposit = { ...deposit, settlementId };
+          }
+          return { ...booking, payments, depositCollection: deposit };
+        }
+        let remaining = settleAmount;
+        const payments = booking.payments.map((payment) => {
+          if (remaining <= 0) return payment;
+          if (!payment.voidedAt && payment.recipientTargetId === target && !payment.settlementId) {
+            const take = Math.min(Math.max(0, Number(payment.amount || 0)), remaining);
+            if (take > 0) {
+              coveredPaymentIds.push(payment.id);
+              remaining = Math.max(0, Math.round((remaining - take) * 100) / 100);
+              return { ...payment, settlementId };
+            }
+          }
+          return payment;
+        });
+        let deposit = booking.depositCollection;
+        if (remaining > 0 && deposit && !deposit.voidedAt && deposit.recipientTargetId === target && !deposit.settlementId) {
+          const take = Math.min(Math.max(0, Number(deposit.amount || 0)), remaining);
+          if (take > 0) {
+            coveredPaymentIds.push(deposit.id);
+            remaining = Math.max(0, Math.round((remaining - take) * 100) / 100);
+            deposit = { ...deposit, settlementId };
+          }
+        }
+        return { ...booking, payments, depositCollection: deposit };
+      });
+      const coveredExpenseIds: string[] = [];
+      const expenses = isFull ? (data.expenses ?? []).map((expense) => {
+        if (expense.isFloatExpense === true && expense.fundingSourceId === floatId && expense.isSettled !== true) {
+          coveredExpenseIds.push(expense.id);
+          return { ...expense, isSettled: true, settlementId };
+        }
+        return expense;
+      }) : (data.expenses ?? []);
+      const commissionEarned = staffFloatCommissionEarned(data, floatId);
       const actorName = auditActorName ?? "مستخدم التطبيق";
-      const settlement: StaffFloatSettlement = { id: `float-settlement-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, floatId, amount: outstanding, settledAt, note: note?.trim() || undefined, settledByUserId: user?.id, settledByName: actorName };
-      await persist({ ...data, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settled" as AuditAction, subjectName: account.label, details: `تسوية وتوريد عهدة "${account.label}" للمالك: ${outstanding} ${data.settings.currency}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: settledAt, actorName }, ...data.auditLog] });
+      const requestedSettlementDate = options?.settlementDate;
+      const settlementDate = typeof requestedSettlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(requestedSettlementDate) ? requestedSettlementDate : settledAt.slice(0, 10);
+      const settlement: StaffFloatSettlement = { id: settlementId, floatId, amount: settleAmount, settledAt, settlementDate, recipientAccountId: options?.recipientAccountId?.trim() || undefined, recipientAccountLabel: options?.recipientAccountLabel?.trim() || undefined, channel: options?.channel === "cliq" || options?.channel === "bank" || options?.channel === "vault" ? options?.channel : undefined, coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, note: note?.trim() || undefined, settledByUserId: user?.id, settledByName: actorName, status: "CONFIRMED" as FloatSettlementStatus, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined };
+      const recipientDetail = settlement.recipientAccountLabel ? ` · إلى ${settlement.recipientAccountLabel}` : "";
+      const partialDetail = !isFull ? ` · توريد جزئي ${settleAmount}` : "";
+      await persist({ ...data, bookings, expenses, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settled" as AuditAction, subjectName: account.label, details: `تسوية وتوريد عهدة "${account.label}" للمالك: ${settleAmount} ${data.settings.currency}${recipientDetail}${partialDetail}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: settledAt, actorName }, ...data.auditLog] });
+    },
+    requestStaffFloatSettlement: async (floatId, input) => {
+      if (!isAuthenticated || isGuest) throw new Error("float-request-forbidden");
+      const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
+      if (!account) throw new Error("float-account-not-found");
+      const outstanding = staffFloatOutstanding(data, floatId);
+      if (outstanding <= 0.005) throw new Error("float-nothing-to-settle");
+      const amount = Number(input.amount);
+      if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding + 0.005) throw new Error("float-settlement-amount-invalid");
+      const requestedAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const requestedSettlementDate = input.settlementDate;
+      const settlementDate = typeof requestedSettlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(requestedSettlementDate) ? requestedSettlementDate : localDateISO();
+      const receiptUri = typeof input.receiptUri === "string" && input.receiptUri.trim() ? input.receiptUri.trim().slice(0, 600) : undefined;
+      const settlementId = `float-settlement-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const settlement: StaffFloatSettlement = { id: settlementId, floatId, amount: Math.round(Math.max(0.01, amount) * 100) / 100, settledAt: requestedAt, settlementDate, recipientAccountId: input.recipientAccountId?.trim() || undefined, recipientAccountLabel: input.recipientAccountLabel?.trim() || undefined, channel: input.channel === "cliq" || input.channel === "bank" || input.channel === "vault" ? input.channel : undefined, note: input.note?.trim() || undefined, requestedByUserId: user?.id, requestedByName: actorName, receiptUri, status: "PENDING_APPROVAL" as FloatSettlementStatus };
+      const recipientDetail = settlement.recipientAccountLabel ? ` · إلى ${settlement.recipientAccountLabel}` : "";
+      await persist({ ...data, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-requested" as AuditAction, subjectName: account.label, details: `طلب توريد عهدة "${account.label}": ${settlement.amount} ${data.settings.currency}${recipientDetail}${input.note?.trim() ? ` · ${input.note.trim()}` : ""} · بانتظار تأكيد المالك`, createdAt: requestedAt, actorName }, ...data.auditLog] });
+    },
+    approveStaffFloatSettlement: async (settlementId, note) => {
+      if (!can("manage_payments")) throw new Error("manage-payments-forbidden");
+      const pending = (data.staffFloatSettlements ?? []).find((item) => item.id === settlementId && item.status === "PENDING_APPROVAL");
+      if (!pending) throw new Error("float-settlement-not-pending");
+      const account = staffFloatAccounts(data.settings).find((item) => item.id === pending.floatId);
+      if (!account) throw new Error("float-account-not-found");
+      const approvedAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const outstanding = staffFloatOutstanding(data, pending.floatId);
+      if (outstanding <= 0.005) {
+        const record: StaffFloatSettlement = { ...pending, status: "REJECTED", rejectReason: "لا يوجد رصيد متبقٍ للتأكيد", approvedAt, approvedByUserId: user?.id, approvedByName: actorName };
+        await persist({ ...data, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-rejected" as AuditAction, subjectName: account.label, details: `رفض توريد عهدة "${account.label}" (لا رصيد متبقٍ للتأكيد)`, createdAt: approvedAt, actorName }, ...data.auditLog] });
+        return;
+      }
+      const settleAmount = Math.min(outstanding, Math.max(0.01, Number(pending.amount || 0)));
+      const isFull = Math.abs(settleAmount - outstanding) <= 0.005;
+      const target = `float-${pending.floatId}`;
+      const coveredPaymentIds: string[] = [];
+      const bookings = data.bookings.map((booking) => {
+        if (isFull) {
+          const payments = booking.payments.map((payment) => {
+            if (!payment.voidedAt && payment.recipientTargetId === target && !payment.settlementId) {
+              coveredPaymentIds.push(payment.id);
+              return { ...payment, settlementId };
+            }
+            return payment;
+          });
+          let deposit = booking.depositCollection;
+          if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target && !deposit.settlementId) {
+            coveredPaymentIds.push(deposit.id);
+            deposit = { ...deposit, settlementId };
+          }
+          return { ...booking, payments, depositCollection: deposit };
+        }
+        let remaining = settleAmount;
+        const payments = booking.payments.map((payment) => {
+          if (remaining <= 0) return payment;
+          if (!payment.voidedAt && payment.recipientTargetId === target && !payment.settlementId) {
+            const take = Math.min(Math.max(0, Number(payment.amount || 0)), remaining);
+            if (take > 0) {
+              coveredPaymentIds.push(payment.id);
+              remaining = Math.max(0, Math.round((remaining - take) * 100) / 100);
+              return { ...payment, settlementId };
+            }
+          }
+          return payment;
+        });
+        let deposit = booking.depositCollection;
+        if (remaining > 0 && deposit && !deposit.voidedAt && deposit.recipientTargetId === target && !deposit.settlementId) {
+          const take = Math.min(Math.max(0, Number(deposit.amount || 0)), remaining);
+          if (take > 0) {
+            coveredPaymentIds.push(deposit.id);
+            remaining = Math.max(0, Math.round((remaining - take) * 100) / 100);
+            deposit = { ...deposit, settlementId };
+          }
+        }
+        return { ...booking, payments, depositCollection: deposit };
+      });
+      const coveredExpenseIds: string[] = [];
+      const expenses = isFull ? (data.expenses ?? []).map((expense) => {
+        if (expense.isFloatExpense === true && expense.fundingSourceId === pending.floatId && expense.isSettled !== true) {
+          coveredExpenseIds.push(expense.id);
+          return { ...expense, isSettled: true, settlementId };
+        }
+        return expense;
+      }) : (data.expenses ?? []);
+      const commissionEarned = staffFloatCommissionEarned(data, pending.floatId);
+      const record: StaffFloatSettlement = { ...pending, amount: settleAmount, status: "CONFIRMED", coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, approvedAt, approvedByUserId: user?.id, approvedByName: actorName, note: [pending.note, note?.trim()].filter(Boolean).join(" · ") || undefined, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined };
+      const recipientDetail = record.recipientAccountLabel ? ` · إلى ${record.recipientAccountLabel}` : "";
+      const partialDetail = !isFull ? ` · توريد جزئي ${settleAmount}` : "";
+      await persist({ ...data, bookings, expenses, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-approved" as AuditAction, subjectName: account.label, details: `تأكيد توريد عهدة "${account.label}" من ${record.requestedByName ?? "موظف"}: ${settleAmount} ${data.settings.currency}${recipientDetail}${partialDetail}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: approvedAt, actorName }, ...data.auditLog] });
+    },
+    rejectStaffFloatSettlement: async (settlementId, reason) => {
+      if (!can("manage_payments")) throw new Error("manage-payments-forbidden");
+      const pending = (data.staffFloatSettlements ?? []).find((item) => item.id === settlementId && item.status === "PENDING_APPROVAL");
+      if (!pending) throw new Error("float-settlement-not-pending");
+      const account = staffFloatAccounts(data.settings).find((item) => item.id === pending.floatId);
+      if (!account) throw new Error("float-account-not-found");
+      const rejectedAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const record: StaffFloatSettlement = { ...pending, status: "REJECTED", rejectReason: reason?.trim() || undefined, approvedAt: rejectedAt, approvedByUserId: user?.id, approvedByName: actorName };
+      await persist({ ...data, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-rejected" as AuditAction, subjectName: account.label, details: `رفض توريد عهدة "${account.label}" بمبلغ ${record.amount} ${data.settings.currency}${record.rejectReason?.trim() ? ` · السبب: ${record.rejectReason.trim()}` : ""}`, createdAt: rejectedAt, actorName }, ...data.auditLog] });
+    },
+    settleStaffReimbursement: async (floatId, input) => {
+      if (!can("manage_payments")) throw new Error("manage-payments-forbidden");
+      if (isEmployee) throw new Error("expense-forbidden");
+      const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
+      if (!account) throw new Error("float-account-not-found");
+      const due = staffFloatReimbursementTotal(data, floatId);
+      if (due <= 0.005) throw new Error("float-no-reimbursement-due");
+      const createdAt = new Date().toISOString();
+      const actorName = auditActorName ?? "مستخدم التطبيق";
+      const channel: FloatSettlementChannel = input.channel === "cliq" ? "cliq" : input.channel === "bank" ? "bank" : "vault";
+      const paymentMethod: ExpensePaymentMethod = channel === "cliq" ? "click" : channel === "bank" ? "iban" : "cash";
+      const fundingChannel: ExpenseFundingChannel = channel === "cliq" ? "cliq" : channel === "bank" ? "iban" : "vault-cash";
+      const reimbursementExpenseId = `expense-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const requestedPaymentDate = input.paymentDate;
+      const paymentDate = typeof requestedPaymentDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(requestedPaymentDate) ? requestedPaymentDate : localDateISO();
+      const savedExpense: Expense = { id: reimbursementExpenseId, category: "other", note: `تصفية ذمة موظف${input.note?.trim() ? `: ${input.note.trim()}` : ""}`, amount: due, date: paymentDate, paymentMethod, fundingEntity: "owner", fundingChannel, fundingSourceId: input.recipientAccountId?.trim() || undefined, fundingSourceLabel: input.recipientAccountLabel?.trim() || undefined, isStaffReimbursementSettled: true, clearsReimbursementForFloatId: floatId, reimbursementChannel: channel, createdAt, createdByName: actorName };
+      const expenses = (data.expenses ?? []).map((expense) => expense.isStaffReimbursement === true && expense.fundingSourceId === floatId && expense.reimbursementSettled !== true ? { ...expense, reimbursementSettled: true, reimbursementSettledById: reimbursementExpenseId } : expense);
+      const sourceDetail = input.recipientAccountLabel?.trim() ? ` · من ${input.recipientAccountLabel}` : "";
+      await persist({ ...data, expenses: [savedExpense, ...expenses], auditLog: [{ id: `audit-${Date.now()}`, action: "staff-reimbursement-paid" as AuditAction, subjectName: account.label, details: `تصفية ذمة موظف "${account.label}": ${due} ${data.settings.currency}${sourceDetail}${input.note?.trim() ? ` · ${input.note.trim()}` : ""}`, createdAt, actorName }, ...data.auditLog] });
     },
     recordDepositCompensation: async (bookingId, input) => {
       if (!can("refund_security_deposits")) throw new Error("refund-deposit-forbidden");
@@ -943,7 +1165,7 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       }
       const promotedAt = new Date().toISOString();
       const actorName = user?.name ?? "مستخدم التطبيق";
-      const savedBooking: Booking = { ...booking, createdByUserId: user?.id, createdByName: actorName, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined };
+      const savedBooking: Booking = { ...booking, createdByUserId: user?.id, createdByName: actorName, createdByRole: isManager ? "owner" : isEmployee ? "employee" : undefined, earnedCommission: bookingEarnedCommission(data.settings, booking) };
       const replacedBookings = data.bookings.filter((item) => conflictIds.includes(item.id));
       const bookingReference = savedBooking.bookingReference ?? smartBookingReference({ creatorCode: (user as { userCode?: string | null } | null | undefined)?.userCode ?? "U000", workspaceCode: typeof data.settings.workspaceCode === "string" && data.settings.workspaceCode.trim() ? data.settings.workspaceCode : "E01", unitCode: data.chalets.find((chalet) => chalet.id === savedBooking.chaletId)?.referenceCode, date: savedBooking.startDate, shiftCode: shiftCodeForShift(data.chalets.find((chalet) => chalet.id === savedBooking.chaletId) ? getChaletShift(data.chalets.find((chalet) => chalet.id === savedBooking.chaletId)!, savedBooking.shiftId, savedBooking.bookingType) : undefined, savedBooking.bookingType) });
       const replacementNames = replacedBookings.map((item) => item.customerName).join("، ");
@@ -961,10 +1183,10 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const cancelledAt = new Date().toISOString();
       const replacementAudits = replacedBookings.map((item, index) => ({ id: `audit-waitlist-replacement-${Date.now()}-${index}`, action: "booking-cancelled" as AuditAction, subjectName: item.customerName, details: `${item.chaletName ?? ""} · استُبدل بحجز العميل: ${booking.customerName}`, createdAt: cancelledAt, actorName }));
       const nextBookings = data.bookings.map((item) => {
-        if (item.id === booking.id) return booking;
+        if (item.id === booking.id) return { ...booking, earnedCommission: bookingEarnedCommission(data.settings, booking) };
         return conflictIds.includes(item.id) ? { ...item, status: "cancelled" as const, updatedByUserId: user?.id, updatedByName: actorName } : item;
       });
-      await persist({ ...data, bookings: exists ? nextBookings : [booking, ...nextBookings], auditLog: [...replacementAudits, ...data.auditLog] });
+      await persist({ ...data, bookings: exists ? nextBookings : [{ ...booking, earnedCommission: bookingEarnedCommission(data.settings, booking) }, ...nextBookings], auditLog: [...replacementAudits, ...data.auditLog] });
     },
     exportBackup: async () => {
       const uri = `${FileSystem.documentDirectory}booking-backup-${new Date().toISOString().slice(0, 10)}.json`;

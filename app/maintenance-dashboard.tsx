@@ -6,7 +6,7 @@ import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
 import { CalendarDateField } from "@/components/calendar-date-picker";
 import { useColors } from "@/hooks/use-colors";
-import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, MAINTENANCE_PAYMENT_SOURCES, maintenanceAuditActionLabel, maintenancePaymentSourceLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePaymentSource, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
+import { localDateISO, addDays, formatMoney, activeStaffFloatAccounts, activeOwnerTreasuryAccounts, EXPENSE_FUNDING_CHANNELS, expenseFundingChannelLabel, expenseFundingEntityLabel, maintenanceAuditActionLabel, maintenancePerformerRoleLabel, type Asset, type AssetCondition, type ExpenseFundingChannel, type MaintenanceAuditAction, type MaintenanceAuditEntry, type MaintenanceBlockPeriod, type MaintenanceFrequency, type MaintenancePerformerRole, type MaintenanceTask, type MaintenanceTaskStatus } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { assetConditionLabel, isMaintenanceDueToday, isMaintenanceOverdue, isMaintenanceUpcoming, MAINTENANCE_FREQUENCIES, maintenanceFrequencyLabel, maintenanceStats, nextMaintenanceDueDate } from "@/lib/maintenance";
@@ -79,7 +79,7 @@ type TaskDraft = { id?: string; title: string; unitIds: string[]; allUnits: bool
 type AssetDraft = { id?: string; name: string; unitIds: string[]; chaletName?: string; category: string; condition: AssetCondition; serialNumber?: string; purchaseCost?: string };
 /** خيار منفّذ المهمة في نافذة الإتمام: المستخدم الحالي، عهدة موظف/حارس، أو حارس الوحدة. */
 type PerformerOption = { id: string; name: string; role: MaintenancePerformerRole };
-type CompletionDraft = { task: MaintenanceTask; performerId: string; actualCost: string; paymentSource: MaintenancePaymentSource; postExpense: boolean; scheduleNext: boolean; notes: string };
+type CompletionDraft = { task: MaintenanceTask; performerId: string; actualCost: string; fundingEntity: "owner" | "staff" | null; fundingChannel: ExpenseFundingChannel | null; fundingSourceId: string; fundingSourceLabel: string; staffMode: "float" | "reimbursement" | null; postExpense: boolean; scheduleNext: boolean; notes: string };
 
 export default function MaintenanceDashboard() {
   const { maintenanceTasks, maintenanceAuditLog, assets, chalets, settings, saveMaintenanceTask, startMaintenanceTask, completeMaintenanceTaskWithExpense, cancelMaintenanceTask, deleteMaintenanceTask, saveAsset, deleteAsset } = useBookings();
@@ -118,6 +118,12 @@ export default function MaintenanceDashboard() {
   // بدء التنفيذ والإلغاء والإتمام متاحة للمالك/الموظفين والحراس بالتساوي؛ الإضافة والتحرير والحذف للمديرين/الموظفين فقط.
   const canOperate = canManage || role === "caretaker";
   const hasPositiveActualCost = (draft: CompletionDraft) => draft.actualCost.trim() !== "" && Number(draft.actualCost) > 0;
+  const fundingReady = (draft: CompletionDraft) => {
+    if (!hasPositiveActualCost(draft) || !draft.postExpense) return true;
+    if (draft.fundingEntity === "staff") return Boolean(draft.fundingSourceId.trim()) && (draft.staffMode === "float" || draft.staffMode === "reimbursement");
+    if (draft.fundingEntity === "owner") return draft.fundingChannel === "vault-cash" || ((draft.fundingChannel === "cliq" || draft.fundingChannel === "iban") && Boolean(draft.fundingSourceId.trim()));
+    return false;
+  };
   const completionNextDate = completion ? nextMaintenanceDueDate(completion.task) : "";
   const now = useMemo(() => Date.now(), []);
   const todayISO = localDateISO(new Date(now));
@@ -144,6 +150,9 @@ export default function MaintenanceDashboard() {
     const seen = new Set<string>();
     return options.filter((option) => { if (seen.has(option.name)) return false; seen.add(option.name); return true; });
   }, [user, role, settings, chalets]);
+
+  const fundingOwnerAccounts = useMemo(() => activeOwnerTreasuryAccounts(settings), [settings]);
+  const fundingStaffFloats = useMemo(() => activeStaffFloatAccounts(settings), [settings]);
 
   const sortedTasks = useMemo(() => {
     const tasks = [...(maintenanceTasks ?? [])];
@@ -252,7 +261,7 @@ export default function MaintenanceDashboard() {
     if (!canOperate || busy) return;
     triggerHaptic();
     const currentPerformer = performerOptions.find((option) => option.id === "current");
-    setCompletion({ task, performerId: currentPerformer?.id ?? performerOptions[0]?.id ?? "", actualCost: task.actualCost !== undefined ? String(task.actualCost) : task.cost !== undefined ? String(task.cost) : "", paymentSource: "owner_account", postExpense: true, scheduleNext: task.frequency === "once" ? false : true, notes: "" });
+    setCompletion({ task, performerId: currentPerformer?.id ?? performerOptions[0]?.id ?? "", actualCost: task.actualCost !== undefined ? String(task.actualCost) : task.cost !== undefined ? String(task.cost) : "", fundingEntity: "owner", fundingChannel: "vault-cash", fundingSourceId: "", fundingSourceLabel: "", staffMode: null, postExpense: true, scheduleNext: task.frequency === "once" ? false : true, notes: "" });
     setPerformerMenuOpen(false);
   };
 
@@ -267,7 +276,7 @@ export default function MaintenanceDashboard() {
         performedByName: performer.name,
         performedByRole: performer.role,
         actualCost: completion.actualCost.trim() ? Math.max(0, Number(completion.actualCost) || 0) : undefined,
-        paymentSource: completion.paymentSource,
+        funding: completion.postExpense && hasPositiveActualCost(completion) ? { entity: completion.fundingEntity ?? "owner", channel: completion.fundingEntity === "owner" ? (completion.fundingChannel ?? undefined) : undefined, sourceId: completion.fundingSourceId.trim() || undefined, sourceLabel: completion.fundingSourceLabel.trim() || undefined, mode: completion.fundingEntity === "staff" ? (completion.staffMode ?? undefined) : undefined } : undefined,
         completionNotes: completion.notes,
         postExpense: completion.postExpense,
         scheduleNext: completion.scheduleNext,
@@ -604,7 +613,29 @@ export default function MaintenanceDashboard() {
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "التكلفة الفعلية" : "Actual cost"} · {settings.currency}</Text>
           <TextInput accessibilityLabel={language === "ar" ? "التكلفة الفعلية" : "Actual cost"} value={completion.actualCost} onChangeText={(value) => setCompletion({ ...completion, actualCost: value, postExpense: value.trim() !== "" && Number(value) > 0 })} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
           <Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13, textAlign: align, marginTop: 14 }}>{language === "ar" ? "مصدر الدفع" : "Payment source"}</Text>
-          {MAINTENANCE_PAYMENT_SOURCES.map((source) => { const selected = completion.paymentSource === source; return <Pressable key={source} accessibilityRole="button" accessibilityLabel={maintenancePaymentSourceLabel(source, language)} onPress={() => setCompletion({ ...completion, paymentSource: source })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{maintenancePaymentSourceLabel(source, language)}</Text></Pressable>; })}
+          {hasPositiveActualCost(completion) ? <>
+            <View style={styles.fundingRow}>
+              {(["owner", "staff"] as const).map((entity) => { const selected = completion.fundingEntity === entity; return <Pressable key={entity} accessibilityRole="button" accessibilityLabel={expenseFundingEntityLabel(entity, language)} onPress={() => setCompletion({ ...completion, fundingEntity: entity, fundingChannel: entity === "owner" ? (completion.fundingChannel ?? "vault-cash") : null, fundingSourceId: entity === "owner" ? completion.fundingSourceId : "", fundingSourceLabel: entity === "owner" ? completion.fundingSourceLabel : "", staffMode: entity === "staff" ? (completion.staffMode ?? "float") : null })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={entity === "owner" ? "account-balance" : "account-balance-wallet"} size={16} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{expenseFundingEntityLabel(entity, language)}</Text></Pressable>; })}
+            </View>
+            {completion.fundingEntity === "owner" ? <>
+              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "قناة الصرف من الخزينة" : "Withdrawal channel"}</Text>
+              <View style={styles.fundingRow}>
+                {EXPENSE_FUNDING_CHANNELS.map((channel) => { const selected = completion.fundingChannel === channel; return <Pressable key={channel} accessibilityRole="button" accessibilityLabel={expenseFundingChannelLabel(channel, language)} onPress={() => setCompletion({ ...completion, fundingChannel: channel, fundingSourceId: channel === "vault-cash" ? "" : completion.fundingSourceId, fundingSourceLabel: channel === "vault-cash" ? "" : completion.fundingSourceLabel })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={channel === "vault-cash" ? "point-of-sale" : channel === "cliq" ? "bolt" : "account-balance"} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{expenseFundingChannelLabel(channel, language)}</Text></Pressable>; })}
+              </View>
+              {completion.fundingChannel !== "vault-cash" ? <>
+                <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "الحساب المموَّل منه" : "Funding account"}</Text>
+                {(() => { const accounts = fundingOwnerAccounts.filter((account) => (completion.fundingChannel === "cliq" && account.kind === "cliq") || (completion.fundingChannel === "iban" && account.kind === "bank")); return accounts.length ? accounts.map((account) => { const selected = completion.fundingSourceId === account.id; return <Pressable key={account.id} accessibilityRole="button" accessibilityLabel={account.label} onPress={() => setCompletion({ ...completion, fundingSourceId: account.id, fundingSourceLabel: account.label })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{account.label}</Text></Pressable>; }) : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "لا توجد حسابات مفعلة لهذه القناة — فعّلها في إعدادات الدفع." : "No active accounts for this channel — enable them in payment settings."}</Text>; })()}
+              </> : null}
+            </> : <>
+              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "نقطة العهدة المخصوم منها" : "Float point to deduct from"}</Text>
+              {fundingStaffFloats.length ? fundingStaffFloats.map((account) => { const selected = completion.fundingSourceId === account.id; return <Pressable key={account.id} accessibilityRole="button" accessibilityLabel={account.label} onPress={() => setCompletion({ ...completion, fundingSourceId: account.id, fundingSourceLabel: account.label })} style={[styles.radioRow, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={selected ? "radio-button-checked" : "radio-button-unchecked"} size={17} color={selected ? colors.primary : colors.muted} /><Text numberOfLines={1} style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{account.label}</Text></Pressable>; }) : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "لا توجد عُهد مفعلة — أنشئ نقطة عهدة في إعدادات الدفع." : "No active floats — create a float point in payment settings."}</Text>}
+              <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "800", marginTop: 10, textAlign: align }}>{language === "ar" ? "طريقة السداد" : "Payment mode"}</Text>
+              <View style={styles.fundingRow}>
+                {([{ id: "float", ar: "خصم من العهدة النقدية المعلقة", en: "Deduct from held float cash" }, { id: "reimbursement", ar: "دفع من الجيب الخاص للموظف", en: "Paid from staff own pocket" }] as const).map((mode) => { const selected = completion.staffMode === mode.id; return <Pressable key={mode.id} accessibilityRole="button" accessibilityLabel={mode.ar} onPress={() => setCompletion({ ...completion, staffMode: mode.id })} style={[styles.fundingChip, { backgroundColor: selected ? colors.primary + "14" : colors.surfaceMuted, borderColor: selected ? colors.primary : colors.border }]}><MaterialIcons name={mode.id === "float" ? "account-balance-wallet" : "payments"} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? mode.ar : mode.en}</Text></Pressable>; })}
+              </View>
+            </>}
+            {!fundingReady(completion) ? <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "أكمل تحديد مصدر التمويل لتمكين الترحيل التلقائي." : "Complete the funding selection to enable automatic posting."}</Text> : null}
+          </> : null}
           <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "الترحيل التلقائي للمصروفات" : "Auto post expense"} disabled={!hasPositiveActualCost(completion)} onPress={() => setCompletion({ ...completion, postExpense: !completion.postExpense })} style={[styles.checkRow, { backgroundColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success + "12" : colors.surfaceMuted, borderColor: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.border, opacity: hasPositiveActualCost(completion) ? 1 : 0.45 }]}><MaterialIcons name={hasPositiveActualCost(completion) && completion.postExpense ? "check-box" : "check-box-outline-blank"} size={18} color={hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.muted} /><Text style={{ flex: 1, color: hasPositiveActualCost(completion) && completion.postExpense ? colors.success : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "ترحيل تلقائي إلى سجل المصروفات تحت بند (صيانة وتشغيل)" : "Auto post to the expenses ledger under (Maintenance & operations)"}</Text></Pressable>
           {hasPositiveActualCost(completion) ? null : <Text style={{ color: colors.warning, fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: align }}>{language === "ar" ? "أدخل تكلفة فعلية أكبر من صفر لتفعيل الترحيل التلقائي للمصروفات." : "Enter an actual cost greater than zero to enable automatic expense posting."}</Text>}
           {completion.task.frequency !== "once" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "جدولة الاستحقاق القادم" : "Schedule next occurrence"} onPress={() => setCompletion({ ...completion, scheduleNext: !completion.scheduleNext })} style={[styles.checkRow, { backgroundColor: completion.scheduleNext ? colors.primary + "12" : colors.surfaceMuted, borderColor: completion.scheduleNext ? colors.primary : colors.border }]}><MaterialIcons name={completion.scheduleNext ? "check-box" : "check-box-outline-blank"} size={18} color={completion.scheduleNext ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: completion.scheduleNext ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? `جدولة الاستحقاق القادم تلقائياً (تاريخ: ${formatDate(completionNextDate) ?? completionNextDate})` : `Automatically schedule the next occurrence (date: ${formatDate(completionNextDate) ?? completionNextDate})`}</Text></Pressable> : null}
@@ -612,7 +643,7 @@ export default function MaintenanceDashboard() {
           <TextInput accessibilityLabel={language === "ar" ? "ملاحظات الإتمام" : "Completion notes"} value={completion.notes} onChangeText={(value) => setCompletion({ ...completion, notes: value })} multiline placeholder={language === "ar" ? "ما تم إنجازه، قطع الغيار، ملاحظات إضافية..." : "What was done, parts, extra notes..."} placeholderTextColor={colors.muted} style={[styles.input, styles.multiline, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
           <View style={[styles.completionActions, { flexDirection: row }]}>
             <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء" : "Cancel"} disabled={Boolean(busy)} onPress={() => setCompletion(null)} style={({ pressed }) => [styles.completionSecondary, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={{ color: colors.foreground, fontWeight: "800", fontSize: 13 }}>{language === "ar" ? "إلغاء" : "Cancel"}</Text></Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting"} disabled={Boolean(busy) || !completion.performerId} onPress={() => void submitCompletion()} style={({ pressed }) => [styles.completionPrimary, { backgroundColor: busy?.kind === "complete" ? colors.muted : colors.success, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name={busy?.kind === "complete" ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{busy?.kind === "complete" ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting")}</Text></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting"} disabled={Boolean(busy) || !completion.performerId || !fundingReady(completion)} onPress={() => void submitCompletion()} style={({ pressed }) => [styles.completionPrimary, { backgroundColor: busy?.kind === "complete" ? colors.muted : colors.success, opacity: pressed ? 0.8 : 1 }]}><MaterialIcons name={busy?.kind === "complete" ? "hourglass-top" : "check"} size={16} color="#FFFFFF" /><Text style={{ color: "#FFFFFF", fontWeight: "900", fontSize: 13 }}>{busy?.kind === "complete" ? (language === "ar" ? "جارٍ الترحيل..." : "Posting...") : (language === "ar" ? "تأكيد الإتمام والترحيل" : "Confirm completion & posting")}</Text></Pressable>
           </View>
         </ScrollView>
       </View>
@@ -792,6 +823,8 @@ const styles = StyleSheet.create({
   performerRow: { minHeight: 44, paddingHorizontal: 12, alignItems: "center", flexDirection: "row", gap: 8 },
   roleTag: { minHeight: 18, borderRadius: 9, paddingHorizontal: 7, alignItems: "center", justifyContent: "center" },
   radioRow: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, marginTop: 7, alignItems: "center", flexDirection: "row", gap: 9 },
+  fundingRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 7 },
+  fundingChip: { minHeight: 42, borderRadius: 12, borderWidth: 1, paddingHorizontal: 11, alignItems: "center", flexDirection: "row", gap: 7, flexGrow: 1, flexBasis: "44%" },
   checkRow: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 12, marginTop: 7, alignItems: "center", flexDirection: "row", gap: 9 },
   taskErrorBox: { flexDirection: "row", alignItems: "center", borderRadius: 13, borderWidth: 1, padding: 11, marginTop: 14 },
   scheduleHint: { flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 12, borderWidth: 1, padding: 10, marginTop: 8 },

@@ -16,7 +16,7 @@ describe("Booking form edit validation", () => {
   it("keeps the compact form clear by surfacing missing inputs and reserving space above the fixed action dock", () => {
     expect(source).toContain("const bookingReady = missingItems.length === 0");
     expect(source).toContain("أدخل السعر يدويًا أو حدده من الإعدادات");
-    expect(source).toContain("paddingBottom: 148");
+    expect(source).toContain("paddingBottom: 176");
   });
 
   it("keeps the RTL rent total in a field-sized third column", () => {

@@ -9,8 +9,8 @@ describe("expenses management", () => {
   it("opens a full expense form with general scope and required financial fields", () => {
     expect(screen).toContain("إضافة مصروف");
     expect(screen).toContain("جميع الشاليهات / مصروف عام");
-    expect(screen).toContain("رواتب وحراس");
-    expect(screen).toContain("فواتير وخدمات");
+    expect(screen).toContain("رواتب ومكافآت");
+    expect(screen).toContain("كهرباء ومياه");
     expect(screen).toContain("تحويل CliQ");
     expect(screen).toContain("البيان / ملاحظات المصروف");
     expect(screen).toContain("اختر نطاق المصروف أولًا");
@@ -44,5 +44,25 @@ describe("expenses management", () => {
   it("links the reports screen to expenses and net profit", () => {
     expect(reports).toContain("إدارة المصروفات والربح الصافي");
     expect(reports).toContain("الربح الصافي");
+  });
+
+  it("offers the cascading funding source selector with treasury, float, and staff-pocket modes", () => {
+    expect(screen).toContain("مصدر التمويل");
+    expect(screen).toContain("الخزينة المركزية للمالك");
+    expect(screen).toContain("عهدة موظف / حارس ميداني");
+    expect(screen).toContain("نقد من صندوق الخزينة");
+    expect(screen).toContain("حوالة بنكية IBAN");
+    expect(screen).toContain("من العُهدة النقدية المعلقة");
+    expect(screen).toContain("دفع من الجيب الخاص للموظف");
+    expect(screen).toContain("تاريخ الصرف");
+  });
+
+  it("renders entity and funding-mode badges plus monthly treasury and float counters", () => {
+    expect(screen).toContain("خزينة رئيسية");
+    expect(screen).toContain("خصم من عهدة");
+    expect(screen).toContain("ذمة للموظف");
+    expect(screen).toContain("إجمالي المصروفات");
+    expect(screen).toContain("من الخزينة المركزية");
+    expect(screen).toContain("من عُهد الموظفين");
   });
 });

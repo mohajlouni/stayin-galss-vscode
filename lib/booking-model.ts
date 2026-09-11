@@ -24,10 +24,25 @@ export function propertyTypeFrameRadius(value: unknown) {
   const type = normalizePropertyType(value);
   return type === "farm" ? 24 : type === "cabin" ? 30 : type === "villa" ? 26 : type === "camp" ? 20 : type === "other" ? 26 : 28;
 }
-export const EXPENSE_CATEGORIES = ["guards-salaries", "maintenance", "cleaning-supplies", "utilities", "other"] as const;
+export const EXPENSE_CATEGORIES = ["maintenance", "fuel-gas", "cleaning-supplies", "utilities", "hospitality", "guards-salaries", "other"] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
-export const EXPENSE_PAYMENT_METHODS = ["cash", "click"] as const;
+export const EXPENSE_PAYMENT_METHODS = ["cash", "click", "iban"] as const;
 export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
+/** جهة تمويل المصروف: الخزينة المركزية للمالك أو عهدة موظف / حارس ميداني. */
+export const EXPENSE_FUNDING_ENTITIES = ["owner", "staff"] as const;
+export type ExpenseFundingEntity = (typeof EXPENSE_FUNDING_ENTITIES)[number];
+/** قنوات الصرف من الخزينة المركزية للمالك. */
+export const EXPENSE_FUNDING_CHANNELS = ["vault-cash", "cliq", "iban"] as const;
+export type ExpenseFundingChannel = (typeof EXPENSE_FUNDING_CHANNELS)[number];
+/** طريقة سداد الموظف: خصم من عهدته النقدية أو دفعه من جيبه الخاص (ذمة تُردّ له). */
+export const EXPENSE_STAFF_MODES = ["float", "reimbursement"] as const;
+export type ExpenseStaffMode = (typeof EXPENSE_STAFF_MODES)[number];
+export function expenseFundingEntityLabel(entity: ExpenseFundingEntity | undefined, language: "ar" | "en") {
+  return (entity === "staff" ? ["عهدة موظف / حارس ميداني", "Staff float / field guard"] : ["الخزينة المركزية للمالك", "Owner central treasury"])[language === "ar" ? 0 : 1];
+}
+export function expenseFundingChannelLabel(channel: ExpenseFundingChannel | undefined, language: "ar" | "en") {
+  return ({ "vault-cash": ["نقد من صندوق الخزينة", "Cash from treasury"], cliq: ["تحويل عبر CliQ", "CliQ transfer"], iban: ["حوالة بنكية IBAN", "Bank transfer (IBAN)"], "undefined": ["غير محدد", "Not set"] } as const)[channel ?? "undefined"][language === "ar" ? 0 : 1];
+}
 /** مصادر الصرف عند ترحيل مصروف صيانة من إنجاز مهمة: عهدة الحارس / عهدة الموظف / حساب المالك. */
 export const MAINTENANCE_EXPENSE_SOURCES = ["guard-custody", "staff-float", "owner-account"] as const;
 export type MaintenanceExpenseSource = (typeof MAINTENANCE_EXPENSE_SOURCES)[number];
@@ -81,9 +96,48 @@ export type OwnerTreasuryAccount = { id: string; kind: OwnerTreasuryKind; label:
 /** قناة استلام داخل نقطة العهدة الميدانية: CliQ أو بنك، ببياناتها المنظمة وعلامة الافتراضية داخل النقطة. */
 export type StaffFloatChannel = { kind: "cliq" | "bank"; alias?: string; provider?: string; holderName?: string; iban?: string; isDefault?: boolean; whatsApp?: boolean; isActive?: boolean };
 /** نقطة تحصيل ميدانية مرتبطة بموظف: تستقبل عمليات على ذمة الموظف (عهدة) لحين التوريد للمالك. */
-export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; contactPhone?: string; label: string; cliqAlias?: string; bankDetails?: string; channels?: StaffFloatChannel[]; maxFloatLimit?: number; cashActive?: boolean; hasOther?: boolean; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean; entity?: "staff" | "guard" };
+export type StaffFloatAccount = { id: string; memberUserId?: number; memberName?: string; contactPhone?: string; label: string; cliqAlias?: string; bankDetails?: string; channels?: StaffFloatChannel[]; maxFloatLimit?: number; cashActive?: boolean; hasOther?: boolean; isActive?: boolean; isDefault?: boolean; whatsApp?: boolean; entity?: "staff" | "guard"; /** تفعيل محرك عمولات الموظف على تحصيلات هذه العهدة. */ isCommissionEnabled?: boolean; /** نوع العمولة: مبلغ ثابت لكل حجز أو نسبة من إجمالي تحصيلات العهدة. */ commissionType?: "FIXED_PER_BOOKING" | "PERCENTAGE_OF_TOTAL"; /** قيمة العمولة: مبلغ ثابت بالعملة أو نسبة مئوية. */ commissionValue?: number };
+/** قناة التوريد/الصرف عند تسوية العهدة أو تصفية ذمة الموظف: كاش الخزينة، CliQ، أو بنك. */
+export type FloatSettlementChannel = "vault" | "cliq" | "bank";
+/** حالة تسوية العهدة في المصافحة الثنائية: طلب بانتظار تأكيد المالك، مؤكَّد، أو مرفوض/يحتاج تعديل. */
+export type FloatSettlementStatus = "PENDING_APPROVAL" | "CONFIRMED" | "REJECTED";
+/** سجل تسوية عهدة غير قابل للتعديل: يُصفّر ذمة الموظف وينقل المبلغ لحساب الخزينة المستلم. */
+export type FloatSettlementRecord = {
+  id: string;
+  floatId: string;
+  amount: number;
+  settledAt: string;
+  /** تاريخ التسوية (افتراضيًا يوم التسوية) — يُعرض في سجل التسويات السابقة. */
+  settlementDate?: string;
+  /** حساب الخزينة المستلم (صندوق كاش، حساب CliQ للمالك، أو بنك). */
+  recipientAccountId?: string;
+  recipientAccountLabel?: string;
+  channel?: FloatSettlementChannel;
+  /** معرّفات دفعات الحجوزات والتأمينات المتضمنة في هذه التسوية (مؤشر عليها settlementId). */
+  coveredPaymentIds?: string[];
+  /** معرّفات مصروفات العهدة المتضمنة في هذه التسوية (مؤشر عليها isSettled). */
+  coveredExpenseIds?: string[];
+  note?: string;
+  settledByUserId?: number;
+  settledByName?: string;
+  /** حالة التسوية: بانتظار تأكيد المالك (طلب موظف)، مؤكَّد، أو مرفوض. */
+  status?: FloatSettlementStatus;
+  /** من طلب التوريد (في المصافحة الثنائية: الموظف يقدّم والمالك يؤكد). */
+  requestedByUserId?: number;
+  requestedByName?: string;
+  /** إثبات إيصال التوريد المرفوع مع طلب الموظف. */
+  receiptUri?: string;
+  /** سبب الرفض/طلب التعديل من المالك. */
+  rejectReason?: string;
+  /** توقيت ومن نفّذ التأكيد أو الرفض. */
+  approvedAt?: string;
+  approvedByUserId?: number;
+  approvedByName?: string;
+  /** عمولات الموظف المخصومة ضمن هذه التسوية (نقدية مقابل تحصيلاته). */
+  commissionOffset?: number;
+};
 /** تسوية وتوريد عهدة: المالك يصفّر ذمة الموظف وينقل المبلغ لخزينته. */
-export type StaffFloatSettlement = { id: string; floatId: string; amount: number; settledAt: string; note?: string; settledByUserId?: number; settledByName?: string };
+export type StaffFloatSettlement = FloatSettlementRecord;
 /** خصم أضرار/غرامات من التأمين عند المغادرة: يُحوَّل لبند إيرادات تعويضات ويخصم من الاسترداد. */
 export type DepositCompensation = { amount: number; date: string; recordedAt?: string; note?: string; sourceFloatId?: string; returnedByUserId?: number; returnedByName?: string };
 export type PaymentRoutingSettings = { ownerAccounts?: OwnerTreasuryAccount[]; masterAccounts?: MasterPaymentAccounts; staffFloats?: StaffFloatAccount[] };
@@ -162,7 +216,7 @@ export function normalizeStaffFloatAccounts(value: unknown): StaffFloatAccount[]
     ids.add(id);
     const channels = Array.isArray(candidate.channels) ? candidate.channels.flatMap((entry) => { const c = entry as Partial<StaffFloatChannel>; if (c?.kind !== "cliq" && c?.kind !== "bank") return []; return [{ kind: c.kind, alias: typeof c.alias === "string" ? c.alias.trim().slice(0, 160) || undefined : undefined, provider: typeof c.provider === "string" ? c.provider.trim().slice(0, 60) || undefined : undefined, holderName: typeof c.holderName === "string" ? c.holderName.trim().slice(0, 60) || undefined : undefined, iban: typeof c.iban === "string" ? c.iban.trim().slice(0, 200) || undefined : undefined, isDefault: c.isDefault === true || undefined, whatsApp: c.whatsApp === true || undefined, isActive: c.isActive === false ? false : undefined } satisfies StaffFloatChannel]; }) : undefined;
     const cashActive = candidate.cashActive === true || (candidate.cashActive === undefined && candidate.isActive !== false);
-    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone.trim().slice(0, 30) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, channels, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, cashActive, hasOther: candidate.hasOther === true || undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || (Array.isArray(channels) && channels.some((entry) => entry.whatsApp === true)) || undefined, entity: candidate.entity === "staff" || candidate.entity === "guard" ? candidate.entity : undefined } satisfies StaffFloatAccount];
+    return [{ id, memberUserId: Number.isInteger(candidate.memberUserId) ? candidate.memberUserId : undefined, memberName: typeof candidate.memberName === "string" ? candidate.memberName.trim().slice(0, 120) || undefined : undefined, contactPhone: typeof candidate.contactPhone === "string" ? candidate.contactPhone.trim().slice(0, 30) || undefined : undefined, label, cliqAlias: typeof candidate.cliqAlias === "string" ? candidate.cliqAlias.trim().slice(0, 160) || undefined : undefined, bankDetails: typeof candidate.bankDetails === "string" ? candidate.bankDetails.trim().slice(0, 1000) || undefined : undefined, channels, maxFloatLimit: Number.isFinite(Number(candidate.maxFloatLimit)) && Number(candidate.maxFloatLimit) >= 0 ? Math.round(Number(candidate.maxFloatLimit) * 100) / 100 : undefined, cashActive, hasOther: candidate.hasOther === true || undefined, isActive: candidate.isActive !== false, isDefault: candidate.isDefault === true || undefined, whatsApp: candidate.whatsApp === true || (Array.isArray(channels) && channels.some((entry) => entry.whatsApp === true)) || undefined, entity: candidate.entity === "staff" || candidate.entity === "guard" ? candidate.entity : undefined, isCommissionEnabled: candidate.isCommissionEnabled === true || undefined, commissionType: candidate.commissionType === "FIXED_PER_BOOKING" || candidate.commissionType === "PERCENTAGE_OF_TOTAL" ? candidate.commissionType : undefined, commissionValue: Number.isFinite(Number(candidate.commissionValue)) && Number(candidate.commissionValue) > 0 ? Math.round(Number(candidate.commissionValue) * 100) / 100 : undefined } satisfies StaffFloatAccount];
   });
 }
 /** العُهد الميدانية المسجلة في إعدادات طرق الدفع. */
@@ -192,7 +246,7 @@ export function normalizeStaffFloatSettlements(value: unknown): StaffFloatSettle
     const amount = Number.isFinite(Number(candidate.amount)) && Number(candidate.amount) > 0 ? Math.round(Number(candidate.amount) * 100) / 100 : undefined;
     if (!id || !floatId || !settledAt || amount === undefined || ids.has(id)) return [];
     ids.add(id);
-    return [{ id, floatId, amount, settledAt, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, settledByUserId: Number.isInteger(candidate.settledByUserId) ? candidate.settledByUserId : undefined, settledByName: typeof candidate.settledByName === "string" ? candidate.settledByName.trim().slice(0, 120) || undefined : undefined } satisfies StaffFloatSettlement];
+    return [{ id, floatId, amount, settledAt, settlementDate: typeof candidate.settlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.settlementDate) ? candidate.settlementDate : undefined, recipientAccountId: typeof candidate.recipientAccountId === "string" ? candidate.recipientAccountId.trim().slice(0, 72) || undefined : undefined, recipientAccountLabel: typeof candidate.recipientAccountLabel === "string" ? candidate.recipientAccountLabel.trim().slice(0, 120) || undefined : undefined, channel: candidate.channel === "cliq" || candidate.channel === "bank" ? candidate.channel : candidate.channel === "vault" ? "vault" : undefined, coveredPaymentIds: Array.isArray(candidate.coveredPaymentIds) ? candidate.coveredPaymentIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, coveredExpenseIds: Array.isArray(candidate.coveredExpenseIds) ? candidate.coveredExpenseIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, settledByUserId: Number.isInteger(candidate.settledByUserId) ? candidate.settledByUserId : undefined, settledByName: typeof candidate.settledByName === "string" ? candidate.settledByName.trim().slice(0, 120) || undefined : undefined, status: candidate.status === "PENDING_APPROVAL" || candidate.status === "CONFIRMED" || candidate.status === "REJECTED" ? candidate.status : "CONFIRMED", requestedByUserId: Number.isInteger(candidate.requestedByUserId) ? candidate.requestedByUserId : undefined, requestedByName: typeof candidate.requestedByName === "string" ? candidate.requestedByName.trim().slice(0, 120) || undefined : undefined, receiptUri: typeof candidate.receiptUri === "string" ? candidate.receiptUri.trim().slice(0, 600) || undefined : undefined, rejectReason: typeof candidate.rejectReason === "string" ? candidate.rejectReason.trim().slice(0, 400) || undefined : undefined, approvedAt: typeof candidate.approvedAt === "string" && !Number.isNaN(new Date(candidate.approvedAt).getTime()) ? candidate.approvedAt : undefined, approvedByUserId: Number.isInteger(candidate.approvedByUserId) ? candidate.approvedByUserId : undefined, approvedByName: typeof candidate.approvedByName === "string" ? candidate.approvedByName.trim().slice(0, 120) || undefined : undefined, commissionOffset: Number.isFinite(Number(candidate.commissionOffset)) && Number(candidate.commissionOffset) > 0 ? Math.round(Number(candidate.commissionOffset) * 100) / 100 : undefined } satisfies StaffFloatSettlement];
   });
 }
 /** إيرادات تعويضات مخصومة من تأمين الحجز (أضرار/غرامات) — بند مستقل عن الإيجار. */
@@ -282,14 +336,14 @@ function normalizeDepositCompensation(value: unknown): DepositCompensation | und
   if (amount === undefined || !date) return undefined;
   return { amount, date, recordedAt: typeof candidate.recordedAt === "string" && !Number.isNaN(new Date(candidate.recordedAt).getTime()) ? candidate.recordedAt : undefined, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, sourceFloatId: typeof candidate.sourceFloatId === "string" ? candidate.sourceFloatId.trim().slice(0, 72) || undefined : undefined, returnedByUserId: Number.isInteger(candidate.returnedByUserId) ? candidate.returnedByUserId : undefined, returnedByName: typeof candidate.returnedByName === "string" ? candidate.returnedByName.trim().slice(0, 120) || undefined : undefined };
 }
-export type Payment = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; recipientType?: PaymentRecipientType; handlerUserId?: number; handlerName?: string; recipientAccountLabel?: string; /** معرف حساب الاستلام الفعلي: "owner" أو member-{userId} أو float-{floatId}. */ recipientTargetId?: string; /** كيان المستلم في دفتر الأستاذ: "owner" أو member-{userId} أو float-{floatId}. */ recipientEntityId?: string; /** الحساب الفرعي الفعلي: معرف حساب الخزينة المركزية أو معرف العهدة/قناتها. */ recipientSubAccountId?: string; /** هل المبلغ على ذمة موظف/حارس (تكوين التزام عهدة)؟ أم دخل الخزينة المركزية مباشرة. */ isCustody?: boolean; calculatedCommission?: number; commissionType?: CommissionType; receiptUri?: string; voidedAt?: string; voidReason?: string; recordedByUserId?: number; recordedByName?: string; updatedByUserId?: number; updatedByName?: string; voidedByUserId?: number; voidedByName?: string };
+export type Payment = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; recipientType?: PaymentRecipientType; handlerUserId?: number; handlerName?: string; recipientAccountLabel?: string; /** معرف حساب الاستلام الفعلي: "owner" أو member-{userId} أو float-{floatId}. */ recipientTargetId?: string; /** كيان المستلم في دفتر الأستاذ: "owner" أو member-{userId} أو float-{floatId}. */ recipientEntityId?: string; /** الحساب الفرعي الفعلي: معرف حساب الخزينة المركزية أو معرف العهدة/قناتها. */ recipientSubAccountId?: string; /** هل المبلغ على ذمة موظف/حارس (تكوين التزام عهدة)؟ أم دخل الخزينة المركزية مباشرة. */ isCustody?: boolean; /** معرف تسوية العهدة التي ضُمّ إليها هذا التحصيل عند توريده للمالك. */ settlementId?: string; calculatedCommission?: number; commissionType?: CommissionType; receiptUri?: string; voidedAt?: string; voidReason?: string; recordedByUserId?: number; recordedByName?: string; updatedByUserId?: number; updatedByName?: string; voidedByUserId?: number; voidedByName?: string };
 export type DepositRefund = { id: string; amount: number; date: string; recordedAt?: string; note?: string; paymentMethod?: PaymentMethod; /** العهدة التي تورّد منها مبلغ الإرجاع (عند التحصيل عبر موظف). */ sourceFloatId?: string; /** من نفّذ الإرجاع (المالك أو الموظف/الحارس من عهدته). */ returnedByUserId?: number; returnedByName?: string };
 export type CheckInConfirmation = { actualArrivalAt: string; rentalBalanceVerified: boolean; rentalBalancePaymentMethod?: PaymentMethod; securityDepositVerified: boolean; securityDepositPaymentMethod?: PaymentMethod; identityNote?: string; identityImageUri?: string; utilityReading?: UtilityMeterInput };
 export type CheckoutConfirmation = { inspectionPassed: boolean; inspectionNote?: string; depositRefund?: { amount: number; paymentMethod: PaymentMethod; note?: string; returnedByUserId?: number; returnedByName?: string }; /** خصم أضرار/غرامات من التأمين: يُحوَّل لإيرادات تعويضات ويقلل الاسترداد. */ depositCompensation?: { amount: number; note?: string }; assetInspections?: AssetInspectionItem[]; utilityReading?: UtilityMeterInput };
 export type ManualStayCorrection = { checkedInAt?: string; checkedOutAt?: string; restoreNoShow?: boolean; note?: string };
 export type ChaletShift = { id: string; name: string; startTime: string; endTime: string; weekdayPrice: number; weekendPrice: number; /** سعر العطل الرسمية (يُستخدم تلقائيًا عند توافق اليوم مع عطلة أردنية). */ holidayPrice?: number; isActive: boolean; color: string; /** نوع الفترة هو مصدر لونها المحجوز. */ periodKind?: ReservedPeriodColorKey };
 export type Chalet = { id: string; name: string; propertyType?: PropertyType; referenceCode?: string; color: string; imageUri?: string; location?: string; locationUrl?: string; /** إحداثيات النشر لخرائط الضيوف. */ latitude?: number; longitude?: number; googleMapsUrl?: string; /** حالة الظهور للجمهور في تطبيق الضيوف. */ isPublished?: boolean; /** حالة الاعتماد والتوثيق من المنصة. */ isVerified?: boolean;   /** تمتلك مسبحًا قابلًا للتدفئة (تنبيهات الطقس البارد). */ hasHeatedPool?: boolean; /** تقع بالقرب من مسطح مائي (تنبيهات المدّ). */ nearWater?: boolean; guardianName?: string; guardianPhone?: string; contactPhone?: string; notes?: string; weekendDays?: number[]; shifts?: ChaletShift[]; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodPricing?: PeriodPricingSettings; /** محفوظ للتوافق مع نسخ البيانات السابقة. */ periodTimes?: Partial<Record<PricedBookingType, { startTime: string; endTime: string }>>; createdAt: string };
-export type Booking = { id: string; bookingReference?: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; startDate: string; endDate: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime: string; endTime: string; price: number; discountAmount?: number; depositAmount?: number; /** طريقة استلام التأمين مستقلة عن دفعات الإيجار. */ depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; depositCollection?: Payment; payments: Payment[]; depositRefunds?: DepositRefund[]; /** خصم أضرار/غرامات من التأمين عند المغادرة يُحوَّل بند إيرادات تعويضات. */ depositCompensation?: DepositCompensation; notes: string; status: BookingStatus; createdAt: string; checkedInAt?: string; checkInConfirmation?: CheckInConfirmation; checkedOutAt?: string; noShowAt?: string; createdByUserId?: number; createdByName?: string; createdByRole?: "owner" | "employee"; /** مصدر الحجز: يدوي من المالك أو عبر تطبيق الضيوف. */ bookingSource?: BookingSource; /** نسبة عمولة المنصة على الحجز. */ commissionRate?: number; /** مبلغ عمولة المنصة المحتسب. */ commissionAmount?: number; /** حالة تحويل العمولة للمنصة. */ payoutStatus?: PayoutStatus; updatedByUserId?: number; updatedByName?: string; waitlistPriorityAcknowledgedForId?: string; waitlistPriorityAcknowledgedAt?: string; waitlistPriorityAcknowledgedByName?: string; /** نتائج فحص الأصول عند إنهاء الإقامة. */ assetInspections?: AssetInspectionItem[] };
+export type Booking = { id: string; bookingReference?: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; startDate: string; endDate: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime: string; endTime: string; price: number; discountAmount?: number; depositAmount?: number; /** طريقة استلام التأمين مستقلة عن دفعات الإيجار. */ depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; depositCollection?: Payment; payments: Payment[]; depositRefunds?: DepositRefund[]; /** خصم أضرار/غرامات من التأمين عند المغادرة يُحوَّل بند إيرادات تعويضات. */ depositCompensation?: DepositCompensation; notes: string; status: BookingStatus; createdAt: string; checkedInAt?: string; checkInConfirmation?: CheckInConfirmation; checkedOutAt?: string; noShowAt?: string; createdByUserId?: number; createdByName?: string; createdByRole?: "owner" | "employee"; /** مصدر الحجز: يدوي من المالك أو عبر تطبيق الضيوف. */ bookingSource?: BookingSource; /** نسبة عمولة المنصة على الحجز. */ commissionRate?: number; /** مبلغ عمولة المنصة المحتسب. */ commissionAmount?: number; /** حالة تحويل العمولة للمنصة. */ payoutStatus?: PayoutStatus; /** عمولة موظف العهدة المحتسبة على تحصيلات هذا الحجز (تُخصم من صافي التوريد). */ earnedCommission?: number; updatedByUserId?: number; updatedByName?: string; waitlistPriorityAcknowledgedForId?: string; waitlistPriorityAcknowledgedAt?: string; waitlistPriorityAcknowledgedByName?: string; /** نتائج فحص الأصول عند إنهاء الإقامة. */ assetInspections?: AssetInspectionItem[] };
 export type WaitlistEntry = { id: string; customerName: string; phone: string; chaletId?: string; chaletName?: string; requestedDate: string; endDate?: string; bookingType: BookingType; shiftId?: string; shiftName?: string; shiftColor?: string; startTime?: string; endTime?: string; price?: number; discountAmount?: number; depositAmount?: number; depositPaymentMethod?: PaymentMethod; depositPaymentRecordedAt?: string; payments?: Payment[]; notes: string; status?: WaitlistStatus; cancelledAt?: string; cancellationReason?: "manual" | "start-time"; promotedAt?: string; promotedByUserId?: number; promotedByName?: string; promotedBookingId?: string; promotedBookingReference?: string; promotedReplacedCustomerNames?: string; createdAt: string };
 export type TurnoverTask = { id: string; checkoutBookingId: string; nextBookingId: string; chaletId?: string; chaletName?: string; dueAt: string; status: TurnoverTaskStatus; createdAt: string; startedAt?: string; completedAt?: string; completedByName?: string };
 export type ExpenseAllocation = { chaletId: string; chaletName: string; amount: number };
@@ -475,7 +529,7 @@ export type WeatherLog = { id: string; chaletId: string; fetchedAt: string; lati
 export type LoyaltyTier = "bronze" | "silver" | "gold" | "platinum";
 export type LoyaltyAccount = { id: string; customerId: string; pointsBalance: number; tier: LoyaltyTier; lifetimeEarned: number; lifetimeRedeemed: number; updatedAt: string; createdAt: string };
 export type LoyaltyTransaction = { id: string; customerId: string; type: "earn" | "redeem"; points: number; /** Cashback value in JOD deducted from the booking total. */ amount: number; bookingId?: string; bookingReference?: string; note?: string; createdAt: string };
-export type Expense = { id: string; chaletId?: string; chaletName?: string; amount: number; date: string; category: ExpenseCategory; note?: string; paymentMethod?: ExpensePaymentMethod; receiptUri?: string; /** حصص ثابتة لقيد مصروف عام، تحفظ وقت تسجيله. */ generalAllocations?: ExpenseAllocation[]; /** مصدر الصرف عند الترحيل من مهمة صيانة (عهدة الحارس / عهدة الموظف / حساب المالك). */ expenseSource?: MaintenanceExpenseSource; createdAt: string; createdByName?: string };
+export type Expense = { id: string; chaletId?: string; chaletName?: string; amount: number; date: string; category: ExpenseCategory; note?: string; paymentMethod?: ExpensePaymentMethod; receiptUri?: string; /** حصص ثابتة لقيد مصروف عام، تحفظ وقت تسجيله. */ generalAllocations?: ExpenseAllocation[]; /** مصدر الصرف عند الترحيل من مهمة صيانة (عهدة الحارس / عهدة الموظف / حساب المالك). */ expenseSource?: MaintenanceExpenseSource; /** معرّف مهمة الصيانة المُرحَّل منها القيد (يربطه بسجل الصيانة ويمنع الترحيل المكرر). */ maintenanceTaskId?: string; /** جهة التمويل: الخزينة المركزية للمالك أو عهدة موظف / حارس ميداني. */ fundingEntity?: ExpenseFundingEntity; /** قناة الصرف من الخزينة المركزية للمالك. */ fundingChannel?: ExpenseFundingChannel; /** الحساب المموَّل منه (حساب خزينة للمالك أو نقطة عهدة موظف). */ fundingSourceId?: string; /** اسم ملتقط للمصدر وقت التسجيل ليستقر في التقارير والنسخ الاحتياطي. */ fundingSourceLabel?: string; /** خصم مباشر من العهدة النقدية المعلقة للموظف — يدخل في تسوية العهدة (المرجوع/الخصم). */ isFloatExpense?: boolean; /** دفعه الموظف من جيبه الخاص — ذمة على المالك تُردّ للموظف لاحقًا. */ isStaffReimbursement?: boolean; /** دخل هذا المصروف ضمن تسوية عهدة (ضُمّ إلى سجل تسوية وأُشير بقيمته). */ isSettled?: boolean; /** معرف سجل التسوية التي ضُمّ إليها هذا المصروف. */ settlementId?: string; /** قيد التعويض التلقائي الذي يصفّي ذمة موظف: مصروف «أخرى / تصفية ذمة موظف». */ isStaffReimbursementSettled?: boolean; /** العهدة التي صُرِف عنها قيد التعويض هذا. */ clearsReimbursementForFloatId?: string; /** قناة صرف التعويض (كاش الخزينة / CliQ / بنك). */ reimbursementChannel?: "vault" | "cliq" | "bank"; /** ذمة الموظف المدفوعة من جيبه: هل صُرفت وصُفّيت؟ */ reimbursementSettled?: boolean; /** معرّف قيد التعويض الذي صفّى هذه الذمة. */ reimbursementSettledById?: string; createdAt: string; createdByName?: string };
 export type AppLanguage = "ar" | "en";
 export type AppearanceMode = "light" | "dark" | "system";
 export type DateFormat = "DD/MM/YYYY" | "YYYY-MM-DD" | "english-month" | "arabic-gregorian";
@@ -601,7 +655,7 @@ export const PRICED_BOOKING_TYPES: PricedBookingType[] = ["morning", "evening", 
 export const DEFAULT_PERIOD_PRICING: PeriodPricingSettings = { morning: { weekdayPrice: 0, weekendPrice: 0 }, evening: { weekdayPrice: 0, weekendPrice: 0 }, "24h": { weekdayPrice: 0, weekendPrice: 0 } };
 export const LEGACY_SHIFT_IDS: Record<PricedBookingType, string> = { morning: "legacy-morning", evening: "legacy-evening", "24h": "legacy-24h" };
 export type SpecialPriceRule = { id: string; name: string; startDate: string; endDate: string; price: number; kind: "season" | "occasion"; createdAt: string };
-export type AuditAction = "waitlist-promoted" | "waitlist-deleted" | "waitlist-cancelled" | "booking-deleted" | "booking-cancelled" | "booking-checked-in" | "booking-checked-out" | "booking-status-corrected" | "turnover-task-updated" | "expense-added" | "expense-deleted" | "booking-waitlist-priority-confirmed" | "chalet-deleted" | "payment-updated" | "payment-voided" | "customer-created" | "customer-updated" | "customer-blacklisted" | "customer-unblacklisted" | "contract-signed" | "asset-added" | "asset-updated" | "asset-deleted" | "maintenance-task-updated" | "maintenance-task-completed" | "weather-log-updated" | "utility-reading-recorded" | "loyalty-points-awarded" | "loyalty-points-redeemed" | "float-settled" | "deposit-compensation-recorded" | "staff-float-account-saved";
+export type AuditAction = "waitlist-promoted" | "waitlist-deleted" | "waitlist-cancelled" | "booking-deleted" | "booking-cancelled" | "booking-checked-in" | "booking-checked-out" | "booking-status-corrected" | "turnover-task-updated" | "expense-added" | "expense-deleted" | "expense-updated" | "booking-waitlist-priority-confirmed" | "chalet-deleted" | "payment-updated" | "payment-voided" | "customer-created" | "customer-updated" | "customer-blacklisted" | "customer-unblacklisted" | "contract-signed" | "asset-added" | "asset-updated" | "asset-deleted" | "maintenance-task-updated" | "maintenance-task-completed" | "weather-log-updated" | "utility-reading-recorded" | "loyalty-points-awarded" | "loyalty-points-redeemed" | "float-settled" | "deposit-compensation-recorded" | "staff-float-account-saved" | "staff-reimbursement-paid" | "float-settlement-requested" | "float-settlement-approved" | "float-settlement-rejected";
 export type AuditLogEntry = { id: string; action: AuditAction; subjectName: string; details: string; createdAt: string; actorName?: string; bookingId?: string };
 export type UtilityRatesConfig = { enabled: boolean; rates: Partial<Record<UtilityReadingType, number>>; thresholds: Partial<Record<UtilityReadingType, number>> };
 export type LoyaltyProgramConfig = { enabled: boolean; pointsPerJod: number; jodPerPoint: number; silverMinStays: number; goldMinStays: number; platinumMinStays: number; silverMinSpendJod: number; goldMinSpendJod: number };
@@ -969,11 +1023,11 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
     const match = entry.details.match(/(?:من\s+)?([0-9]+(?:\.[0-9]+)?)\s*(?:د\.أ)?\s*(?:←|إلى)\s*([0-9]+(?:\.[0-9]+)?)/);
     return Boolean(match && Math.abs(Number(match[1]) - Number(match[2])) < 0.0001);
   };
-  const auditLog = Array.isArray(data.auditLog) ? data.auditLog.filter((entry): entry is AuditLogEntry => Boolean(entry?.id && entry?.subjectName && entry?.details && entry?.createdAt && ["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved"].includes(entry.action))).filter((entry) => !isNoChangePaymentAudit(entry)).map((entry) => ({ ...entry, actorName: entry.actorName?.trim() || undefined })) : [];
+  const auditLog = Array.isArray(data.auditLog) ? data.auditLog.filter((entry): entry is AuditLogEntry => Boolean(entry?.id && entry?.subjectName && entry?.details && entry?.createdAt && ["waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "booking-status-corrected", "turnover-task-updated", "expense-added", "expense-deleted", "expense-updated", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved"].includes(entry.action))).filter((entry) => !isNoChangePaymentAudit(entry)).map((entry) => ({ ...entry, actorName: entry.actorName?.trim() || undefined })) : [];
   const normalizeRecordedAt = (value: unknown) => typeof value === "string" && !Number.isNaN(new Date(value).getTime()) ? value : undefined;
   const normalizePayment = (payment: Payment): Payment => {
     const paymentMethod = normalizePaymentMethodId(payment.paymentMethod);
-    return { ...payment, amount: Math.max(0, Number(payment.amount || 0)), recordedAt: normalizeRecordedAt(payment.recordedAt), note: payment.note?.trim() || undefined, paymentMethod, recipientType: normalizePaymentRecipientType(payment.recipientType), recipientTargetId: typeof payment.recipientTargetId === "string" ? payment.recipientTargetId.trim().slice(0, 64) || undefined : undefined, recipientEntityId: typeof payment.recipientEntityId === "string" ? payment.recipientEntityId.trim().slice(0, 64) || undefined : undefined, recipientSubAccountId: typeof payment.recipientSubAccountId === "string" ? payment.recipientSubAccountId.trim().slice(0, 128) || undefined : undefined, isCustody: payment.isCustody === true ? true : payment.isCustody === false ? false : undefined, handlerUserId: Number.isInteger(payment.handlerUserId) ? payment.handlerUserId : undefined, handlerName: payment.handlerName?.trim().slice(0, 255) || undefined, recipientAccountLabel: payment.recipientAccountLabel?.trim().slice(0, 180) || undefined, calculatedCommission: Math.max(0, Number(payment.calculatedCommission || 0)) || undefined, commissionType: payment.commissionType === "fixed" ? "fixed" : payment.commissionType === "percent" ? "percent" : undefined, receiptUri: payment.receiptUri?.trim() || undefined, voidedAt: normalizeRecordedAt(payment.voidedAt), voidReason: payment.voidReason?.trim() || undefined, recordedByUserId: Number.isInteger(payment.recordedByUserId) ? payment.recordedByUserId : undefined, recordedByName: payment.recordedByName?.trim() || undefined, updatedByUserId: Number.isInteger(payment.updatedByUserId) ? payment.updatedByUserId : undefined, updatedByName: payment.updatedByName?.trim() || undefined, voidedByUserId: Number.isInteger(payment.voidedByUserId) ? payment.voidedByUserId : undefined, voidedByName: payment.voidedByName?.trim() || undefined };
+    return { ...payment, amount: Math.max(0, Number(payment.amount || 0)), recordedAt: normalizeRecordedAt(payment.recordedAt), note: payment.note?.trim() || undefined, paymentMethod, recipientType: normalizePaymentRecipientType(payment.recipientType), recipientTargetId: typeof payment.recipientTargetId === "string" ? payment.recipientTargetId.trim().slice(0, 64) || undefined : undefined, recipientEntityId: typeof payment.recipientEntityId === "string" ? payment.recipientEntityId.trim().slice(0, 64) || undefined : undefined, recipientSubAccountId: typeof payment.recipientSubAccountId === "string" ? payment.recipientSubAccountId.trim().slice(0, 128) || undefined : undefined, isCustody: payment.isCustody === true ? true : payment.isCustody === false ? false : undefined, settlementId: typeof payment.settlementId === "string" ? payment.settlementId.trim().slice(0, 72) || undefined : undefined, handlerUserId: Number.isInteger(payment.handlerUserId) ? payment.handlerUserId : undefined, handlerName: payment.handlerName?.trim().slice(0, 255) || undefined, recipientAccountLabel: payment.recipientAccountLabel?.trim().slice(0, 180) || undefined, calculatedCommission: Math.max(0, Number(payment.calculatedCommission || 0)) || undefined, commissionType: payment.commissionType === "fixed" ? "fixed" : payment.commissionType === "percent" ? "percent" : undefined, receiptUri: payment.receiptUri?.trim() || undefined, voidedAt: normalizeRecordedAt(payment.voidedAt), voidReason: payment.voidReason?.trim() || undefined, recordedByUserId: Number.isInteger(payment.recordedByUserId) ? payment.recordedByUserId : undefined, recordedByName: payment.recordedByName?.trim() || undefined, updatedByUserId: Number.isInteger(payment.updatedByUserId) ? payment.updatedByUserId : undefined, updatedByName: payment.updatedByName?.trim() || undefined, voidedByUserId: Number.isInteger(payment.voidedByUserId) ? payment.voidedByUserId : undefined, voidedByName: payment.voidedByName?.trim() || undefined };
   };
   const normalizeUtilityMeterInput = (value: UtilityMeterInput | undefined): UtilityMeterInput | undefined => {
     if (!value || typeof value !== "object") return undefined;
@@ -994,13 +1048,14 @@ export function normalizeAppData(data: Partial<AppData>): AppData {
   const device: DeviceSettings | undefined = incomingSettings.device ? { ...DEFAULT_DEVICE_SETTINGS, ...incomingSettings.device, weekdayFormat: normalizeWeekdayFormat(incomingSettings.device.weekdayFormat), bookingCardViewMode: incomingSettings.device.bookingCardViewMode === "compact" ? "compact" : "expanded", glassBackgroundLevel, glassSurfaceOpacity, glassGlowIntensity, quietGlassBackground: glassBackgroundLevel !== "standard", showGuestCheckIn: incomingSettings.device.showGuestCheckIn !== false, guestCheckInModeHistory, showTurnoverTasks: incomingSettings.device.showTurnoverTasks !== false, showDailyTasks: incomingSettings.device.showDailyTasks !== false, dailyOperationsCollapsed: incomingSettings.device.dailyOperationsCollapsed === true, guardReminderLeadMinutes: Number.isFinite(Number(incomingSettings.device.guardReminderLeadMinutes)) && Number(incomingSettings.device.guardReminderLeadMinutes) >= 1 && Number(incomingSettings.device.guardReminderLeadMinutes) <= 1440 ? Math.round(Number(incomingSettings.device.guardReminderLeadMinutes)) : DEFAULT_DEVICE_SETTINGS.guardReminderLeadMinutes, showLunarPhase: incomingSettings.device.showLunarPhase !== false } : undefined;
   const turnoverTasks: TurnoverTask[] = Array.isArray(data.turnoverTasks) ? data.turnoverTasks.filter((task): task is TurnoverTask => Boolean(task?.id && task?.checkoutBookingId && task?.nextBookingId && typeof task?.dueAt === "string" && typeof task?.createdAt === "string")).map((task) => ({ ...task, chaletId: task.chaletId?.trim() || undefined, chaletName: task.chaletName?.trim() || undefined, status: (task.status === "completed" ? "completed" : task.status === "in-progress" ? "in-progress" : "pending") as TurnoverTaskStatus, completedAt: normalizeRecordedAt(task.completedAt), completedByName: task.completedByName?.trim() || undefined })) : [];
   const normalizeExpenseCategory = (value: unknown): ExpenseCategory => {
-    if (value === "guards-salaries" || value === "maintenance" || value === "cleaning-supplies" || value === "utilities" || value === "other") return value;
+    if (value === "guards-salaries" || value === "maintenance" || value === "cleaning-supplies" || value === "utilities" || value === "other" || value === "fuel-gas" || value === "hospitality") return value;
     if (value === "cleaning" || value === "supplies") return "cleaning-supplies";
+    if (value === "fuel" || value === "gas") return "fuel-gas";
     return "other";
   };
   const expenses: Expense[] = Array.isArray(data.expenses) ? data.expenses.filter((expense): expense is Expense => Boolean(expense?.id && typeof expense?.date === "string" && Number.isFinite(Number(expense?.amount)) && Number(expense.amount) > 0)).map((expense) => {
     const generalAllocations = Array.isArray(expense.generalAllocations) ? expense.generalAllocations.filter((allocation): allocation is ExpenseAllocation => Boolean(allocation?.chaletId?.trim() && allocation?.chaletName?.trim() && Number.isFinite(Number(allocation.amount)) && Number(allocation.amount) > 0)).map((allocation) => ({ chaletId: allocation.chaletId.trim(), chaletName: allocation.chaletName.trim(), amount: Number(allocation.amount) })) : undefined;
-    return { ...expense, amount: Number(expense.amount), chaletId: expense.chaletId?.trim() || undefined, chaletName: expense.chaletName?.trim() || undefined, category: normalizeExpenseCategory(expense.category), note: expense.note?.trim() || undefined, paymentMethod: expense.paymentMethod === "cash" || expense.paymentMethod === "click" ? expense.paymentMethod : undefined, receiptUri: expense.receiptUri?.trim() || undefined, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, expenseSource: MAINTENANCE_EXPENSE_SOURCES.includes(expense.expenseSource as MaintenanceExpenseSource) ? expense.expenseSource as MaintenanceExpenseSource : undefined, createdByName: expense.createdByName?.trim() || undefined };
+    return { ...expense, amount: Number(expense.amount), chaletId: expense.chaletId?.trim() || undefined, chaletName: expense.chaletName?.trim() || undefined, category: normalizeExpenseCategory(expense.category), note: expense.note?.trim() || undefined, paymentMethod: EXPENSE_PAYMENT_METHODS.includes(expense.paymentMethod as ExpensePaymentMethod) ? expense.paymentMethod as ExpensePaymentMethod : undefined, receiptUri: expense.receiptUri?.trim() || undefined, generalAllocations: generalAllocations?.length ? generalAllocations : undefined, expenseSource: MAINTENANCE_EXPENSE_SOURCES.includes(expense.expenseSource as MaintenanceExpenseSource) ? expense.expenseSource as MaintenanceExpenseSource : undefined, maintenanceTaskId: typeof expense.maintenanceTaskId === "string" ? expense.maintenanceTaskId.trim().slice(0, 72) || undefined : undefined, fundingEntity: expense.fundingEntity === "staff" || expense.fundingEntity === "owner" ? expense.fundingEntity : undefined, fundingChannel: EXPENSE_FUNDING_CHANNELS.includes(expense.fundingChannel as ExpenseFundingChannel) ? expense.fundingChannel as ExpenseFundingChannel : undefined, fundingSourceId: typeof expense.fundingSourceId === "string" ? expense.fundingSourceId.trim().slice(0, 72) || undefined : undefined, fundingSourceLabel: typeof expense.fundingSourceLabel === "string" ? expense.fundingSourceLabel.trim().slice(0, 120) || undefined : undefined, isFloatExpense: expense.isFloatExpense === true || undefined, isStaffReimbursement: expense.isStaffReimbursement === true || undefined, isSettled: expense.isSettled === true || undefined, settlementId: typeof expense.settlementId === "string" ? expense.settlementId.trim().slice(0, 72) || undefined : undefined, isStaffReimbursementSettled: expense.isStaffReimbursementSettled === true || undefined, clearsReimbursementForFloatId: typeof expense.clearsReimbursementForFloatId === "string" ? expense.clearsReimbursementForFloatId.trim().slice(0, 72) || undefined : undefined, reimbursementChannel: expense.reimbursementChannel === "cliq" || expense.reimbursementChannel === "bank" ? expense.reimbursementChannel : expense.reimbursementChannel === "vault" ? "vault" : undefined, reimbursementSettled: expense.reimbursementSettled === true || undefined, reimbursementSettledById: typeof expense.reimbursementSettledById === "string" ? expense.reimbursementSettledById.trim().slice(0, 72) || undefined : undefined, createdByName: expense.createdByName?.trim() || undefined };
   }) : [];
   const isDateOnly = (value: unknown): value is string => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00.000Z`).getTime());
   const customers: Customer[] = Array.isArray(data.customers) ? data.customers.filter((customer): customer is Customer => Boolean(customer?.id && customer?.name)).map((customer) => {
@@ -1398,8 +1453,8 @@ export function staffFloatCollectedTotal(data: Pick<AppData, "bookings">, floatI
   }
   return Math.round(total * 100) / 100;
 }
-/** ما خرج من العهدة: إرجاعات تأمين + خصومات أضرار خُصمت من ذلك الحساب. */
-export function staffFloatPaidOutTotal(data: Pick<AppData, "bookings">, floatId: string): number {
+/** ما خرج من العهدة: إرجاعات تأمين + خصومات أضرار + مصروفات مخصومة مباشرة من عهدة الموظف. */
+export function staffFloatPaidOutTotal(data: Pick<AppData, "bookings" | "expenses">, floatId: string): number {
   let total = 0;
   for (const booking of data.bookings) {
     for (const refund of booking.depositRefunds ?? []) {
@@ -1407,15 +1462,74 @@ export function staffFloatPaidOutTotal(data: Pick<AppData, "bookings">, floatId:
     }
     if (booking.depositCompensation?.sourceFloatId === floatId) total += Math.max(0, Number(booking.depositCompensation.amount || 0));
   }
+  for (const expense of data.expenses ?? []) {
+    if (expense.isFloatExpense === true && expense.fundingSourceId === floatId) total += Math.max(0, Number(expense.amount || 0));
+  }
   return Math.round(total * 100) / 100;
+}
+/** ذمة المالك للموظف: مصروفات دفعها الموظف من جيبه الخاص ولم تُردّ بعد (المطالبات غير المصروفة). */
+export function staffFloatReimbursementTotal(data: Pick<AppData, "expenses">, floatId: string): number {
+  return Math.round((data.expenses ?? []).filter((expense) => expense.isStaffReimbursement === true && expense.fundingSourceId === floatId && expense.reimbursementSettled !== true).reduce((sum, expense) => sum + Math.max(0, Number(expense.amount || 0)), 0) * 100) / 100;
+}
+/** إجمالي التعويضات المصروفة للموظف حتى الآن (قيد «تصفية ذمة موظف»). */
+export function staffFloatReimbursementPaidTotal(data: Pick<AppData, "expenses">, floatId: string): number {
+  return Math.round((data.expenses ?? []).filter((expense) => expense.isStaffReimbursementSettled === true && expense.clearsReimbursementForFloatId === floatId).reduce((sum, expense) => sum + Math.max(0, Number(expense.amount || 0)), 0) * 100) / 100;
 }
 /** إجمالي ما سُوّي وتورّد للمالك حتى الآن من العهدة. */
 export function staffFloatSettledTotal(data: Pick<AppData, "staffFloatSettlements">, floatId: string): number {
-  return Math.round((data.staffFloatSettlements ?? []).filter((entry) => entry.floatId === floatId).reduce((sum, entry) => sum + Math.max(0, Number(entry.amount || 0)), 0) * 100) / 100;
+  return Math.round((data.staffFloatSettlements ?? []).filter((entry) => entry.floatId === floatId && entry.status !== "REJECTED" && entry.status !== "PENDING_APPROVAL").reduce((sum, entry) => sum + Math.max(0, Number(entry.amount || 0)), 0) * 100) / 100;
 }
-/** الرصيد المعلّق على الموظف (عهدة) = المستلم - المدفوع خارجاً - المسوّى للمالك. */
-export function staffFloatOutstanding(data: Pick<AppData, "bookings" | "staffFloatSettlements">, floatId: string): number {
-  return Math.max(0, Math.round((staffFloatCollectedTotal(data, floatId) - staffFloatPaidOutTotal(data, floatId) - staffFloatSettledTotal(data, floatId)) * 100) / 100);
+/** عمولة موظف على حجز واحد: مبلغ ثابت لكل حجز أو نسبة من إجمالي تحصيلات العهدة لهذا الحجز. */
+export function staffCommissionForBooking(account: Pick<StaffFloatAccount, "isCommissionEnabled" | "commissionType" | "commissionValue">, amountCollectedOnFloat: number): number {
+  if (account.isCommissionEnabled !== true) return 0;
+  const value = Number(account.commissionValue || 0);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const collected = Math.max(0, Number(amountCollectedOnFloat || 0));
+  if (collected <= 0.005) return 0;
+  const earned = account.commissionType === "PERCENTAGE_OF_TOTAL" ? collected * value / 100 : value;
+  return Math.round(Math.max(0, earned) * 100) / 100;
+}
+/** إجمالي عمولات موظف العهدة المحتسبة على تحصيلات حجز واحد (تُحفظ على سجل الحجز). */
+export function bookingEarnedCommission(settings: Settings, booking: Pick<Booking, "id" | "status" | "payments" | "depositCollection">): number {
+  if (!booking || booking.status === "cancelled" || booking.status === "waitlisted") return 0;
+  const collectedByTarget = new Map<string, number>();
+  for (const payment of booking.payments ?? []) {
+    if (payment.voidedAt || typeof payment.recipientTargetId !== "string") continue;
+    const amount = Math.max(0, Number(payment.amount || 0));
+    if (amount <= 0) continue;
+    collectedByTarget.set(payment.recipientTargetId, (collectedByTarget.get(payment.recipientTargetId) ?? 0) + amount);
+  }
+  const deposit = booking.depositCollection;
+  if (deposit && !deposit.voidedAt && typeof deposit.recipientTargetId === "string") collectedByTarget.set(deposit.recipientTargetId, (collectedByTarget.get(deposit.recipientTargetId) ?? 0) + Math.max(0, Number(deposit.amount || 0)));
+  let total = 0;
+  for (const account of staffFloatAccounts(settings)) {
+    const collected = collectedByTarget.get(`float-${account.id}`);
+    if (collected !== undefined && collected > 0.005) total += staffCommissionForBooking(account, collected);
+  }
+  return Math.round(total * 100) / 100;
+}
+/** إجمالي عمولات الموظف المستحقة على تحصيلات عهدته (كل الحجوزات غير الملغاة المحصّلة عبر هذه العهدة). */
+export function staffFloatCommissionEarned(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string): number {
+  if (!data.settings) return 0;
+  const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
+  if (!account || account.isCommissionEnabled !== true) return 0;
+  const target = `float-${floatId}`;
+  let total = 0;
+  for (const booking of data.bookings) {
+    if (!booking || booking.status === "cancelled" || booking.status === "waitlisted") continue;
+    let collected = 0;
+    for (const payment of booking.payments ?? []) {
+      if (!payment.voidedAt && payment.recipientTargetId === target) collected += Math.max(0, Number(payment.amount || 0));
+    }
+    const deposit = booking.depositCollection;
+    if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target) collected += Math.max(0, Number(deposit.amount || 0));
+    if (collected > 0.005) total += staffCommissionForBooking(account, collected);
+  }
+  return Math.round(total * 100) / 100;
+}
+/** الرصيد المعلّق على الموظف (عهدة) = المستلم - المدفوع خارجاً - المسوّى للمالك - عمولاته المستحقة. */
+export function staffFloatOutstanding(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "expenses"> & Partial<Pick<AppData, "settings">>, floatId: string): number {
+  return Math.max(0, Math.round((staffFloatCollectedTotal(data, floatId) - staffFloatPaidOutTotal(data, floatId) - staffFloatSettledTotal(data, floatId) - staffFloatCommissionEarned(data, floatId)) * 100) / 100);
 }
 export function remainingRefundableDeposit(booking: Pick<Booking, "depositAmount" | "depositRefunds">) { return Math.max(0, refundableDepositAmount(booking) - totalDepositRefunded(booking)); }
 export type DepositFinancialStatus = "none" | "held" | "fully-refunded";

@@ -43,7 +43,7 @@ describe("maintenance expense builder", () => {
       amount: 25.5,
       date: "2026-03-10",
       category: "maintenance",
-      note: "صيانة دورية: صيانة التكييف - الوحدة: شاليه البحر",
+      note: "إتمام صيانة: صيانة التكييف - الوحدة: شاليه البحر",
       expenseSource: "staff-float",
       createdByName: "أبو محمد",
     });
@@ -51,9 +51,9 @@ describe("maintenance expense builder", () => {
   });
 
   it("records the performer name inside the ledger note", () => {
-    expect(maintenanceExpenseNote(task(), "أبو محمد")).toBe("صيانة دورية: صيانة التكييف - الوحدة: شاليه البحر - بواسطة: أبو محمد");
+    expect(maintenanceExpenseNote(task(), "أبو محمد")).toBe("إتمام صيانة: صيانة التكييف - الوحدة: شاليه البحر - بواسطة: أبو محمد");
     const expense = buildMaintenanceExpense({ id: "expense-1b", task: task({ cost: 40 }), source: "owner-account", performedByName: "أبو محمد", createdAt: "2026-03-10T09:30:00.000Z" });
-    expect(expense.note).toBe("صيانة دورية: صيانة التكييف - الوحدة: شاليه البحر - بواسطة: أبو محمد");
+    expect(expense.note).toBe("إتمام صيانة: صيانة التكييف - الوحدة: شاليه البحر - بواسطة: أبو محمد");
   });
 
   it("prefers the actual cost over the expected cost when both exist", () => {
@@ -166,5 +166,95 @@ describe("STEP 3 & 4 UI wiring sanity", () => {
     expect(source).toContain("#مصروف");
     expect(source).toContain("تم التنفيذ بواسطة");
     expect(source).toContain("سجل الإجراءات");
+  });
+});
+
+describe("funding-aware maintenance expense builder", () => {
+  it("maps owner vault-cash funding to a cash payment with no tied account", () => {
+    const expense = buildMaintenanceExpense({ id: "expense-o1", task: task({ cost: 30 }), fundingEntity: "owner", fundingChannel: "vault-cash", createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(expense).toMatchObject({ fundingEntity: "owner", fundingChannel: "vault-cash", paymentMethod: "cash", expenseSource: "owner-account", maintenanceTaskId: "mt-1", amount: 30 });
+    expect(expense.fundingSourceId).toBeUndefined();
+    expect(expense.isFloatExpense).toBeUndefined();
+    expect(expense.isStaffReimbursement).toBeUndefined();
+  });
+
+  it("maps owner cliq/iban funding to the matching payment method and keeps the account", () => {
+    const cliq = buildMaintenanceExpense({ id: "expense-o2", task: task({ cost: 30 }), fundingEntity: "owner", fundingChannel: "cliq", fundingSourceId: "treasury-1", fundingSourceLabel: "حساب CliQ", createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(cliq).toMatchObject({ paymentMethod: "click", fundingSourceId: "treasury-1", fundingSourceLabel: "حساب CliQ", fundingChannel: "cliq" });
+    const iban = buildMaintenanceExpense({ id: "expense-o3", task: task({ cost: 30 }), fundingEntity: "owner", fundingChannel: "iban", fundingSourceId: "treasury-2", fundingSourceLabel: "حساب بنكي", createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(iban).toMatchObject({ paymentMethod: "iban", fundingSourceId: "treasury-2" });
+  });
+
+  it("flags a float deduction when staff is funded from the held float", () => {
+    const expense = buildMaintenanceExpense({ id: "expense-s1", task: task({ cost: 30 }), fundingEntity: "staff", fundingSourceId: "staff-1", fundingSourceLabel: "نقطة الحارس", staffMode: "float", createdByName: "أبو محمد", createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(expense).toMatchObject({ isFloatExpense: true, expenseSource: "staff-float", fundingEntity: "staff", fundingSourceId: "staff-1", fundingSourceLabel: "نقطة الحارس", maintenanceTaskId: "mt-1" });
+    expect(expense.paymentMethod).toBeUndefined();
+    expect(expense.fundingChannel).toBeUndefined();
+    expect(expense.isStaffReimbursement).toBeUndefined();
+    expect(expense.createdByName).toBe("أبو محمد");
+  });
+
+  it("flags a staff reimbursement when paid from the employee's own pocket", () => {
+    const expense = buildMaintenanceExpense({ id: "expense-s2", task: task({ cost: 30 }), fundingEntity: "staff", fundingSourceId: "staff-1", fundingSourceLabel: "نقطة الحارس", staffMode: "reimbursement", createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(expense).toMatchObject({ isStaffReimbursement: true, expenseSource: "staff-float" });
+    expect(expense.isFloatExpense).toBeUndefined();
+    expect(expense.paymentMethod).toBeUndefined();
+  });
+
+  it("records a zero-cost completion without a source, payment method, or funding flags", () => {
+    const expense = buildMaintenanceExpense({ id: "expense-z1", task: task({ cost: 0, actualCost: 0 }), createdAt: "2026-03-10T09:30:00.000Z" });
+    expect(expense.amount).toBe(0);
+    expect(expense.expenseSource).toBeUndefined();
+    expect(expense.paymentMethod).toBeUndefined();
+    expect(expense.fundingEntity).toBeUndefined();
+    expect(expense.isFloatExpense).toBeUndefined();
+    expect(expense.isStaffReimbursement).toBeUndefined();
+    expect(expense.maintenanceTaskId).toBe("mt-1");
+  });
+});
+
+describe("maintenanceTaskId data persistence", () => {
+  it("normalization keeps the linked maintenance task id", () => {
+    const data = normalizeAppData({ chalets: [], bookings: [], waitlist: [], turnoverTasks: [], specialPriceRules: [], auditLog: [], settings: DEFAULT_SETTINGS as unknown as Settings, expenses: [{ id: "exp-1", amount: 12, date: "2026-03-10", category: "maintenance", maintenanceTaskId: "mt-77", createdAt: "2026-03-10T09:00:00.000Z" }] });
+    expect(data.expenses?.[0]?.maintenanceTaskId).toBe("mt-77");
+  });
+
+  it("normalization drops a non-string maintenanceTaskId", () => {
+    const data = normalizeAppData({ chalets: [], bookings: [], waitlist: [], turnoverTasks: [], specialPriceRules: [], auditLog: [], settings: DEFAULT_SETTINGS as unknown as Settings, expenses: [{ id: "exp-2", amount: 12, date: "2026-03-10", category: "maintenance", maintenanceTaskId: 123 as unknown as string, createdAt: "2026-03-10T09:00:00.000Z" }] });
+    expect(data.expenses?.[0]?.maintenanceTaskId).toBeUndefined();
+  });
+});
+
+describe("completion funding wiring (store + dashboard)", () => {
+  const source = read("app/maintenance-dashboard.tsx");
+  const store = read("lib/booking-store.tsx");
+  const model = read("lib/booking-model.ts");
+  const backup = read("lib/backup-import.ts");
+
+  it("routes completed maintenance costs through createExpense with funding fields", () => {
+    expect(store).toContain("createExpense(");
+    expect(store).toContain("maintenance-funding-required");
+    expect(store).toContain("funding?: { entity: \"owner\" | \"staff\"; channel?: ExpenseFundingChannel; sourceId?: string; sourceLabel?: string; mode?: \"float\" | \"reimbursement\" }");
+    expect(store).toContain("await createExpense(buildMaintenanceExpense(");
+  });
+
+  it("persists the linked maintenance task id on the expense model and backup schema", () => {
+    expect(model).toContain("maintenanceTaskId");
+    expect(backup).toContain("maintenanceTaskId");
+  });
+
+  it("renders the unified funding selector with entity, channel, account, and staff mode steps", () => {
+    expect(source).toContain("قناة الصرف من الخزينة");
+    expect(source).toContain("الحساب المموَّل منه");
+    expect(source).toContain("نقطة العهدة المخصوم منها");
+    expect(source).toContain("خصم من العهدة النقدية المعلقة");
+    expect(source).toContain("دفع من الجيب الخاص للموظف");
+    expect(source).toContain("أكمل تحديد مصدر التمويل لتمكين الترحيل التلقائي.");
+    expect(source).toContain("fundingReady(completion)");
+  });
+
+  it("replaces the three legacy payment radios with the cascade selector", () => {
+    expect(source).not.toContain("maintenancePaymentSourceLabel(source, language)");
+    expect(source).not.toContain("MAINTENANCE_PAYMENT_SOURCES.map");
   });
 });

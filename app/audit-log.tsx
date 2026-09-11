@@ -12,7 +12,7 @@ import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 
-const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved"];
+const ACTIONS: (AuditAction | "all")[] = ["all", "waitlist-promoted", "waitlist-deleted", "waitlist-cancelled", "booking-deleted", "booking-cancelled", "booking-checked-in", "booking-checked-out", "turnover-task-updated", "expense-added", "expense-deleted", "expense-updated", "booking-waitlist-priority-confirmed", "chalet-deleted", "payment-updated", "payment-voided", "customer-created", "customer-updated", "customer-blacklisted", "customer-unblacklisted", "contract-signed", "asset-added", "asset-updated", "asset-deleted", "maintenance-task-updated", "maintenance-task-completed", "weather-log-updated", "utility-reading-recorded", "loyalty-points-awarded", "loyalty-points-redeemed", "float-settled", "deposit-compensation-recorded", "staff-float-account-saved", "staff-reimbursement-paid", "float-settlement-requested", "float-settlement-approved", "float-settlement-rejected"];
 const TIME_RANGES = ["all", "today", "two-days", "week", "month"] as const;
 type TimeRange = (typeof TIME_RANGES)[number];
 
@@ -38,6 +38,7 @@ function actionPresentation(entry: AuditLogEntry | AuditAction, language: "ar" |
     "turnover-task-updated": { label: language === "ar" ? "تنظيف وفحص" : "Cleaning & inspection", color: colors.warning, icon: "cleaning-services" as const },
     "expense-added": { label: language === "ar" ? "تسجيل مصروف" : "Expense recorded", color: colors.warning, icon: "receipt-long" as const },
     "expense-deleted": { label: language === "ar" ? "حذف مصروف" : "Expense deleted", color: colors.error, icon: "delete-outline" as const },
+    "expense-updated": { label: language === "ar" ? "تعديل مصروف" : "Expense edited", color: colors.primary, icon: "edit" as const },
     "booking-waitlist-priority-confirmed": { label: language === "ar" ? "تأكيد حجز أمام انتظار" : "Booking confirmed", color: colors.success, icon: "verified" as const },
     "chalet-deleted": { label: language === "ar" ? "حذف شاليه" : "Chalet deleted", color: colors.error, icon: "holiday-village" as const },
     "payment-updated": { label: language === "ar" ? "تعديل دفعة" : "Payment updated", color: colors.warning, icon: "edit" as const },
@@ -59,6 +60,10 @@ function actionPresentation(entry: AuditLogEntry | AuditAction, language: "ar" |
     "float-settled": { label: language === "ar" ? "تسوية وتوريد عهدة" : "Float settled", color: colors.success, icon: "account-balance-wallet" as const },
     "deposit-compensation-recorded": { label: language === "ar" ? "خصم أضرار من التأمين" : "Deposit compensation", color: colors.warning, icon: "handshake" as const },
     "staff-float-account-saved": { label: language === "ar" ? "نقطة تحصيل موظف" : "Staff float account", color: colors.sky, icon: "add-card" as const },
+    "staff-reimbursement-paid": { label: language === "ar" ? "تصفية ذمة موظف" : "Staff reimbursement paid", color: colors.warning, icon: "payments" as const },
+    "float-settlement-requested": { label: language === "ar" ? "طلب توريد عهدة" : "Float handover requested", color: colors.sky, icon: "send" as const },
+    "float-settlement-approved": { label: language === "ar" ? "تأكيد توريد عهدة" : "Float handover confirmed", color: colors.success, icon: "verified" as const },
+    "float-settlement-rejected": { label: language === "ar" ? "رفض توريد عهدة" : "Float handover rejected", color: colors.error, icon: "block" as const },
   } as const;
   return common[action];
 }

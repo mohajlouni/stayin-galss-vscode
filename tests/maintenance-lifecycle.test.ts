@@ -520,9 +520,9 @@ describe("ROLLER STEP: ultra-compact timeline strip & strict scope isolation", (
     expect(source).toContain("date.slice(8, 10)");
   });
 
-  it("shows the amber task dot ONLY on dates that actually have active maintenance tasks", () => {
+  it("shows the orange task dot ONLY on dates that actually have active maintenance tasks", () => {
     expect(source).toContain("activeTasks.some((task) => task.nextDueDate === date)");
-    expect(source).toContain('backgroundColor: hasTaskOnDate ? "#F59E0B" : "transparent"');
+    expect(source).toContain('backgroundColor: hasTaskOnDate ? "#EA580C" : "transparent"');
     expect(source).not.toContain("overdue ? colors.error : colors.warning");
   });
 
@@ -582,9 +582,9 @@ describe("ROLLER STEP: unified tiles, floating popover & card flow polish", () =
     expect(source).toContain("borderWidth: 1");
   });
 
-  it("reserves the framed box for Today and prints 'اليوم' inside the tile instead of a floating badge", () => {
+  it("marks Today with a border-2 orange ring instead of a harsh white outline", () => {
     expect(source).toContain('const framed = isToday || singleSelected;');
-    expect(source).toContain('backgroundColor: colors.primary + "1A", borderColor: colors.primary + "CC"');
+    expect(source).toContain('backgroundColor: "rgba(249, 115, 22, 0.2)", borderColor: "#F97316", borderWidth: 2');
     expect(source).toContain('const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;');
     expect(source).not.toContain("rollerTodayBadge");
   });

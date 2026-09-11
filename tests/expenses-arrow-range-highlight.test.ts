@@ -36,13 +36,13 @@ describe("expenses stepper arrows and custom-range amber highlight", () => {
   it("highlights days between the range edges with an amber fill and solid amber edges", () => {
     expect(picker).toContain("const isRangeEdge = Boolean(range && range.start && range.end && (date === range.start || date === range.end));");
     expect(picker).toContain("const isInRange = Boolean(range && range.start && range.end && date > range.start && date < range.end);");
-    expect(picker).toContain('isRangeEdge ? "#F59E0B"');
-    expect(picker).toContain('isInRange ? "#F59E0B33"');
-    expect(picker).toContain('isRangeEdge ? "#0F172A"');
-    expect(picker).toContain('isInRange ? "#FCD34D"');
+    expect(picker).toContain('isRangeEdge ? "#EA580C"');
+    expect(picker).toContain('isInRange ? "rgba(234, 88, 12, 0.15)"');
+    expect(picker).toContain('isRangeEdge ? "#FFFFFF"');
+    expect(picker).toContain('isInRange ? "#FDBA74"');
     expect(picker).toContain('borderTopWidth: isInRange ? 1 : 0');
-    expect(picker).toContain('borderColor: isInRange ? "#F59E0B4D"');
-    expect(picker).toContain('shadowColor: isRangeEdge ? "#F59E0B"');
+    expect(picker).toContain('borderColor: isInRange ? "rgba(234, 88, 12, 0.3)"');
+    expect(picker).toContain('shadowColor: isRangeEdge ? "#EA580C"');
   });
 
   it("applies the same pointer-events defensiveness to the popover month steppers", () => {

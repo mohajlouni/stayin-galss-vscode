@@ -130,8 +130,8 @@ describe("custom range: no forced +1 month, amber pill, amber strip band", () =>
 
   it("highlights the active custom pill in solid amber with dark text", () => {
     const source = dashboard();
-    expect(source).toContain('backgroundColor: rollerRange.kind === "custom" ? "#F59E0B" : colors.surface');
-    expect(source).toContain('color={rollerRange.kind === "custom" ? "#0F172A" : colors.muted}');
+    expect(source).toContain('backgroundColor: rollerRange.kind === "custom" ? "#EA580C" : colors.surface');
+    expect(source).toContain('color={rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted}');
     expect(source).toContain('fontWeight: rollerRange.kind === "custom" ? "900"');
   });
 
@@ -139,10 +139,10 @@ describe("custom range: no forced +1 month, amber pill, amber strip band", () =>
     const source = dashboard();
     expect(source).toContain("const isCustomEdge = Boolean(customRange");
     expect(source).toContain("const isCustomInside = Boolean(customRange");
-    expect(source).toContain('isCustomEdge ? { backgroundColor: "#F59E0B"');
-    expect(source).toContain('isCustomInside ? { backgroundColor: "#F59E0B33"');
-    expect(source).toContain('"#F59E0B4D"');
-    expect(source).toContain('isCustomInside ? "#FCD34D"');
+    expect(source).toContain('isCustomEdge ? { backgroundColor: "#EA580C"');
+    expect(source).toContain('isCustomInside ? { backgroundColor: "rgba(234, 88, 12, 0.15)"');
+    expect(source).toContain('"rgba(234, 88, 12, 0.3)"');
+    expect(source).toContain('isCustomInside ? "#FDBA74"');
     expect(source).toContain("rollerRange.kind === \"custom\" && rollerRange.start && rollerRange.end");
   });
 });
@@ -176,8 +176,8 @@ describe("roller anchor stepping (week chevrons move the strip)", () => {
 describe("single-selected date chip in brand amber", () => {
   it("paints the picked day solid amber with slate-950 text and font-black weight", () => {
     const source = dashboard();
-    expect(source).toContain("const topColor = singleSelected ? \"#0F172A\" : isCustomEdge ? \"#0F172A\"");
-    expect(source).toContain("singleSelected ? { backgroundColor: \"#F59E0B\", borderColor: \"#F59E0B\", borderRadius: 12 }");
+    expect(source).toContain("const topColor = singleSelected ? \"#FFFFFF\" : isCustomEdge ? \"#FFFFFF\"");
+    expect(source).toContain("singleSelected ? { backgroundColor: \"#EA580C\", borderColor: \"#EA580C\", borderRadius: 12 }");
     expect(source).toContain('fontWeight: singleSelected ? "900"');
   });
 });
@@ -196,8 +196,8 @@ describe("strip stays full-window around a custom range (no truncation)", () => 
 describe("the calendar single-day selection matches the amber day strip", () => {
   it("uses solid amber for the selected day instead of the app primary colour", () => {
     const source = picker();
-    expect(source).toContain('isSelected ? "#F59E0B" : isToday');
-    expect(source).toContain('isSelected ? "#0F172A" : isToday');
-    expect(source).toContain('isSelected ? "#0F172A" : colors.primary');
+    expect(source).toContain('isSelected ? "#EA580C" : isToday');
+    expect(source).toContain('isSelected ? "#FFFFFF" : isToday');
+    expect(source).toContain('isSelected ? "#FFFFFF" : "#EA580C"');
   });
 });

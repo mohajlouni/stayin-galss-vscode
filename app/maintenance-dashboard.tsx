@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Dimensions, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { ScreenContainer } from "@/components/screen-container";
@@ -196,6 +196,11 @@ export default function MaintenanceDashboard() {
   const [anchorDate, setAnchorDate] = useState(() => localDateISO(new Date()));
   /** فهرس المهمة المتأخرة الحالية ضمن عدّاد الانتقال التسلسلي (قيمة -1 تعني إيقاف السبر). */
   const [overdueIndex, setOverdueIndex] = useState(-1);
+  /** اتجاه فتح كل قائمة منسدلة حسب مكان المرساة على الشاشة لضمان بقائها داخل حدود الموبايل. */
+  const [menuSides, setMenuSides] = useState<{ unit: "left" | "right"; cadence: "left" | "right" }>({ unit: "right", cadence: "right" });
+  /** إشعار داخلي يُعرض عند النقر على بطاقة «متأخرة» دون وجود مهام متأخرة. */
+  const [overdueEmptyNotice, setOverdueEmptyNotice] = useState(false);
+  const winWidth = Dimensions.get("window").width;
 
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
@@ -574,6 +579,20 @@ export default function MaintenanceDashboard() {
     const target = Math.min(Math.max(rollerOffsetRef.current + weeks * 7 * ROLLER_PILL_STEP, 0), max);
     rollerRef.current?.scrollTo({ x: target, animated: true });
   };
+  /** يحسب اتجاه فتح القائمة من مركز المرساة: إذا كانت في النصف الأيسر تُفتح لليمين والعكس، كي لا تتجاوز حافة الشاشة على الموبايل. */
+  const measureMenuSide = (which: "unit" | "cadence") => (event: LayoutChangeEvent) => {
+    const left = 16 + event.nativeEvent.layout.x;
+    const width = event.nativeEvent.layout.width;
+    const side: "left" | "right" = left + width / 2 < winWidth / 2 ? "left" : "right";
+    setMenuSides((current) => current[which] === side ? current : { ...current, [which]: side });
+  };
+  /** يُمرّر الشريط لوسَط اليوم المحدد بحيث يظهر اليوم النشط في منتصف النافذة فوراً على الموبايل. */
+  const centerRollerOnDate = useCallback((date: string) => {
+    const index = timelineDates.indexOf(date);
+    if (index < 0) return;
+    const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
+    rollerRef.current?.scrollTo({ x: Math.min(Math.max(index * ROLLER_PILL_STEP - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
+  }, [timelineDates]);
   /** يُبقي مرساة اليوم/الفترة المختارة في مقدمة النافذة بعد كل تنقّل حتى لا تضيع الأيام خارج الشاشة. */
   useEffect(() => {
     if (!rollerRef.current) return;
@@ -583,6 +602,20 @@ export default function MaintenanceDashboard() {
     const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
     rollerRef.current?.scrollTo({ x: Math.min(Math.max(raw - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
   }, [anchorDate, timelineDates]);
+  /** عند تغيّر اليوم المحدد (نقر على خانة اليوم، زر «اليوم»، أو القفز المتأخر) يوسِّط الشريط اليوم النشط تلقائياً. */
+  useEffect(() => {
+    if (dateFilter) {
+      centerRollerOnDate(dateFilter);
+      return;
+    }
+    if (horizon === "today") centerRollerOnDate(todayISO);
+  }, [dateFilter, horizon, centerRollerOnDate, todayISO]);
+  /** إخفاء إشعار «لا توجد مهام متأخرة» تلقائياً بعد 3 ثوانٍ. */
+  useEffect(() => {
+    if (!overdueEmptyNotice) return;
+    const timer = setTimeout(() => setOverdueEmptyNotice(false), 3000);
+    return () => clearTimeout(timer);
+  }, [overdueEmptyNotice]);
   /** يقفز إلى مهمة متأخرة محددة: يركّز الشريط الزمني فوق تاريخها ويصفي القائمة ليومها فقط. */
   const goToOverdue = (index: number) => {
     const task = overdueTasks[index];
@@ -594,13 +627,15 @@ export default function MaintenanceDashboard() {
     setRollerRange({ kind: "all" });
     setRangePanelOpen(false);
   };
-  /** معالج بطاقة «متأخرة»: يبدأ السبر التسلسلي من أقدم مهمة متأخرة. */
+  /** معالج بطاقة «متأخرة»: يبدأ السبر التسلسلي من أقدم مهمة متأخرة، ويعرض إشعاراً بديلاً إن لم توجد. */
   const jumpOverdue = () => {
     if (tab !== "active") switchTab("active");
     if (!overdueTasks.length) {
       setOverdueIndex(-1);
+      setOverdueEmptyNotice(true);
       return;
     }
+    setOverdueEmptyNotice(false);
     goToOverdue(0);
   };
   /** الانتقال للتالية: يمر على المهام المتأخرة تصاعدياً ثم يصل إلى اليوم ويغلق المساعد. */
@@ -640,6 +675,7 @@ export default function MaintenanceDashboard() {
   return <ScreenContainer edges={["top", "left", "right"]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
     <View style={[styles.header, { flexDirection: row }]}><ScreenBackButton fallbackHref="/(tabs)/more" /><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 24, fontWeight: "900", textAlign: align }}>{language === "ar" ? "الصيانة الوقائية" : "Preventive maintenance"}</Text><Text style={[styles.subtitle, { color: colors.muted, textAlign: align, marginTop: 3 }]}>{language === "ar" ? "جرد الأصول والجدولة الدورية ومتابعة الاستحقاق" : "Asset inventory, recurring schedules & due tracking"}</Text></View></View>
     <View style={[styles.statsRow, { flexDirection: row }]}>{statCard(language === "ar" ? "متأخرة" : "Overdue", stats.overdue, colors.error, "new-releases", jumpOverdue)}{statCard(language === "ar" ? "اليوم" : "Today", stats.dueToday, colors.warning, "today")}{statCard(language === "ar" ? "قريبة" : "Upcoming", stats.upcoming, colors.primary, "schedule")}{statCard(language === "ar" ? "مكتملة" : "Completed", stats.completed, colors.success, "done-all")}</View>
+    {overdueEmptyNotice ? <View style={[styles.feedbackChip, { backgroundColor: colors.error + "14", borderColor: colors.error + "44", flexDirection: row, marginTop: 10 }]}><MaterialIcons name="new-releases" size={13} color={colors.error} /><Text style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "700", textAlign: align }}>{language === "ar" ? "لا توجد مهام متأخرة" : "No overdue tasks"}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق الإشعار" : "Dismiss notice"} onPress={() => setOverdueEmptyNotice(false)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={14} color={colors.error} /></Pressable></View> : null}
 
     <View style={[styles.tabRow, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}>
       <Pressable accessibilityRole="button" onPress={() => switchTab("assets")} style={[styles.tab, { backgroundColor: tab === "assets" ? colors.primary : "transparent" }]}><MaterialIcons name="inventory" size={15} color={tab === "assets" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "assets" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `الأصول (${(assets ?? []).length})` : `Assets (${(assets ?? []).length})`}</Text></Pressable>
@@ -689,27 +725,26 @@ export default function MaintenanceDashboard() {
     <View style={[styles.filterRow, { flexDirection: row, alignItems: "flex-start", gap: 8, zIndex: unitMenuOpen || cadenceMenuOpen ? 2 : 0 }]}>
       <View style={[styles.searchWrap, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}>
         <MaterialIcons name="search" size={16} color={colors.muted} />
-        <TextInput accessibilityLabel="بحث ذكي شامل" value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)" : "Smart search (task, asset, performer, unit, cost, notes, date...)"} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
-        {searchQuery ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={16} color={colors.muted} /></Pressable> : null}
-      </View>
-      {searchActive ? <View style={[styles.feedbackChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "44", flexDirection: row, marginTop: 6 }]}>
-        <MaterialIcons name="info-outline" size={13} color={colors.primary} />
-        <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "700", textAlign: align }}>{tab === "assets" ? `${visibleAssets.length} ${language === "ar" ? "نتيجة مطابقة" : "matching assets"}: "${searchQuery.trim()}"` : `${visibleTasks.length} ${language === "ar" ? "نتيجة مطابقة" : "matching tasks"}: "${searchQuery.trim()}"}`}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={14} color={colors.muted} /></Pressable>
-      </View> : null}
-      {tab !== "assets" && searchActive && dateFilter !== null && visibleTasks.length === 0 ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "عرض النتائج ضمن الكل" : "Show results in All"} onPress={() => selectHorizon("all")} style={({ pressed }) => [styles.zeroHitShortcut, { backgroundColor: "#EA580C" + "14", borderColor: "#EA580C" + "55", flexDirection: row, opacity: pressed ? 0.75 : 1, marginTop: 6 }]}><MaterialIcons name="search" size={13} color="#EA580C" /><Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "800", textAlign: align }}>{language === "ar" ? "لم يتم العثور على نتائج ضمن هذه الفترة — عرض النتائج في (الكل)" : "No results within this period — show results in (All)"}</Text><MaterialIcons name="chevron-right" size={15} color="#EA580C" /></Pressable> : null}
-      <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
-        {unitMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "كافة الوحدات" : "All units"} onPress={() => { setUnitFilter(null); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: unitFilter === null ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={unitFilter === null ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: unitFilter === null ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "كافة الوحدات" : "All units"}</Text></Pressable>
-          {chalets.map((chalet) => { const selected = unitFilter === chalet.id; return <Pressable key={chalet.id} accessibilityRole="button" accessibilityLabel={chalet.name} onPress={() => { setUnitFilter(selected ? null : chalet.id); setUnitMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: selected ? colors.primary + "14" : "transparent", flexDirection: row }]}><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text></Pressable>; })}
+        <TextInput accessibilityLabel="بحث ذكي شامل" value={searchQuery} onChangeText={setSearchQuery} placeholder={language === "ar" ? "بحث ذكي شامل (المهمة، الأصل، المنفذ، الشاليه، التكلفة، الملاحظات، التاريخ...)" : "Smart search (task, asset, performer, unit, cost, notes, date...)"} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} /></View>
+      <View onLayout={measureMenuSide("unit")} style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة الوحدات" : "Unit list"} onPress={() => { setUnitMenuOpen(!unitMenuOpen); setCadenceMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{unitFilter ? (chalets.find((chalet) => chalet.id === unitFilter)?.name ?? "—") : (language === "ar" ? "كافة الوحدات" : "All units")}</Text><MaterialIcons name={unitMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
+        {unitMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }, { backgroundColor: colors.background, width: 220, elevation: 18, shadowColor: "#000000", shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, left: menuSides.unit === "left" ? 0 : undefined, right: menuSides.unit === "left" ? undefined : 0 }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "كافة الوحدات" : "All units"} onPress={() => { setUnitFilter(null); setUnitMenuOpen(false); }} style={({ pressed }) => [styles.toolbarRow, { backgroundColor: unitFilter === null ? colors.primary + "22" : pressed ? colors.surfaceMuted : "transparent", borderStartWidth: unitFilter === null ? 2 : 0, borderEndWidth: 0, borderStartColor: unitFilter === null ? colors.primary : "transparent", flexDirection: row }]}><MaterialIcons name="holiday-village" size={15} color={unitFilter === null ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: unitFilter === null ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{language === "ar" ? "كافة الوحدات" : "All units"}</Text></Pressable>
+          {chalets.map((chalet) => { const selected = unitFilter === chalet.id; return <Pressable key={chalet.id} accessibilityRole="button" accessibilityLabel={chalet.name} onPress={() => { setUnitFilter(selected ? null : chalet.id); setUnitMenuOpen(false); }} style={({ pressed }) => [styles.toolbarRow, { backgroundColor: selected ? colors.primary + "22" : pressed ? colors.surfaceMuted : "transparent", borderStartWidth: selected ? 2 : 0, borderEndWidth: 0, borderStartColor: selected ? colors.primary : "transparent", flexDirection: row }]}><View style={[styles.filterDot, { backgroundColor: chalet.color }]} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{chalet.name}</Text></Pressable>; })}
         </View> : null}
       </View>
-      <View style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة دورية الصيانة" : "Recurrence list"} onPress={() => { setCadenceMenuOpen(!cadenceMenuOpen); setUnitMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="schedule" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{CADENCE_FILTERS.find((cadence) => cadence.id === cadenceFilter)?.label[language === "ar" ? 0 : 1] ?? (language === "ar" ? "كافة الفترات" : "All periods")}</Text><MaterialIcons name={cadenceMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
-        {cadenceMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }]}>
-          {CADENCE_FILTERS.map((cadence) => { const selected = cadenceFilter === cadence.id; return <Pressable key={cadence.id} accessibilityRole="button" accessibilityLabel={cadence.label[language === "ar" ? 0 : 1]} onPress={() => { setCadenceFilter(selected ? "all" : cadence.id); setCadenceMenuOpen(false); }} style={[styles.toolbarRow, { backgroundColor: selected ? colors.primary + "14" : "transparent", flexDirection: row }]}><MaterialIcons name={cadence.icon} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{cadence.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}
+      <View onLayout={measureMenuSide("cadence")} style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة دورية الصيانة" : "Recurrence list"} onPress={() => { setCadenceMenuOpen(!cadenceMenuOpen); setUnitMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="schedule" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{CADENCE_FILTERS.find((cadence) => cadence.id === cadenceFilter)?.label[language === "ar" ? 0 : 1] ?? (language === "ar" ? "كافة الفترات" : "All periods")}</Text><MaterialIcons name={cadenceMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
+        {cadenceMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }, { backgroundColor: colors.background, width: 220, elevation: 18, shadowColor: "#000000", shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, left: menuSides.cadence === "left" ? 0 : undefined, right: menuSides.cadence === "left" ? undefined : 0 }]}>
+          {CADENCE_FILTERS.map((cadence) => { const selected = cadenceFilter === cadence.id; return <Pressable key={cadence.id} accessibilityRole="button" accessibilityLabel={cadence.label[language === "ar" ? 0 : 1]} onPress={() => { setCadenceFilter(selected ? "all" : cadence.id); setCadenceMenuOpen(false); }} style={({ pressed }) => [styles.toolbarRow, { backgroundColor: selected ? colors.primary + "22" : pressed ? colors.surfaceMuted : "transparent", borderStartWidth: selected ? 2 : 0, borderEndWidth: 0, borderStartColor: selected ? colors.primary : "transparent", flexDirection: row }]}><MaterialIcons name={cadence.icon} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{cadence.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}
         </View> : null}
       </View>
     </View>
+
+    {searchActive ? <View style={[styles.feedbackChip, { backgroundColor: colors.primary + "12", borderColor: colors.primary + "44", flexDirection: row, marginTop: 10 }]}>
+      <MaterialIcons name="info-outline" size={13} color={colors.primary} />
+      <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "700", textAlign: align }}>{tab === "assets" ? `${visibleAssets.length} ${visibleAssets.length === 1 ? (language === "ar" ? "نتيجة مطابقة" : "matching asset") : (language === "ar" ? "نتائج مطابقة" : "matching assets")}: "${searchQuery.trim()}"` : `${visibleTasks.length} ${visibleTasks.length === 1 ? (language === "ar" ? "نتيجة مطابقة" : "matching task") : (language === "ar" ? "نتائج مطابقة" : "matching tasks")}: "${searchQuery.trim()}"`}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={14} color={colors.muted} /></Pressable>
+    </View> : null}
+    {tab !== "assets" && searchActive && dateFilter !== null && visibleTasks.length === 0 ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "عرض النتائج ضمن الكل" : "Show results in All"} onPress={() => selectHorizon("all")} style={({ pressed }) => [styles.zeroHitShortcut, { backgroundColor: "#EA580C" + "14", borderColor: "#EA580C" + "55", flexDirection: row, opacity: pressed ? 0.75 : 1, marginTop: 8 }]}><MaterialIcons name="search" size={13} color="#EA580C" /><Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "800", textAlign: align }}>{language === "ar" ? "لم يتم العثور على نتائج ضمن هذه الفترة — عرض النتائج في (الكل)" : "No results within this period — show results in (All)"}</Text><MaterialIcons name="chevron-right" size={15} color="#EA580C" /></Pressable> : null}
 
     {unitMenuOpen || cadenceMenuOpen || menuFor ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => { setUnitMenuOpen(false); setCadenceMenuOpen(false); setMenuFor(null); }} style={[StyleSheet.absoluteFill, styles.clickAway]} /> : null}
 

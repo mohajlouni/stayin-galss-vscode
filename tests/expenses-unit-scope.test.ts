@@ -68,8 +68,8 @@ describe("expenses multi-unit checkbox scope, opaque modal, and summary/badge po
     expect(screen).toContain('color: "#A855F7"');
   });
 
-  it("combines the range chip, period pills, and 14-day strip into one unified timeline", () => {
-    expect(screen).toContain("styles.timelineChips");
+  it("combines the period dropdown and 14-day strip into one unified timeline", () => {
+    expect(screen).not.toContain("styles.timelineChips");
     expect(screen).toContain("styles.timelineWrap");
     expect(screen).not.toContain("styles.navBar");
     expect(screen).not.toContain("styles.periodRow");

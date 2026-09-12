@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 const screen = readFileSync(resolve(process.cwd(), "app/expenses.tsx"), "utf8");
 
 describe("expenses unified timeline", () => {
-  it("groups the range chip, period pills, day strip, and search under one coherent filter block", () => {
+  it("groups the 14-day strip and search under one coherent filter block with a single dropdown period control", () => {
     expect(screen).toContain("styles.timelineWrap");
-    expect(screen).toContain("styles.timelineChips");
+    expect(screen).toContain("styles.dayStrip");
+    expect(screen).not.toContain("styles.timelineChips");
+    expect(screen).not.toContain("styles.rangeChip");
     expect(screen).toContain("styles.filterRow");
     expect(screen).not.toContain("styles.navBar");
     expect(screen).not.toContain("styles.periodArrow");
@@ -15,12 +17,13 @@ describe("expenses unified timeline", () => {
     expect(screen).not.toContain("handleNext");
   });
 
-  it("lets the custom range chip open the range picker and clear its own selection", () => {
+  it("lets the custom range from the period dropdown open the range picker and marks it amber", () => {
     expect(screen).toContain("onPress={() => setRangePickerOpen(true)}");
-    expect(screen).toContain('accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"}');
-    expect(screen).toContain('"من - إلى"');
-    expect(screen).toContain("clearRangeFilter()");
-    expect(screen).toContain("مسح الفترة");
+    expect(screen).toContain("applyPeriodFilter");
+    expect(screen).toContain('if (id === "custom") setRangePickerOpen(true);');
+    expect(screen).toContain('period === "custom" ? "#EA580C" : colors.border');
+    expect(screen).toContain('language === "ar" ? "من" : "From"');
+    expect(screen).toContain('language === "ar" ? "إلى" : "To"');
   });
 
   it("recolors the day strip chips and dots to the orange family", () => {
@@ -33,7 +36,7 @@ describe("expenses unified timeline", () => {
     expect(screen).not.toContain("rgba(245, 158, 11, 0.18)");
   });
 
-  it("moves the 14-day strip under the period pills inside the timeline wrapper", () => {
+  it("moves the 14-day strip directly under the summary metrics inside the timeline wrapper", () => {
     expect(screen).toMatch(/expenseStripDates\.map\(\(date\) =>/);
     expect(screen).toContain("styles.dayStrip");
     expect(screen).toContain("styles.stripChip");

@@ -38,11 +38,11 @@ describe("expenses calendar navigation chevrons", () => {
     expect(screen).toContain("Scroll days forward");
   });
 
-  it("renders the current period header from the active anchor, replaced by the custom range text", () => {
-    expect(screen).toContain('formatDate(todayAnchor)');
-    expect(screen).toContain("formatMonth(monthAnchorYear, monthAnchorNumber)");
-    expect(screen).toContain('{period === "custom"');
-    expect(screen).toContain('{periodLabel}');
+  it("shows the active period label inside the dropdown trigger with amber custom state", () => {
+    expect(screen).toContain("const periodMenuLabel = period === \"today\"");
+    expect(screen).toContain('(language === "ar" ? "كافة الفترات" : "All periods")');
+    expect(screen).toContain("{periodMenuLabel}");
+    expect(screen).toContain('period === "custom" ? "#EA580C" : colors.border');
   });
 
   it("labels the popover month chevrons with the direction they actually move in each language", () => {

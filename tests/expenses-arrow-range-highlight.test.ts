@@ -7,12 +7,13 @@ const picker = readFileSync(resolve(process.cwd(), "components/calendar-date-pic
 const rangePicker = readFileSync(resolve(process.cwd(), "components/ui/DateRangePicker.tsx"), "utf8");
 
 describe("expenses stepper arrows and custom-range amber highlight", () => {
-  it("routes the strip nudges and the range chip through stop-propagation-aware handlers", () => {
+  it("routes the strip nudges and the custom-range amber state through stop-propagation-aware handlers", () => {
     expect(screen).toMatch(/nudgeStrip\(-1\)/);
     expect(screen).toMatch(/nudgeStrip\(1\)/);
     expect(screen).toContain("event?.stopPropagation?.()");
     expect(screen).toContain("onPress={() => setRangePickerOpen(true)}");
-    expect(screen).toContain("clearRangeFilter");
+    expect(screen).toContain("applyPeriodFilter(option.id)");
+    expect(screen).not.toContain("clearRangeFilter");
   });
 
   it("forces the strip arrow buttons above siblings with explicit pointer events and web cursor semantics", () => {
@@ -22,8 +23,8 @@ describe("expenses stepper arrows and custom-range amber highlight", () => {
     expect(screen).toContain('userSelect: "none"');
   });
 
-  it("keeps the custom period range chip orange while it stays active", () => {
-    expect(screen).toContain('period === "custom" ? "#EA580C"');
+  it("keeps the custom period dropdown trigger orange while it stays active", () => {
+    expect(screen).toContain('period === "custom" ? "#EA580C" : colors.border');
     expect(screen).toContain("setRangePickerOpen(true)");
     expect(screen).not.toContain('activeColor="#F59E0B"');
   });

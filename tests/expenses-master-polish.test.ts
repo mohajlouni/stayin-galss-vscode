@@ -41,13 +41,13 @@ describe("expenses master polish", () => {
     expect(screen).toContain("مسح البحث");
   });
 
-  it("extends the period bar to include the last 7 days and all records with stepping", () => {
+  it("extends the period dropdown to include the last 7 days and all records with stepping", () => {
     expect(screen).toContain('type ExpensePeriod = "today" | "7" | "month" | "custom" | "all";');
     expect(screen).toContain("const [weekAnchor, setWeekAnchor] = useState(todayISO());");
     expect(screen).toContain("addDays(weekAnchor, -6)");
     expect(screen).toContain("setWeekAnchor(todayISO());");
     expect(screen).toContain("خلال 7 أيام");
-    expect(screen).toContain('active={period === "all"}');
+    expect(screen).toContain("const active = period === option.id;");
     expect(screen).toContain("nudgeStrip(-1)");
     expect(screen).toContain('{period === "custom"');
   });

@@ -59,6 +59,14 @@ describe("expenses master polish", () => {
     expect(screen).toContain("تقارير المصروفات");
   });
 
+  it("relocates the quick actions into the first date separator bar as compact horizontal buttons", () => {
+    expect(screen).toContain("styles.dateHeaderBar");
+    expect(screen).toContain("styles.quickAction");
+    expect(screen).toContain("index === 0 ?");
+    expect(screen).toContain('justifyContent: "space-between"');
+    expect(screen).toContain("styles.dateHeaderActions");
+  });
+
   it("pre-filters the audit log from the deep-linked action parameter", () => {
     expect(audit).toContain('import { useLocalSearchParams } from "expo-router";');
     expect(audit).toContain("initialFilter");

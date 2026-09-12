@@ -2,7 +2,8 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
-import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, View, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, Dimensions, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, View, type LayoutChangeEvent } from "react-native";
+import { confirmAction, showAlert } from "@/lib/confirm";
 
 import { CalendarDatePicker } from "@/components/calendar-date-picker";
 import { normalizeArabic } from "@/components/ui/HighlightedText";
@@ -361,14 +362,14 @@ export default function ExpensesScreen() {
   const notifyExpenseSaved = () => {
     const message = language === "ar" ? "تم حفظ المصروف بنجاح" : "Expense saved successfully";
     if (Platform.OS === "android") ToastAndroid.show(message, ToastAndroid.SHORT);
-    else Alert.alert(language === "ar" ? "تم الحفظ" : "Saved", message);
+    else showAlert(language === "ar" ? "تم الحفظ" : "Saved", message);
   };
   const chooseReceipt = async (source: "camera" | "library") => {
     try {
       if (source === "camera") {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) {
-          Alert.alert(language === "ar" ? "إذن الكاميرا مطلوب" : "Camera permission required", language === "ar" ? "اسمح للكاميرا لالتقاط صورة الفاتورة." : "Allow camera access to take a receipt photo.");
+          showAlert(language === "ar" ? "إذن الكاميرا مطلوب" : "Camera permission required", language === "ar" ? "اسمح للكاميرا لالتقاط صورة الفاتورة." : "Allow camera access to take a receipt photo.");
           return;
         }
       }
@@ -377,7 +378,7 @@ export default function ExpensesScreen() {
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.75 });
       if (!result.canceled && result.assets[0]?.uri) setReceiptUri(result.assets[0].uri);
     } catch {
-      Alert.alert(language === "ar" ? "تعذر إرفاق الوصل" : "Could not attach receipt", language === "ar" ? "حاول اختيار الصورة مرة أخرى." : "Try selecting the image again.");
+      showAlert(language === "ar" ? "تعذر إرفاق الوصل" : "Could not attach receipt", language === "ar" ? "حاول اختيار الصورة مرة أخرى." : "Try selecting the image again.");
     }
   };
   const save = async () => {
@@ -385,32 +386,32 @@ export default function ExpensesScreen() {
     if (!selectedChaletIds.length) {
       setScopeError(true);
       scrollToField("scope");
-      Alert.alert(language === "ar" ? "اختر نطاق المصروف" : "Choose expense scope", language === "ar" ? "اختر شاليهًا واحدًا على الأقل قبل إدخال المبلغ." : "Choose at least one chalet before entering the amount.");
+      showAlert(language === "ar" ? "اختر نطاق المصروف" : "Choose expense scope", language === "ar" ? "اختر شاليهًا واحدًا على الأقل قبل إدخال المبلغ." : "Choose at least one chalet before entering the amount.");
       return;
     }
     const numeric = Number(amount.replace(",", "."));
     if (!Number.isFinite(numeric) || numeric <= 0) {
       setAmountError(true);
       scrollToField("amount");
-      Alert.alert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? "أدخل مبلغ مصروف أكبر من صفر." : "Enter an expense amount greater than zero.");
+      showAlert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? "أدخل مبلغ مصروف أكبر من صفر." : "Enter an expense amount greater than zero.");
       return;
     }
     if (!category) {
       setCategoryError(true);
       scrollToField("category");
-      Alert.alert(language === "ar" ? "اختر التصنيف" : "Choose a category", language === "ar" ? "يرجى اختيار تصنيف المصروف قبل المتابعة." : "Please choose the expense category first.");
+      showAlert(language === "ar" ? "اختر التصنيف" : "Choose a category", language === "ar" ? "يرجى اختيار تصنيف المصروف قبل المتابعة." : "Please choose the expense category first.");
       return;
     }
     if (category === "other" && otherCategoryNote.trim().length < 3) {
       setOtherCategoryError(true);
       scrollToField("otherCategory");
-      Alert.alert(language === "ar" ? "صنّف المصروف" : "Classify the expense", language === "ar" ? "اكتب نوع وتصنيف هذا المصروف (3 أحرف على الأقل)." : "Describe this custom expense type (at least 3 characters).");
+      showAlert(language === "ar" ? "صنّف المصروف" : "Classify the expense", language === "ar" ? "اكتب نوع وتصنيف هذا المصروف (3 أحرف على الأقل)." : "Describe this custom expense type (at least 3 characters).");
       return;
     }
     if (!fundingEntity) {
       setFundingError(true);
       scrollToField("funding");
-      Alert.alert(language === "ar" ? "اختر مصدر التمويل" : "Choose funding source", language === "ar" ? "حدد جهة التمويل: الخزينة المركزية للمالك أو عهدة موظف / حارس ميداني." : "Choose the funding entity: the owner treasury or a staff float.");
+      showAlert(language === "ar" ? "اختر مصدر التمويل" : "Choose funding source", language === "ar" ? "حدد جهة التمويل: الخزينة المركزية للمالك أو عهدة موظف / حارس ميداني." : "Choose the funding entity: the owner treasury or a staff float.");
       return;
     }
     const staffEntity = fundingEntity === "staff";
@@ -418,46 +419,46 @@ export default function ExpensesScreen() {
       if (!staffFloatId) {
         setStaffError(true);
         scrollToField("staff");
-        Alert.alert(language === "ar" ? "اختر عهدة الموظف" : "Choose a staff float", language === "ar" ? "حدد الموظف / الحارس الذي سيدفع المصروف." : "Select the staff member who will pay this expense.");
+        showAlert(language === "ar" ? "اختر عهدة الموظف" : "Choose a staff float", language === "ar" ? "حدد الموظف / الحارس الذي سيدفع المصروف." : "Select the staff member who will pay this expense.");
         return;
       }
       if (!staffMode) {
         setStaffModeError(true);
         scrollToField("staffMode");
-        Alert.alert(language === "ar" ? "اختر طريقة السداد" : "Choose how the staff pays", language === "ar" ? "حدد هل يُخصم من العهدة النقدية أم دُفع من جيب الموظف." : "Choose whether it is deducted from the held float or paid from the staff pocket.");
+        showAlert(language === "ar" ? "اختر طريقة السداد" : "Choose how the staff pays", language === "ar" ? "حدد هل يُخصم من العهدة النقدية أم دُفع من جيب الموظف." : "Choose whether it is deducted from the held float or paid from the staff pocket.");
         return;
       }
     } else if (!fundingChannel) {
       setChannelError(true);
       scrollToField("channel");
-      Alert.alert(language === "ar" ? "اختر طريقة الصرف" : "Choose payment method", language === "ar" ? "حدد كاش أو تحويل CliQ قبل حفظ المصروف." : "Choose Cash or CliQ transfer before saving the expense.");
+      showAlert(language === "ar" ? "اختر طريقة الصرف" : "Choose payment method", language === "ar" ? "حدد كاش أو تحويل CliQ قبل حفظ المصروف." : "Choose Cash or CliQ transfer before saving the expense.");
       return;
     } else if (fundingChannel !== "vault-cash" && !ownerAccountId) {
       setChannelError(true);
       scrollToField("channel");
-      Alert.alert(language === "ar" ? "اختر حساب الخزينة" : "Choose a treasury account", language === "ar" ? "حدد الحساب المفعل الذي سيُحمَّل عليه المصروف." : "Select the active account the expense will be charged to.");
+      showAlert(language === "ar" ? "اختر حساب الخزينة" : "Choose a treasury account", language === "ar" ? "حدد الحساب المفعل الذي سيُحمَّل عليه المصروف." : "Select the active account the expense will be charged to.");
       return;
     }
     if (note.trim().length < 3) {
       setNoteError(true);
       scrollToField("note");
-      Alert.alert(language === "ar" ? "البيان مطلوب" : "Description required", language === "ar" ? "أدخل بيانًا إلزاميًا للمصروف (3 أحرف على الأقل)." : "Enter a required description (at least 3 characters).");
+      showAlert(language === "ar" ? "البيان مطلوب" : "Description required", language === "ar" ? "أدخل بيانًا إلزاميًا للمصروف (3 أحرف على الأقل)." : "Enter a required description (at least 3 characters).");
       return;
     }
     const normalizedDate = expenseDate.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) || Number.isNaN(new Date(`${normalizedDate}T00:00:00.000Z`).getTime())) {
-      Alert.alert(language === "ar" ? "تاريخ صرف غير صحيح" : "Invalid expense date", language === "ar" ? "حدد تاريخًا صحيحًا للمصروف." : "Choose a valid expense date.");
+      showAlert(language === "ar" ? "تاريخ صرف غير صحيح" : "Invalid expense date", language === "ar" ? "حدد تاريخًا صحيحًا للمصروف." : "Choose a valid expense date.");
       return;
     }
     const scopedChalets = chalets.filter((item) => selectedChaletIds.includes(item.id));
     if (!scopedChalets.length) {
-      Alert.alert(language === "ar" ? "اختر شاليهًا" : "Choose a chalet", language === "ar" ? "اختر الشاليه المرتبط بهذا المصروف للمتابعة." : "Choose the chalet related to this expense to continue.");
+      showAlert(language === "ar" ? "اختر شاليهًا" : "Choose a chalet", language === "ar" ? "اختر الشاليه المرتبط بهذا المصروف للمتابعة." : "Choose the chalet related to this expense to continue.");
       return;
     }
     const chalet = scopedChalets.length === 1 ? scopedChalets[0] : undefined;
     const generalAllocations = scopedChalets.length > 1 ? splitExpenseAcrossChalets(numeric, scopedChalets) : undefined;
     if (scopedChalets.length > 1 && !generalAllocations?.length) {
-      Alert.alert(language === "ar" ? "لا توجد وحدات" : "No units available", language === "ar" ? "أضف وحدة واحدة على الأقل قبل تسجيل مصروف عام." : "Add at least one unit before recording a shared expense.");
+      showAlert(language === "ar" ? "لا توجد وحدات" : "No units available", language === "ar" ? "أضف وحدة واحدة على الأقل قبل تسجيل مصروف عام." : "Add at least one unit before recording a shared expense.");
       return;
     }
     const resolvedPaymentMethod: ExpensePaymentMethod | undefined = !staffEntity ? (fundingChannel === "vault-cash" ? "cash" : fundingChannel === "cliq" ? "click" : undefined) : undefined;
@@ -482,14 +483,21 @@ export default function ExpensesScreen() {
       notifyExpenseSaved();
       resetForm();
     } catch {
-      Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "لا تملك صلاحية إضافة المصروف أو تعذر الحفظ." : "You do not have permission to add this expense or it could not be saved.");
+      showAlert(language === "ar" ? "تعذر الحفظ" : "Could not save", language === "ar" ? "لا تملك صلاحية إضافة المصروف أو تعذر الحفظ." : "You do not have permission to add this expense or it could not be saved.");
     } finally {
       endSubmit();
     }
   };
   const remove = (expense: Expense) => {
     const linkedTaskTitle = expense.maintenanceTaskId ? maintenanceTasks.find((task) => task.id === expense.maintenanceTaskId)?.title : undefined;
-    Alert.alert(language === "ar" ? "حذف المصروف" : "Delete expense", language === "ar" ? (linkedTaskTitle ? `هذا المصروف مرتبط بمهمة صيانة مكتملة (${linkedTaskTitle}). هل تريد حذف السند المالي وتصفير تكلفة المهمة؟` : "هل أنت متأكد من حذف هذا المصروف نهائيًا؟") : (linkedTaskTitle ? `This expense is linked to a completed maintenance task (${linkedTaskTitle}). Delete the voucher and reset the task cost to zero?` : "Delete this expense permanently?"), [{ text: language === "ar" ? "إلغاء" : "Cancel", style: "cancel" }, { text: language === "ar" ? "حذف" : "Delete", style: "destructive", onPress: () => void deleteExpense(expense.id).catch(() => Alert.alert(language === "ar" ? "تعذر الحذف" : "Could not delete", language === "ar" ? "لا تملك صلاحية حذف المصروف." : "You do not have permission to delete this expense.")) }]);
+    confirmAction({
+      title: language === "ar" ? "حذف المصروف" : "Delete expense",
+      message: language === "ar" ? (linkedTaskTitle ? `هذا المصروف مرتبط بمهمة صيانة مكتملة (${linkedTaskTitle}). هل تريد حذف السند المالي وتصفير تكلفة المهمة؟` : "هل أنت متأكد من حذف هذا المصروف نهائيًا؟") : (linkedTaskTitle ? `This expense is linked to a completed maintenance task (${linkedTaskTitle}). Delete the voucher and reset the task cost to zero?` : "Delete this expense permanently?"),
+      cancelLabel: language === "ar" ? "إلغاء" : "Cancel",
+      confirmLabel: language === "ar" ? "حذف" : "Delete",
+      destructive: true,
+      onConfirm: () => void deleteExpense(expense.id).catch(() => showAlert(language === "ar" ? "تعذر الحذف" : "Could not delete", language === "ar" ? "لا تملك صلاحية حذف المصروف." : "You do not have permission to delete this expense.")),
+    });
   };
 
   if (!can("view_financial_reports")) return <ScreenContainer><View style={[styles.locked, { backgroundColor: colors.surface, borderColor: colors.border }]}><MaterialIcons name="lock" size={30} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 9, textAlign: align }}>{language === "ar" ? "المصروفات للإدارة فقط" : "Expenses are for management only"}</Text></View></ScreenContainer>;

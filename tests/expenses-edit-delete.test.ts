@@ -94,4 +94,14 @@ describe("expenses UI/UX overhaul: zero-default form, cascading dropdowns, edit,
     expect(existing.maintenanceTaskId).toBe("mt-9");
     expect(store).toContain("task.id === existing.maintenanceTaskId ? { ...task, cost: amount, actualCost: amount } : task");
   });
+
+  it("confirms deletion through the web-aware helper so the delete button works on the web build", () => {
+    const helper = read("lib/confirm.ts");
+    expect(screen).toContain('import { confirmAction, showAlert } from "@/lib/confirm";');
+    expect(screen).toContain("confirmAction({");
+    expect(screen).toContain("onConfirm: () => void deleteExpense(expense.id).catch");
+    expect(helper).toContain('Platform.OS === "web"');
+    expect(helper).toContain("webWindow.confirm?.(message)");
+    expect(helper).toContain('{ text: confirmLabel, style: destructive ? "destructive" : "default", onPress: onConfirm }');
+  });
 });

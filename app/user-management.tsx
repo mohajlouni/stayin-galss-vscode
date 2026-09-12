@@ -1,13 +1,17 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AppToggle } from "@/components/app-toggle";
 import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
+import AddUserModal from "@/components/users/AddUserModal";
 import { startOAuthLogin } from "@/constants/oauth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
+import { suggestOnbookUid, validateOnbookEntry, type OnbookStaffRole } from "@/lib/staff-directory";
+import { useOnbookStaff } from "@/lib/staff-directory-store";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { PERMISSION_KEYS, WORKSPACE_ROLE_LABELS, hasAllWorkspacePermissions, normalizeWorkspacePermissions, permissionsForPreset, type PermissionKey, type PermissionPreset, type WorkspacePermissions } from "@/shared/workspace-permissions";
@@ -59,6 +63,8 @@ export default function UserManagementScreen() {
    const [copiedMemberId, setCopiedMemberId] = useState<number | null>(null);
    const align = isRTL ? "right" : "left";
    const row = isRTL ? "row-reverse" : "row";
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const { staff: onbookStaff, ready: onbookReady, commit } = useOnbookStaff();
 
   useEffect(() => {
     if (!editingMember) return;
@@ -83,20 +89,38 @@ export default function UserManagementScreen() {
     setInvitePermissionsOpen(false);
     setInviteOpen(true);
   };
-  const createInvite = async () => {
-    if (name.trim().length < 2 || phone.trim().length < 6) {
+  const runInvite = async (employeeName: string, phoneNumber: string, role: "admin" | "staff" | "guest", permissions: WorkspacePermissions): Promise<boolean> => {
+    if (employeeName.trim().length < 2 || phoneNumber.trim().length < 6) {
       Alert.alert(language === "ar" ? "بيانات ناقصة" : "Missing details", language === "ar" ? "أدخل اسم الموظف ورقم هاتفه بشكل صحيح." : "Enter the employee name and phone number.");
-      return;
+      return false;
     }
     try {
-      const role = invitePreset === "mini-admin" || invitePreset === "manager" ? "admin" : invitePreset === "guard" || invitePreset === "guest" ? "guest" : "staff";
-      const result = await invite.mutateAsync({ employeeName: name.trim(), phone: phone.trim(), role, permissions: invitePermissions });
-      setGeneratedInvite({ pin: result.pin, expiresAt: new Date(result.expiresAt), phone: phone.trim() });
+      const result = await invite.mutateAsync({ employeeName: employeeName.trim(), phone: phoneNumber.trim(), role, permissions });
+      setGeneratedInvite({ pin: result.pin, expiresAt: new Date(result.expiresAt), phone: phoneNumber.trim() });
       setInviteOpen(false);
       await overview.refetch();
+      return true;
     } catch {
       Alert.alert(language === "ar" ? "تعذر إنشاء الدعوة" : "Could not create invitation", language === "ar" ? "حاول مرة أخرى." : "Please try again.");
+      return false;
     }
+  };
+  const createInvite = async () => {
+    const role = invitePreset === "mini-admin" || invitePreset === "manager" ? "admin" : invitePreset === "guard" || invitePreset === "guest" ? "guest" : "staff";
+    await runInvite(name, phone, role, invitePermissions);
+  };
+  const inviteFromAddModal = async (employeeName: string, phoneNumber: string) => runInvite(employeeName, phoneNumber, "staff", permissionsForPreset("staff"));
+  const addOnbookStaffFromModal = async ({ name: entryName, phone: entryPhone, role: entryRole, email }: { name: string; phone: string; role: OnbookStaffRole; email?: string }) => {
+    const membersData = overview.data?.members ?? [];
+    const memberPhones = membersData.map((item) => item.phone);
+    const memberCodes = membersData.map((item) => item.userCode).filter((code): code is string => Boolean(code));
+    const issue = validateOnbookEntry({ name: entryName, phone: entryPhone }, memberPhones, onbookStaff);
+    if (issue === "duplicate-phone") return language === "ar" ? "رقم الهاتف مستخدم مسبقًا في التطبيق أو دليل المنتسبين." : "This phone is already used by an app member or another on-book entry.";
+    if (issue === "phone") return language === "ar" ? "أدخل رقم هاتف صحيحًا (6 أرقام على الأقل)." : "Enter a valid phone number (at least 6 digits).";
+    if (issue === "name") return language === "ar" ? "أدخل اسم المنتسب (حرفان على الأقل)." : "Enter the staff name (at least 2 characters).";
+    const uid = suggestOnbookUid(entryRole, [...memberCodes, ...onbookStaff.map((item) => item.uid)]);
+    await commit([...onbookStaff, { uid, name: entryName.trim(), phone: entryPhone.trim(), role: entryRole, email: email?.trim() || undefined, isAppUser: false, createdAt: new Date().toISOString() }]);
+    return null;
   };
   const acceptInvite = async () => {
     if (phone.trim().length < 6 || !/^\d{6}$/.test(pin)) {
@@ -151,6 +175,8 @@ export default function UserManagementScreen() {
         const fullAccess = member.role === "owner" || member.role === "admin" || hasAllWorkspacePermissions(member.permissions);
         return <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={member.role === "owner" ? (language === "ar" ? "المالك الأساسي محمي" : "Primary owner protected") : (language === "ar" ? `تعديل صلاحيات ${member.displayName}` : `Edit ${member.displayName}'s permissions`)} onPress={() => member.role === "owner" ? Alert.alert(language === "ar" ? "المالك الأساسي محمي" : "Primary owner protected", language === "ar" ? "لا يمكن حذف المالك الأساسي أو خفض دوره أو تعديل صلاحياته." : "The primary owner cannot be deleted, demoted, or edited.") : setEditingMember(member)} style={({ pressed }) => [styles.member, { backgroundColor: colors.surface, borderColor: member.role === "owner" ? colors.primary + "88" : colors.border, flexDirection: row, opacity: member.role === "owner" ? 1 : pressed ? 0.72 : 1 }]}><View style={[styles.memberIcon, { backgroundColor: member.role === "owner" ? colors.primary + "18" : fullAccess ? colors.success + "18" : colors.warning + "18" }]}><MaterialIcons name={member.role === "owner" ? "verified-user" : fullAccess ? "manage-accounts" : member.role === "guest" ? "security" : "badge"} size={20} color={member.role === "owner" ? colors.primary : fullAccess ? colors.success : colors.warning} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontWeight: "900", textAlign: align }}>{member.displayName}</Text>{member.userCode ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}><MaterialIcons name="badge" size={13} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 12, fontWeight: "900", writingDirection: "ltr" }}>{member.userCode}</Text></View> : null}<Text style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{language === "ar" ? `${WORKSPACE_ROLE_LABELS[member.role].ar}${member.role === "owner" ? " — محمي وغير قابل للتعديل" : ""}` : member.role === "owner" ? "Primary owner — protected" : fullAccess ? "Operational manager" : member.role === "guest" ? "Guard / field supervisor" : "Booking staff"}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "نسخ معرّف المستخدم" : "Copy user ID"} onPress={() => { if (member.userCode) { void Clipboard.setStringAsync(member.userCode); setCopiedMemberId(member.id); setTimeout(() => setCopiedMemberId(null), 1200); } }} style={{ padding: 6 }}><MaterialIcons name={copiedMemberId === member.id ? "check" : "content-copy"} size={16} color={copiedMemberId === member.id ? colors.success : colors.muted} /></Pressable><MaterialIcons name={member.role === "owner" ? "lock" : isRTL ? "chevron-left" : "chevron-right"} size={20} color={member.role === "owner" ? colors.primary : colors.muted} /></Pressable>;
       })}
+      <View style={[styles.addEmployeeRow, { flexDirection: row, marginTop: 24 }]}><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align, marginTop: 0, marginBottom: 0 }]}>{language === "ar" ? "المنتسبون الميدانيون (على الكتاب)" : "Field staff (on the book)"}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إضافة عضو" : "Add member"} onPress={() => setAddUserOpen(true)} style={({ pressed }) => [styles.addEmployee, { backgroundColor: "#0EA5E9", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="person-add" size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "إضافة عضو" : "Add member"}</Text></Pressable></View>
+      {onbookReady ? (onbookStaff.length ? onbookStaff.map((member) => { const roleLabel = member.role === "guard" ? (language === "ar" ? "حارس ميداني" : "Field guard") : (language === "ar" ? "موظف / محاسب" : "Staff / accountant"); return <View key={member.uid} style={[styles.member, { backgroundColor: colors.surface, borderColor: colors.border, flexDirection: row, marginTop: 8 }]}><View style={[styles.memberIcon, { backgroundColor: member.isAppUser ? colors.success + "18" : "#0EA5E9" + "18" }]}><MaterialIcons name={member.isAppUser ? "smartphone" : "badge"} size={20} color={member.isAppUser ? colors.success : "#0EA5E9"} /></View><View style={styles.flex}><Text style={{ color: colors.foreground, fontWeight: "900", textAlign: align }}>{member.name}</Text><Text style={{ color: "#0EA5E9", fontSize: 12, fontWeight: "900", marginTop: 2, writingDirection: "ltr" }}>{member.uid}</Text><Text style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{roleLabel} · {member.phone}{member.isAppUser ? (language === "ar" ? " · تطبيق مفعّل" : " · App active") : ""}</Text></View>{!member.isAppUser ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تفعيل حساب التطبيق" : "Activate app account"} onPress={() => router.push(`/auth/claim-staff-account?phone=${encodeURIComponent(member.phone)}&uid=${encodeURIComponent(member.uid)}` as never)} style={({ pressed }) => [styles.inviteRevoke, { backgroundColor: colors.success + "14", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="smartphone" size={19} color={colors.success} /></Pressable> : null}<Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إزالة المنتسب" : "Remove on-book staff"} onPress={() => Alert.alert(language === "ar" ? "إزالة المنتسب" : "Remove on-book staff", language === "ar" ? `ستُزال «${member.name}» من دليل المنتسبين بجهازك مع بقاء سجلات العُهد والتحصيلات محفوظة.` : `“${member.name}” will be removed from the local directory while custody and collection records remain.`, [{ text: language === "ar" ? "إلغاء" : "Cancel", style: "cancel" }, { text: language === "ar" ? "إزالة" : "Remove", style: "destructive", onPress: () => void commit(onbookStaff.filter((item) => item.uid !== member.uid)) }])} style={({ pressed }) => [styles.inviteRevoke, { backgroundColor: colors.error + "14", opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="delete-outline" size={19} color={colors.error} /></Pressable></View>; }) : <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 8 }]}><Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: align }}>{language === "ar" ? "لا يوجد منتسبون على الكتاب بعد. أضف موظفًا أو حارسًا ميدانيًا بدون حساب تطبيق لربطه بالعُهد والتحصيلات مباشرة." : "No on-book staff yet. Add a field member or guard without an app account to bind custody floats and collections instantly."}</Text></View>) : <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />}
       {generatedInvite ? <View style={[styles.inviteCard, { borderColor: colors.success, backgroundColor: colors.success + "10" }]}><Text style={{ color: colors.success, fontWeight: "900", textAlign: align }}>{language === "ar" ? `أرسل هذا الرمز إلى ${generatedInvite.phone}` : `Send this code to ${generatedInvite.phone}`}</Text><Text style={[styles.pin, { color: colors.foreground }]}>{generatedInvite.pin}</Text><Text style={{ color: colors.muted, fontSize: 11, textAlign: align }}>{language === "ar" ? `ينتهي في ${generatedInvite.expiresAt.toLocaleTimeString("ar-JO", { hour: "2-digit", minute: "2-digit" })}` : `Expires at ${generatedInvite.expiresAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`}</Text></View> : null}
       {isOwner ? <View style={[styles.transferCard, { backgroundColor: colors.primary + "0D", borderColor: colors.primary + "66" }]}><Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "900", textAlign: align }}>{language === "ar" ? "نقل ملكية المنشأة" : "Transfer facility ownership"}</Text><Text style={{ color: colors.muted, fontSize: 11, lineHeight: 18, marginTop: 5, textAlign: align }}>{language === "ar" ? "لا ينقل هذا الإجراء الملكية مباشرة. اختر عضوًا ثم اضغط باستمرار 3 ثوانٍ لتسجيل طلب يرسل إلى القناة الموثقة لإتمام OTP الخارجي." : "This does not transfer ownership directly. Select a member and hold for 3 seconds to request verified external OTP."}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.transferTargets, { flexDirection: row }]}>{overview.data?.members.filter((item) => item.role !== "owner" && item.status === "active").map((item) => <Pressable key={item.id} onPress={() => setTransferTarget({ ...item, permissions: normalizeWorkspacePermissions(item.permissions, item.role === "admin" ? "manager" : item.role === "guest" ? "guest" : "employee") } as TeamMember)} style={[styles.transferTarget, { borderColor: transferTarget?.id === item.id ? colors.primary : colors.border, backgroundColor: transferTarget?.id === item.id ? colors.primary + "18" : colors.surface }]}><Text style={{ color: colors.foreground, fontWeight: "900", fontSize: 11 }}>{item.displayName}</Text><Text style={{ color: colors.muted, fontSize: 9, marginTop: 2 }}>{WORKSPACE_ROLE_LABELS[item.role].ar}</Text></Pressable>)}</ScrollView><Pressable disabled={!transferTarget || requestOwnershipTransfer.isPending} onPressIn={beginOwnershipHold} onPressOut={cancelOwnershipHold} style={[styles.holdButton, { backgroundColor: colors.primary, opacity: !transferTarget || requestOwnershipTransfer.isPending ? 0.45 : 1 }]}><MaterialIcons name="verified-user" size={19} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900" }}>{transferProgress ? (language === "ar" ? `استمر بالضغط… ${transferProgress}/3` : `Keep holding… ${transferProgress}/3`) : (language === "ar" ? "اضغط 3 ثوانٍ لطلب نقل الملكية" : "Hold 3 seconds to request transfer")}</Text></Pressable></View> : null}
       <Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "الدعوات" : "Invitations"}</Text>
@@ -159,6 +185,7 @@ export default function UserManagementScreen() {
   </ScrollView>
   <EmployeePermissionsModal visible={inviteOpen} title={language === "ar" ? "إضافة موظف" : "Add employee"} language={language} isRTL={isRTL} colors={colors} name={name} phone={phone} onNameChange={setName} onPhoneChange={setPhone} preset={invitePreset} onPresetChange={selectInvitePreset} permissions={invitePermissions} onPermissionsChange={setInvitePermissions} permissionsOpen={invitePermissionsOpen} onPermissionsOpenChange={setInvitePermissionsOpen} primaryLabel={language === "ar" ? "إنشاء رمز دعوة" : "Create invitation"} primaryIcon="person-add" isPending={invite.isPending} onClose={() => setInviteOpen(false)} onSubmit={() => void createInvite()} />
   <EmployeePermissionsModal visible={Boolean(editingMember)} title={editingMember ? (language === "ar" ? `صلاحيات وتحصل ${editingMember.displayName}` : `${editingMember.displayName}'s permissions`) : ""} language={language} isRTL={isRTL} colors={colors} permissions={memberPermissions} onPermissionsChange={setMemberPermissions} permissionsOpen={memberPermissionsOpen} onPermissionsOpenChange={setMemberPermissionsOpen} primaryLabel={language === "ar" ? "حفظ الإعدادات" : "Save settings"} primaryIcon="save" isPending={updateMemberPermissions.isPending || updateMemberCollectionProfile.isPending} onClose={() => setEditingMember(null)} onSubmit={() => void saveMemberPermissions()} lockPermissions={editingMember?.role === "owner"} cliqAlias={memberCliqAlias} onCliqAliasChange={setMemberCliqAlias} bankDetails={memberBankDetails} onBankDetailsChange={setMemberBankDetails} commissionRate={memberCommissionRate} onCommissionRateChange={setMemberCommissionRate} commissionType={memberCommissionType} onCommissionTypeChange={setMemberCommissionType} allowDirectCollection={memberAllowDirectCollection} onAllowDirectCollectionChange={setMemberAllowDirectCollection} />
+  <AddUserModal visible={addUserOpen} language={language} isRTL={isRTL} colors={colors} takenUidCodes={[...(overview.data?.members ?? []).map((item) => item.userCode).filter((code): code is string => Boolean(code)), ...onbookStaff.map((item) => item.uid)]} onClose={() => setAddUserOpen(false)} onInviteAppUser={inviteFromAddModal} onAddOnbookStaff={addOnbookStaffFromModal} />
   </ScreenContainer>;
 }
 

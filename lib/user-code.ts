@@ -76,6 +76,8 @@ export function nextCodeForRole(role: Exclude<UserIdentityRole, "internal">, exi
   const seq = ROLE_CODE_SEQ[role];
   const taken = new Set(
     existingCodes
+      .map((code) => String(code ?? "").trim().toUpperCase().replace(/^#/, ""))
+      .filter(Boolean)
       .map(parseUserCode)
       .filter((entry): entry is { prefix: string; num: number } => Boolean(entry))
       .filter((entry) => entry.prefix === seq.prefix && entry.num >= seq.start)

@@ -15,34 +15,34 @@ describe("expenses calendar navigation chevrons", () => {
     expect(screen).toContain("todayAnchor, weekAnchor, monthAnchor, searchQuery");
   });
 
-  it("advances the day anchor by one with addDays and the month anchor with moveGregorianMonth", () => {
+  it("nudges the strip window a full week at a time with addDays around the strip center", () => {
     expect(model).toContain("export function addDays");
-    expect(screen).toContain("setTodayAnchor((current) => addDays(current, direction));");
-    expect(screen).toContain("moveGregorianMonth(Number(current.slice(0, 4)), Number(current.slice(5, 7)), direction)");
+    expect(screen).toContain("setStripCenter((current) => addDays(current, direction * 7));");
+    expect(screen).toMatch(/nudgeStrip\(-1\)/);
+    expect(screen).toMatch(/nudgeStrip\(1\)/);
     expect(screen).toContain("setTodayAnchor(todayISO());");
     expect(screen).toContain('setMonthAnchor(todayISO().slice(0, 7));');
   });
 
-  it("flips forward/backward arrows to match the Arabic RTL reading direction", () => {
-    expect(screen).toContain("shiftPeriod(isRTL ? 1 : -1)");
-    expect(screen).toContain("shiftPeriod(isRTL ? -1 : 1)");
+  it("flips the strip arrows to match the Arabic RTL reading direction", () => {
     expect(screen).toContain('name={isRTL ? "chevron-right" : "chevron-left"}');
     expect(screen).toContain('name={isRTL ? "chevron-left" : "chevron-right"}');
+    expect(screen).toContain("nudgeStrip(-1)");
+    expect(screen).toContain("nudgeStrip(1)");
   });
 
-  it("labels the arrows in both languages for day and month stepping", () => {
-    expect(screen).toContain("اليوم السابق");
-    expect(screen).toContain("اليوم التالي");
-    expect(screen).toContain("الشهر السابق");
-    expect(screen).toContain("الشهر التالي");
-    expect(screen).toContain("Previous day");
-    expect(screen).toContain("Previous month");
+  it("labels the strip navigation arrows in both languages", () => {
+    expect(screen).toContain("تمرير الأيام للخلف");
+    expect(screen).toContain("تمرير الأيام للأمام");
+    expect(screen).toContain("Scroll days backward");
+    expect(screen).toContain("Scroll days forward");
   });
 
-  it("renders the current period header from the active anchor, hidden for custom ranges", () => {
+  it("renders the current period header from the active anchor, replaced by the custom range text", () => {
     expect(screen).toContain('formatDate(todayAnchor)');
     expect(screen).toContain("formatMonth(monthAnchorYear, monthAnchorNumber)");
-    expect(screen).toContain('{period !== "custom"');
+    expect(screen).toContain('{period === "custom"');
+    expect(screen).toContain('{periodLabel}');
   });
 
   it("labels the popover month chevrons with the direction they actually move in each language", () => {

@@ -45,10 +45,11 @@ describe("expenses master polish", () => {
     expect(screen).toContain('type ExpensePeriod = "today" | "7" | "month" | "custom" | "all";');
     expect(screen).toContain("const [weekAnchor, setWeekAnchor] = useState(todayISO());");
     expect(screen).toContain("addDays(weekAnchor, -6)");
-    expect(screen).toContain("setWeekAnchor((current) => addDays(current, direction * 7));");
+    expect(screen).toContain("setWeekAnchor(todayISO());");
     expect(screen).toContain("خلال 7 أيام");
     expect(screen).toContain('active={period === "all"}');
-    expect(screen).toContain('{period !== "custom" && period !== "all"');
+    expect(screen).toContain("nudgeStrip(-1)");
+    expect(screen).toContain('{period === "custom"');
   });
 
   it("links the header to the pre-filtered audit log and the reports view", () => {

@@ -20,8 +20,8 @@ describe("expenses UI/UX sync", () => {
     expect(screen).toContain("styles.stripArrow");
     expect(screen).toContain("styles.stripChip");
     expect(screen).toContain("styles.stripDot");
-    expect(screen).toMatch(/backgroundColor: "#F59E0B", borderColor: "#F59E0B"/);
-    expect(screen).toContain('backgroundColor: hasExpense ? "#F59E0B"');
+    expect(screen).toMatch(/backgroundColor: "#EA580C", borderColor: "#EA580C"/);
+    expect(screen).toContain('backgroundColor: hasExpense ? "#EA580C"');
   });
 
   it("uses the compact card layout with an amber amount and badge cluster", () => {

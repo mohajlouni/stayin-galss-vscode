@@ -7,26 +7,25 @@ const picker = readFileSync(resolve(process.cwd(), "components/calendar-date-pic
 const rangePicker = readFileSync(resolve(process.cwd(), "components/ui/DateRangePicker.tsx"), "utf8");
 
 describe("expenses stepper arrows and custom-range amber highlight", () => {
-  it("routes the calendar chevrons through dedicated handlers that stop event propagation", () => {
-    expect(screen).toContain("const handlePrev = (event: GestureResponderEvent) => {");
-    expect(screen).toContain("const handleNext = (event: GestureResponderEvent) => {");
-    expect(screen).toContain("event.stopPropagation();");
-    expect(screen).toContain("shiftPeriod(isRTL ? 1 : -1);");
-    expect(screen).toContain("shiftPeriod(isRTL ? -1 : 1);");
-    expect(screen).toContain("onPress={handlePrev}");
-    expect(screen).toContain("onPress={handleNext}");
+  it("routes the strip nudges and the range chip through stop-propagation-aware handlers", () => {
+    expect(screen).toMatch(/nudgeStrip\(-1\)/);
+    expect(screen).toMatch(/nudgeStrip\(1\)/);
+    expect(screen).toContain("event?.stopPropagation?.()");
+    expect(screen).toContain("onPress={() => setRangePickerOpen(true)}");
+    expect(screen).toContain("clearRangeFilter");
   });
 
-  it("forces the nav arrow buttons above siblings with explicit pointer events and web cursor semantics", () => {
+  it("forces the strip arrow buttons above siblings with explicit pointer events and web cursor semantics", () => {
     expect(screen).toContain('pointerEvents="auto"');
-    expect(screen).toContain('position: "relative", zIndex: 20, elevation: 20');
+    expect(screen).toContain('position: "relative", zIndex: 30, elevation: 30');
     expect(screen).toContain('cursor: "pointer"');
     expect(screen).toContain('userSelect: "none"');
   });
 
-  it("keeps the custom period chip amber while it stays active", () => {
-    expect(screen).toContain('activeColor="#F59E0B"');
-    expect(screen).toContain('active={period === "custom"}');
+  it("keeps the custom period range chip orange while it stays active", () => {
+    expect(screen).toContain('period === "custom" ? "#EA580C"');
+    expect(screen).toContain("setRangePickerOpen(true)");
+    expect(screen).not.toContain('activeColor="#F59E0B"');
   });
 
   it("passes the shared draft range into both calendar pickers", () => {

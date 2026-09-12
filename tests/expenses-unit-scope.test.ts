@@ -68,9 +68,10 @@ describe("expenses multi-unit checkbox scope, opaque modal, and summary/badge po
     expect(screen).toContain('color: "#A855F7"');
   });
 
-  it("combines the period pills and date stepper into one cohesive centered nav bar", () => {
-    expect(screen).toContain("styles.navBar");
-    expect(screen).toContain("styles.navChips");
+  it("combines the range chip, period pills, and 14-day strip into one unified timeline", () => {
+    expect(screen).toContain("styles.timelineChips");
+    expect(screen).toContain("styles.timelineWrap");
+    expect(screen).not.toContain("styles.navBar");
     expect(screen).not.toContain("styles.periodRow");
     expect(screen).toContain("اليوم");
     expect(screen).toContain("هذا الشهر");

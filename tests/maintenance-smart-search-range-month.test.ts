@@ -110,40 +110,24 @@ describe("month selector grid in the calendar picker", () => {
   });
 });
 
-describe("custom range: no forced +1 month, amber pill, amber strip band", () => {
-  it("opens the range panel with an empty end date instead of a forced future month", () => {
+describe("custom range removed: the strip is a fixed 14-day window", () => {
+  it("removes the custom range modal, its draft state and the amber custom-range band", () => {
     const source = dashboard();
-    expect(source).toContain("end: \"\"");
-    expect(source).not.toContain("end: addDays(todayISO, 29)");
+    expect(source).not.toContain("rangeDraft");
+    expect(source).not.toContain("setRangeDraft");
+    expect(source).not.toContain("rollerRange.kind");
+    expect(source).not.toContain("isCustomEdge");
+    expect(source).not.toContain('"من تاريخ"');
+    expect(source).not.toContain('"إلى تاريخ"');
+    expect(source).not.toContain("openRangePanel");
+    expect(source).not.toContain("applyCustomRange");
   });
 
-  it("falls back to the start date when the end stays empty (single-day range)", () => {
+  it("anchors the window exactly 2 days back from the anchor date for a fixed 14-day span", () => {
     const source = dashboard();
-    expect(source).toContain("const end = /^\\d{4}-\\d{2}-\\d{2}$/.test(rangeDraft.end) ? rangeDraft.end : start;");
-  });
-
-  it("passes the drafting range to both calendar fields in the range modal", () => {
-    const source = dashboard();
-    expect(source).toMatch(/CalendarDateField label=\{language === "ar" \? "من تاريخ" : "From date"}[\s\S]*?range=\{\{ start: rangeDraft.start, end: rangeDraft.end \}\}/);
-    expect(source).toMatch(/CalendarDateField label=\{language === "ar" \? "إلى تاريخ" : "To date"}[\s\S]*?range=\{\{ start: rangeDraft.start, end: rangeDraft.end \}\}/);
-  });
-
-  it("highlights the active custom pill in solid amber with dark text", () => {
-    const source = dashboard();
-    expect(source).toContain('backgroundColor: rollerRange.kind === "custom" ? "#EA580C" : colors.surface');
-    expect(source).toContain('color={rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted}');
-    expect(source).toContain('fontWeight: rollerRange.kind === "custom" ? "900"');
-  });
-
-  it("highlights the strip inside the applied range with orange text and rings over the dark slate base", () => {
-    const source = dashboard();
-    expect(source).toContain("const isCustomEdge = Boolean(customRange");
-    expect(source).toContain("const isCustomInside = Boolean(customRange");
-    expect(source).toContain('isCustomEdge ? { backgroundColor: colors.surfaceMuted, borderColor: "#EA580C"');
-    expect(source).toContain('isCustomInside ? { backgroundColor: colors.surfaceMuted, borderColor: "rgba(234, 88, 12, 0.35)"');
-    expect(source).toContain('"rgba(234, 88, 12, 0.35)"');
-    expect(source).toContain('isCustomInside ? "#F97316"');
-    expect(source).toContain("rollerRange.kind === \"custom\" && rollerRange.start && rollerRange.end");
+    expect(source).toContain("const startDate = new Date(`${anchorDate}T12:00:00`);");
+    expect(source).toContain("startDate.setDate(startDate.getDate() - 2);");
+    expect(source).toContain("while (out.length < 14)");
   });
 });
 
@@ -163,14 +147,9 @@ describe("roller anchor stepping (week chevrons move the strip)", () => {
   it("drives the chevrons through a real anchorDate state stepping exactly 7 days", () => {
     const source = dashboard();
     expect(source).toContain("const [anchorDate, setAnchorDate] = useState(");
-    expect(source).toContain("setAnchorDate((prev) => (weeks > 0 ? addDays(prev, 7) : subDays(prev, 7)));");
-    expect(source).toContain("const subDays = (date: string, amount: number) => addDays(date, -amount);");
+    expect(source).toContain("setAnchorDate((current) => addDays(current, direction * 7));");
+    expect(source).not.toContain("const subDays");
     expect(source).toContain("عرض النتائج في (الكل)");
-  });
-
-  it("re-anchors the strip when applying a custom range so the window sits around it", () => {
-    const source = dashboard();
-    expect(source).toContain("if (start) setAnchorDate(start);");
   });
 });
 
@@ -186,32 +165,31 @@ describe("overdue KPI sequential walk", () => {
     expect(source).toContain("overdueIndex >= 0 && task.nextDueDate === dateFilter");
   });
 
-  it("shows the interval on the custom-range pill and clears it with the inline ×", () => {
+  it("resets the timeline with the inline close, including the overdue walk state", () => {
     const source = dashboard();
-    expect(source).toContain("rollerRange.start.slice(8, 10)}/${rollerRange.start.slice(5, 7)}");
-    expect(source).toContain("الانتقال للتالية");
-    expect(source).toContain("clearCustomRange = () => {");
+    expect(source).toContain("const resetTimeline = () => {");
+    expect(source).toContain("setOverdueIndex(-1);");
+    expect(source).toContain("setDateFilter(null);");
+    expect(source).toContain("setAnchorDate(todayISO);");
   });
 });
 
 describe("single-selected date chip in brand amber", () => {
-  it("rings the picked day in amber with vibrant orange text over the dark slate base", () => {
+  it("fills the picked day solid amber with white text over the dark slate base", () => {
     const source = dashboard();
-    expect(source).toContain("const topColor = singleSelected ? \"#EA580C\" : isCustomEdge ? \"#EA580C\"");
-    expect(source).toContain("singleSelected ? { backgroundColor: colors.surfaceMuted, borderColor: \"#EA580C\", borderWidth: 2, borderRadius: 12 }");
-    expect(source).toContain('fontWeight: singleSelected ? "900"');
+    expect(source).toContain('singleSelected ? { backgroundColor: "#EA580C", borderColor: "#EA580C" }');
+    expect(source).toContain('color: singleSelected ? "#FFFFFF"');
+    expect(source).toContain('fontWeight: singleSelected || isToday ? "900"');
   });
 });
 
-describe("strip stays full-window around a custom range (no truncation)", () => {
-  it("always spans the default today-window and pads ±14 days around custom bounds", () => {
+describe("strip stays a fixed full-window (no truncation)", () => {
+  it("always spans the same 14-day window anchored to the anchor date regardless of any filter", () => {
     const source = dashboard();
-    expect(source).toContain("const preStart = addDays(todayISO, -2);");
-    expect(source).toContain("const defaultEnd = addDays(todayISO, 59);");
-    expect(source).toContain("const padStart = addDays(rollerRange.start, -14);");
-    expect(source).toContain("const padEnd = addDays(rollerRange.end, 14);");
-    expect(source).toContain("const anchorStart = addDays(anchorDate, -14);");
-    expect(source).toContain("return buildDateRange(start, end, 160);");
+    expect(source).toContain("const startDate = new Date(`${anchorDate}T12:00:00`);");
+    expect(source).not.toContain("const defaultEnd = addDays(todayISO, 59);");
+    expect(source).not.toContain("buildDateRange");
+    expect(source).not.toContain("padStart");
   });
 });
 

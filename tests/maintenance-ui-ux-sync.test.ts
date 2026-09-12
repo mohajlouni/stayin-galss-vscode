@@ -31,12 +31,11 @@ describe("maintenance mobile UI/UX sync", () => {
     expect(source).toContain("left + width / 2 < winWidth / 2 ? \"left\" : \"right\"");
   });
 
-  it("auto-centers the active day chip on tap, Today nav and overdue jumps", () => {
-    expect(source).toContain("const centerRollerOnDate = useCallback(");
-    expect(source).toContain("index * ROLLER_PILL_STEP - 2 * ROLLER_PILL_STEP");
-    expect(source).toContain("(timelineDates.length - 7) * ROLLER_PILL_STEP");
+  it("auto-centers the anchor chip whenever the 14-day window changes", () => {
+    expect(source).toContain("timelineDates.indexOf(anchorDate)");
+    expect(source).toContain("Math.min(Math.max(index * ROLLER_PILL_STEP - 2 * ROLLER_PILL_STEP, 0), max)");
     expect(source).toContain("anchorDate, timelineDates");
-    expect(source).toMatch(/centerRollerOnDate\(dateFilter\);[\s\S]*?horizon === "today"\) centerRollerOnDate\(todayISO\)/);
+    expect(source).not.toContain("const centerRollerOnDate = useCallback(");
   });
 
   it("keeps a single clear control (inside the feedback chip, not duplicated in the input)", () => {

@@ -8,20 +8,22 @@ describe("horizontal calendar strip steps in exact 7-day weeks with pre-day rete
   const source = read("app/maintenance-dashboard.tsx");
 
   it("always keeps two pre-days before today so the week window stays complete", () => {
-    expect(source).toContain("const preStart = addDays(todayISO, -2);");
-    expect(source).toContain("addDays(todayISO, 59)");
+    expect(source).toContain("startDate.setDate(startDate.getDate() - 2);");
+    expect(source).toContain("while (out.length < 14)");
+    expect(source).not.toContain("addDays(todayISO, 59)");
   });
 
-  it("steps the strip by a full week locked to day borders, never cutting a pill in half", () => {
-    expect(source).toContain("const ROLLER_PILL_STEP = 60;");
-    expect(source).toContain("weeks * 7 * ROLLER_PILL_STEP");
-    expect(source).toContain("rollerRef.current?.scrollTo({ x: target, animated: true })");
+  it("scrolls by whole 40px pills for exactly one week of cells, never cutting a pill in half", () => {
+    expect(source).toContain("const ROLLER_PILL_STEP = 40;");
+    expect(source).toContain("timelineDates.indexOf(anchorDate)");
+    expect(source).toContain("rollerRef.current?.scrollTo({ x:");
   });
 
-  it("gives the Current Day a distinct inline marker inside its tile", () => {
-    expect(source).toContain("rollerTodayUnderline");
+  it("gives the Current Day an orange ring and label inside its tile", () => {
     expect(source).toContain('const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;');
+    expect(source).toContain('backgroundColor: "rgba(234, 88, 12, 0.15)", borderColor: "#EA580C", borderWidth: 2');
     expect(source).not.toContain("rollerTodayBadge");
+    expect(source).not.toContain("rollerTodayUnderline");
   });
 });
 

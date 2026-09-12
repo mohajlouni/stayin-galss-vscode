@@ -390,13 +390,15 @@ describe("STEP 9 floating action menu, RTL filter bar & compact card", () => {
     expect(cadenceIdx).toBeGreaterThan(unitIdx);
   });
 
-  it("compacts the card: a right-side block (pill + menu) beside the action button, tightly spaced", () => {
-    expect(source).toContain("cardSide");
-    expect(source).toContain("cardSideTop");
+  it("compacts the card: title-row status pill, and a bottom action row with a full-width button beside the menu", () => {
+    expect(source).toContain("cardActionsRow");
     expect(source).toContain("badgeRow");
     expect(source).toContain("styles.statusPill");
     expect(source).toContain("styles.moreBtn");
     expect(source).toContain("styles.actionBtn");
+    expect(source).toContain("{ flexDirection: row, gap: 8, marginTop: 10 }");
+    expect(source).not.toContain("cardSide");
+    expect(source).not.toContain("cardSideTop");
   });
 });
 
@@ -514,7 +516,7 @@ describe("ROLLER STEP: ultra-compact timeline strip & strict scope isolation", (
 
   it("keeps the date chips ultra-compact at h-[60px] with day label, day number, and status dot", () => {
     expect(source).toContain("rollerChip");
-    expect(source).toContain("minWidth: 50, maxWidth: 54, height: 60");
+    expect(source).toContain("minWidth: 38, maxWidth: 38, height: 54");
     expect(source).toContain("rollerDot");
     expect(source).toContain("ROLLER_WEEKDAYS");
     expect(source).toContain("date.slice(8, 10)");
@@ -526,50 +528,44 @@ describe("ROLLER STEP: ultra-compact timeline strip & strict scope isolation", (
     expect(source).not.toContain("overdue ? colors.error : colors.warning");
   });
 
-  it("renders the compact horizon switcher: today, next 7 / 30 days, all, and a custom range picker", () => {
+  it("replaces the horizon preset pills with a unified 14-day strip (no period presets, no custom range picker)", () => {
     expect(source).toContain('"اليوم"');
-    expect(source).toContain('"خلال 7 أيام"');
-    expect(source).toContain('"خلال 30 يوماً"');
-    expect(source).toContain('"الكل"');
-    expect(source).toContain("من - إلى");
-    expect(source).toContain("CalendarDateField");
-    expect(source).toContain('accessibilityLabel={language === "ar" ? "فترة مخصصة"');
+    expect(source).not.toContain('"خلال 7 أيام"');
+    expect(source).not.toContain('"خلال 30 يوماً"');
+    expect(source).not.toContain("من - إلى");
+    expect(source).not.toContain("rollerChips");
+    expect(source).not.toContain("ROLLER_RANGE_OPTIONS");
+    expect(source).not.toContain("<Modal visible={rangePanelOpen}");
   });
 
   it("filters the task list live by due date and toggles selection back to all", () => {
     expect(source).toContain("task.nextDueDate === dateFilter");
-    expect(source).toContain('if (dateFilter !== null) return task.nextDueDate === dateFilter;');
+    expect(source).toContain("const matchesDate = (task: MaintenanceTask) => dateFilter === null || task.nextDueDate === dateFilter;");
     expect(source).toContain("setDateFilter(framed && singleSelected ? null : date)");
   });
 });
 
-describe("ROLLER STEP: continuous strip & independent horizon filtering", () => {
+describe("ROLLER STEP: unified 14-day strip & single-date filtering", () => {
   const source = read("app/maintenance-dashboard.tsx");
 
-  it("keeps the strip continuous regardless of the horizon filter (never collapses to 1 or 7 chips)", () => {
-    expect(source).toContain("الشريط الزمني مستمر دائماً");
-    expect(source).toContain("addDays(todayISO, 29)");
+  it("builds a fixed 14-day window centered on today minus 2 days, independent of any filter", () => {
+    expect(source).toContain("const startDate = new Date(`${anchorDate}T12:00:00`);");
+    expect(source).toContain("startDate.setDate(startDate.getDate() - 2);");
+    expect(source).toContain("while (out.length < 14)");
     expect(source).not.toContain('if (rollerRange.kind === "today") return [todayISO]');
     expect(source).not.toContain('if (rollerRange.kind === "7") return buildDateRange');
+    expect(source).not.toContain("addDays(todayISO, 59)");
   });
 
-  it("decouples the horizon preset from the strip and applies it only to the task list", () => {
-    expect(source).toContain("setHorizon(id);");
-    expect(source).toContain("setDateFilter(null);");
-    expect(source).toContain('if (horizon === "today") return task.nextDueDate === todayISO;');
-    expect(source).toContain('if (horizon === "7") return task.nextDueDate >= todayISO && task.nextDueDate <= addDays(todayISO, 6);');
-    expect(source).toContain('if (horizon === "30") return task.nextDueDate >= todayISO && task.nextDueDate <= addDays(todayISO, 29);');
-  });
-
-  it("highlights the current horizon window and today on the always-visible strip", () => {
-    expect(source).toContain('const inWindow = dateFilter === null &&');
-    expect(source).toContain("const isToday = date === todayISO;");
-    expect(source).toContain('const framed = isToday || singleSelected;');
-  });
-
-  it("clicking an individual date chip sets the filter strictly to that single date", () => {
-    expect(source).toContain("singleSelected = dateFilter === date");
+  it("applies filtering to the task list strictly by the selected due date, synced to the strip", () => {
+    expect(source).toContain("const matchesDate = (task: MaintenanceTask) => dateFilter === null || task.nextDueDate === dateFilter;");
     expect(source).toContain("setDateFilter(framed && singleSelected ? null : date)");
+  });
+
+  it("highlights the selected date solid amber and today with an orange ring on the strip", () => {
+    expect(source).toContain("const isToday = date === todayISO;");
+    expect(source).toContain("const framed = isToday || singleSelected;");
+    expect(source).toContain('backgroundColor: "#EA580C", borderColor: "#EA580C"');
   });
 });
 
@@ -577,57 +573,37 @@ describe("ROLLER STEP: unified tiles, floating popover & card flow polish", () =
   const source = read("app/maintenance-dashboard.tsx");
 
   it("renders every date in a uniform bordered tile (50-54w x 60h, rounded), never a bare floating number", () => {
-    expect(source).toContain("minWidth: 50, maxWidth: 54, height: 60");
-    expect(source).toContain("borderRadius: 14");
+    expect(source).toContain("minWidth: 38, maxWidth: 38, height: 54");
+    expect(source).toContain("borderRadius: 12");
     expect(source).toContain("borderWidth: 1");
   });
 
   it("marks Today with a border-2 orange ring instead of a harsh white outline", () => {
     expect(source).toContain('const framed = isToday || singleSelected;');
-    expect(source).toContain('backgroundColor: colors.surfaceMuted, borderColor: "#EA580C", borderWidth: 2');
+    expect(source).toContain('backgroundColor: "rgba(234, 88, 12, 0.15)", borderColor: "#EA580C", borderWidth: 2');
     expect(source).toContain('const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;');
     expect(source).not.toContain("rollerTodayBadge");
   });
 
-  it("adds smooth forward/backward scroll arrows that step the strip by exactly a full week (7 days)", () => {
+  it("adds forward/backward arrows that nudge the 14-day window by exactly a full week (7 days)", () => {
     expect(source).toContain("nudgeRoller(1)");
     expect(source).toContain("nudgeRoller(-1)");
-    expect(source).toContain("weeks * 7 * ROLLER_PILL_STEP");
-    expect(source).toContain("ROLLER_PILL_STEP = 60");
+    expect(source).toContain("setAnchorDate((current) => addDays(current, direction * 7));");
+    expect(source).toContain("ROLLER_PILL_STEP = 40");
     expect(source).toContain("rollerArrow");
-    expect(source).toContain("onScroll={(event) =>");
-    expect(source).toContain("rollerOffsetRef.current = event.nativeEvent.contentOffset.x");
+    expect(source).not.toContain("onScroll={(event) =>");
+    expect(source).not.toContain("rollerOffsetRef.current = event.nativeEvent.contentOffset.x");
   });
 
-  it("extends the continuous strip up to ~+60 days into the future", () => {
-    expect(source).toContain("addDays(todayISO, 59)");
-  });
-
-  it("decouples the من - إلى range into a centered 100% opaque full-screen modal, never an inline popover", () => {
-    expect(source).not.toContain("rollerRangePanel:");
-    expect(source).not.toContain("rollerActionGhost:");
-    expect(source).toContain("rangeModalBackdrop: { flex: 1, backgroundColor: \"rgba(0, 0, 0, 0.75)\"");
-    expect(source).toContain("alignItems: \"center\", justifyContent: \"center\"");
-    expect(source).toContain("rangeModalCard");
-    expect(source).toContain('backgroundColor: "#0f172a"');
-    expect(source).toContain('borderColor: "rgba(51, 65, 85, 0.9)"');
-    expect(source).toContain("تحديد الفترة الزمنية");
-    expect(source).toContain("من تاريخ");
-    expect(source).toContain("إلى تاريخ");
-    expect(source).toContain("تطبيق الفلترة");
-    expect(source).toContain("<Modal visible={rangePanelOpen}");
-    expect(source).toContain("onRequestClose={() => setRangePanelOpen(false)}");
-    expect(source).toContain("StyleSheet.absoluteFill");
-  });
-
-  it("HOTFIX: renders the range modal shell with a strictly solid slate-900 background, opacity 1, and centered backdrop", () => {
-    const cardLine = source.split("\n").find((line) => line.includes("rangeModalCard:"));
-    expect(cardLine).toBeDefined();
-    expect(cardLine).toContain("opacity: 1");
-    expect(cardLine).toContain('maxWidth: 380');
-    expect(cardLine).toContain("padding: 20");
-    expect(source).toContain('style={[styles.rangeModalCard, { backgroundColor: "#0f172a"');
-    expect(source).not.toContain('colors.surface, borderColor: colors.border }]}"><MaterialIcons name="date-range"');
+  it("removes the custom من - إلى range modal entirely, in favor of the unified strip", () => {
+    expect(source).not.toContain("rangeModalBackdrop:");
+    expect(source).not.toContain("rangeModalCard:");
+    expect(source).not.toContain("تحديد الفترة الزمنية");
+    expect(source).not.toContain("من تاريخ");
+    expect(source).not.toContain("إلى تاريخ");
+    expect(source).not.toContain("openRangePanel");
+    expect(source).not.toContain("applyCustomRange");
+    expect(source).not.toContain("<Modal visible={rangePanelOpen}");
   });
 
   it("HOTFIX: dims and captures outside taps with a full-screen backdrop so the toolbar dropdowns close cleanly", () => {

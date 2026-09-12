@@ -152,8 +152,9 @@ describe("interactive strip chevrons", () => {
     const source = dashboard();
     expect(source).toContain("event?.stopPropagation?.(); nudgeRoller(1);");
     expect(source).toContain("event?.stopPropagation?.(); nudgeRoller(-1);");
-    expect(source).toContain('pointerEvents="auto"');
-    expect(source).toContain("zIndex: 40");
+    expect(source).toContain("pointerEvents=\"auto\"");
+    expect(source).toContain("zIndex: 30");
+    expect(source).toContain('{...mouseClick(() => nudgeRoller(1))}');
     expect(source).toContain('cursor: "pointer", userSelect: "none"');
   });
 });
@@ -173,6 +174,26 @@ describe("roller anchor stepping (week chevrons move the strip)", () => {
   });
 });
 
+describe("overdue KPI sequential walk", () => {
+  it("jumps to the oldest overdue task and shows the walk helper with next-button", () => {
+    const source = dashboard();
+    expect(source).toContain("const overdueTasks = useMemo(() => activeTasks");
+    expect(source).toContain("const goToOverdue = (index: number) => {");
+    expect(source).toContain("setAnchorDate(task.nextDueDate);");
+    expect(source).toContain("عرض المهام المتأخرة: مهمة (");
+    expect(source).toContain("الانتقال للتالية");
+    expect(source).toContain('{...mouseClick(nextOverdue)}');
+    expect(source).toContain("overdueIndex >= 0 && task.nextDueDate === dateFilter");
+  });
+
+  it("shows the interval on the custom-range pill and clears it with the inline ×", () => {
+    const source = dashboard();
+    expect(source).toContain("rollerRange.start.slice(8, 10)}/${rollerRange.start.slice(5, 7)}");
+    expect(source).toContain("الانتقال للتالية");
+    expect(source).toContain("clearCustomRange = () => {");
+  });
+});
+
 describe("single-selected date chip in brand amber", () => {
   it("paints the picked day solid amber with slate-950 text and font-black weight", () => {
     const source = dashboard();
@@ -189,6 +210,7 @@ describe("strip stays full-window around a custom range (no truncation)", () => 
     expect(source).toContain("const defaultEnd = addDays(todayISO, 59);");
     expect(source).toContain("const padStart = addDays(rollerRange.start, -14);");
     expect(source).toContain("const padEnd = addDays(rollerRange.end, 14);");
+    expect(source).toContain("const anchorStart = addDays(anchorDate, -14);");
     expect(source).toContain("return buildDateRange(start, end, 160);");
   });
 });

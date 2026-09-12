@@ -194,6 +194,8 @@ export default function MaintenanceDashboard() {
   const inFlight = useRef(false);
   /** مرساة الشريط الزمني: تقدمها أسهم التنقل أسبوعاً كاملاً (7 أيام) وتقود تمرير النافذة. */
   const [anchorDate, setAnchorDate] = useState(() => localDateISO(new Date()));
+  /** فهرس المهمة المتأخرة الحالية ضمن عدّاد الانتقال التسلسلي (قيمة -1 تعني إيقاف السبر). */
+  const [overdueIndex, setOverdueIndex] = useState(-1);
 
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
@@ -226,6 +228,8 @@ export default function MaintenanceDashboard() {
       if (padStart < start) start = padStart;
       if (padEnd > end) end = padEnd;
     }
+    const anchorStart = addDays(anchorDate, -14);
+    if (anchorStart < start) start = anchorStart;
     const anchorEnd = addDays(anchorDate, 7);
     if (anchorEnd > end) end = anchorEnd;
     return buildDateRange(start, end, 160);
@@ -266,6 +270,10 @@ export default function MaintenanceDashboard() {
   }, [maintenanceTasks, now]);
 
   const activeTasks = useMemo(() => sortedTasks.filter((task) => task.status === "scheduled" || task.status === "in_progress"), [sortedTasks]);
+  /** المهام غير المنجزة بموعد استحقاق قبل اليوم، مرتبة تصاعدياً (الأقدم أولاً) لعدّاد «متأخرة» التسلسلي. */
+  const overdueTasks = useMemo(() => activeTasks
+    .filter((task) => task.nextDueDate < todayISO)
+    .sort((left, right) => left.nextDueDate < right.nextDueDate ? -1 : left.nextDueDate > right.nextDueDate ? 1 : 0), [activeTasks, todayISO]);
   const archiveTasks = useMemo(() => sortedTasks.filter((task) => task.status === "completed" || task.status === "cancelled"), [sortedTasks]);
   const searchActive = searchQuery.trim() !== "";
 
@@ -546,7 +554,10 @@ export default function MaintenanceDashboard() {
   /** شرح الجدولة الديناميكي الذي يظهر تحت خيارات الدورية في نافذة إنشاء المهمة. */
   const frequencyHint = (frequency: MaintenanceFrequency) => ({ once: ["ستُنفذ هذه المهمة لمرة واحدة فقط دون تكرار تلقائي.", "This task will run only once without automatic recurrence."], daily: ["سيتكرر استحقاق هذه المهمة تلقائياً كل يوم للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur daily for the selected chalets once completed."], weekly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل أسبوع للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur weekly for the selected chalets once completed."], biweekly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل أسبوعين للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur every two weeks for the selected chalets once completed."], monthly: ["سيتكرر استحقاق هذه المهمة تلقائياً كل شهر للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur monthly for the selected chalets once completed."], custom: ["سيتكرر استحقاق هذه المهمة تلقائياً وفق الفاصل المخصص للشاليهات المحددة فور إنجازها.", "This task's due date will automatically recur on the custom interval for the selected chalets once completed."] } as const)[frequency][language === "ar" ? 0 : 1];
 
-  const statCard = (label: string, value: number, color: string, icon: "new-releases" | "today" | "schedule" | "done-all") => <View style={[styles.statCard, { backgroundColor: color + "12", borderColor: color + "55" }]}><MaterialIcons name={icon} size={15} color={color} /><Text style={{ color, fontSize: 21, fontWeight: "900", marginTop: 6 }}>{value}</Text><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "700" }}>{label}</Text></View>;
+  const statCard = (label: string, value: number, color: string, icon: "new-releases" | "today" | "schedule" | "done-all", onPress?: () => void) => {
+    const inner = <><MaterialIcons name={icon} size={15} color={color} /><Text style={{ color, fontSize: 21, fontWeight: "900", marginTop: 6 }}>{value}</Text><Text style={{ color: colors.muted, fontSize: 9, fontWeight: "700" }}>{label}</Text></>;
+    return onPress ? <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => [styles.statCard, { backgroundColor: color + "12", borderColor: color + "55", opacity: pressed ? 0.75 : 1 }]}>{inner}</Pressable> : <View style={[styles.statCard, { backgroundColor: color + "12", borderColor: color + "55" }]}>{inner}</View>;
+  };
 
   /** يضبط أفق الفلترة لقائمة المهام أدناه فقط؛ الشريط الزمني يبقى مستمراً دون تغيير. */
   const selectHorizon = (id: "today" | "7" | "30" | "all") => {
@@ -572,6 +583,46 @@ export default function MaintenanceDashboard() {
     const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
     rollerRef.current?.scrollTo({ x: Math.min(Math.max(raw - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
   }, [anchorDate, timelineDates]);
+  /** يقفز إلى مهمة متأخرة محددة: يركّز الشريط الزمني فوق تاريخها ويصفي القائمة ليومها فقط. */
+  const goToOverdue = (index: number) => {
+    const task = overdueTasks[index];
+    if (!task) return;
+    setOverdueIndex(index);
+    setAnchorDate(task.nextDueDate);
+    setDateFilter(task.nextDueDate);
+    setHorizon("all");
+    setRollerRange({ kind: "all" });
+    setRangePanelOpen(false);
+  };
+  /** معالج بطاقة «متأخرة»: يبدأ السبر التسلسلي من أقدم مهمة متأخرة. */
+  const jumpOverdue = () => {
+    if (tab !== "active") switchTab("active");
+    if (!overdueTasks.length) {
+      setOverdueIndex(-1);
+      return;
+    }
+    goToOverdue(0);
+  };
+  /** الانتقال للتالية: يمر على المهام المتأخرة تصاعدياً ثم يصل إلى اليوم ويغلق المساعد. */
+  const nextOverdue = () => {
+    if (overdueIndex < 0) return;
+    if (overdueIndex + 1 < overdueTasks.length) {
+      goToOverdue(overdueIndex + 1);
+      return;
+    }
+    setOverdueIndex(-1);
+    setAnchorDate(todayISO);
+    setDateFilter(null);
+  };
+  /** ربط نقر الفأرة الأصلي (ويب) مع إيقاف التصعيد؛ يُنشر داخل Pressable لضمان التوافق عبر المنصات. */
+  const mouseClick = (action: () => void) => ({ onClick: (event: { stopPropagation?: () => void }) => { event?.stopPropagation?.(); action(); } });
+  /** مسح الفترة المخصصة والعودة للعرض الافتراضي (يوم اليوم بدون فلترة). */
+  const clearCustomRange = () => {
+    setRollerRange({ kind: "all" });
+    setDateFilter(null);
+    setOverdueIndex(-1);
+    setAnchorDate(todayISO);
+  };
   const openRangePanel = () => {
     if (!rangePanelOpen) setRangeDraft(rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? { start: rollerRange.start, end: rollerRange.end } : { start: todayISO, end: "" });
     setRangePanelOpen(!rangePanelOpen);
@@ -588,7 +639,7 @@ export default function MaintenanceDashboard() {
 
   return <ScreenContainer edges={["top", "left", "right"]}><ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
     <View style={[styles.header, { flexDirection: row }]}><ScreenBackButton fallbackHref="/(tabs)/more" /><View style={styles.flex}><Text style={{ color: colors.foreground, fontSize: 24, fontWeight: "900", textAlign: align }}>{language === "ar" ? "الصيانة الوقائية" : "Preventive maintenance"}</Text><Text style={[styles.subtitle, { color: colors.muted, textAlign: align, marginTop: 3 }]}>{language === "ar" ? "جرد الأصول والجدولة الدورية ومتابعة الاستحقاق" : "Asset inventory, recurring schedules & due tracking"}</Text></View></View>
-    <View style={[styles.statsRow, { flexDirection: row }]}>{statCard(language === "ar" ? "متأخرة" : "Overdue", stats.overdue, colors.error, "new-releases")}{statCard(language === "ar" ? "اليوم" : "Today", stats.dueToday, colors.warning, "today")}{statCard(language === "ar" ? "قريبة" : "Upcoming", stats.upcoming, colors.primary, "schedule")}{statCard(language === "ar" ? "مكتملة" : "Completed", stats.completed, colors.success, "done-all")}</View>
+    <View style={[styles.statsRow, { flexDirection: row }]}>{statCard(language === "ar" ? "متأخرة" : "Overdue", stats.overdue, colors.error, "new-releases", jumpOverdue)}{statCard(language === "ar" ? "اليوم" : "Today", stats.dueToday, colors.warning, "today")}{statCard(language === "ar" ? "قريبة" : "Upcoming", stats.upcoming, colors.primary, "schedule")}{statCard(language === "ar" ? "مكتملة" : "Completed", stats.completed, colors.success, "done-all")}</View>
 
     <View style={[styles.tabRow, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}>
       <Pressable accessibilityRole="button" onPress={() => switchTab("assets")} style={[styles.tab, { backgroundColor: tab === "assets" ? colors.primary : "transparent" }]}><MaterialIcons name="inventory" size={15} color={tab === "assets" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ color: tab === "assets" ? "#FFFFFF" : colors.muted, fontSize: 11, fontWeight: "900" }}>{language === "ar" ? `الأصول (${(assets ?? []).length})` : `Assets (${(assets ?? []).length})`}</Text></Pressable>
@@ -599,10 +650,10 @@ export default function MaintenanceDashboard() {
     <View style={styles.rollerWrap}>
       <View style={[styles.rollerToolbar, { flexDirection: row }]}>
         <View style={styles.rollerChips}>{ROLLER_RANGE_OPTIONS.map((option) => { const active = horizon === option.id; return <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.label[language === "ar" ? 0 : 1]} onPress={() => selectHorizon(option.id)} style={[styles.rollerRangeChip, { backgroundColor: active ? colors.primary + "1F" : colors.surface, borderColor: active ? colors.primary : colors.border }]}><Text style={{ color: active ? colors.primary : colors.muted, fontSize: 12, fontWeight: active ? "900" : "700" }}>{option.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}</View>
-        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? "#EA580C" : colors.surface, borderColor: rollerRange.kind === "custom" ? "#EA580C" : colors.border, shadowColor: rollerRange.kind === "custom" ? "#EA580C" : "transparent", shadowOpacity: rollerRange.kind === "custom" ? 0.4 : 0, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: rollerRange.kind === "custom" ? 4 : 0 }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted} /><Text style={{ color: rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{language === "ar" ? "من - إلى" : "From - To"}</Text></Pressable></View>
+        <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? "#EA580C" : colors.surface, borderColor: rollerRange.kind === "custom" ? "#EA580C" : colors.border, shadowColor: rollerRange.kind === "custom" ? "#EA580C" : "transparent", shadowOpacity: rollerRange.kind === "custom" ? 0.4 : 0, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: rollerRange.kind === "custom" ? 4 : 0 }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ maxWidth: 96, color: rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? `${rollerRange.start.slice(8, 10)}/${rollerRange.start.slice(5, 7)} - ${rollerRange.end.slice(8, 10)}/${rollerRange.end.slice(5, 7)}` : (language === "ar" ? "من - إلى" : "From - To")}</Text>{rollerRange.kind === "custom" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح الفترة" : "Clear range"} onPress={(event) => { event?.stopPropagation?.(); clearCustomRange(); }} {...mouseClick(clearCustomRange)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={13} color="#FFFFFF" /></Pressable> : null}</Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 40, elevation: 40, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} {...mouseClick(() => nudgeRoller(1))} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
@@ -626,7 +677,7 @@ export default function MaintenanceDashboard() {
             </Pressable>;
           })}
         </ScrollView>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 40, elevation: 40, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} {...mouseClick(() => nudgeRoller(-1))} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
       </View>
     </View>
 
@@ -662,6 +713,8 @@ export default function MaintenanceDashboard() {
 
     {unitMenuOpen || cadenceMenuOpen || menuFor ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={() => { setUnitMenuOpen(false); setCadenceMenuOpen(false); setMenuFor(null); }} style={[StyleSheet.absoluteFill, styles.clickAway]} /> : null}
 
+    {tab === "active" && overdueIndex >= 0 ? <View style={[styles.overdueHelper, { backgroundColor: colors.error + "F2", flexDirection: row }]}><MaterialIcons name="new-releases" size={15} color="#FFFFFF" /><Text numberOfLines={1} style={styles.overdueHelperText}>{language === "ar" ? `عرض المهام المتأخرة: مهمة (${overdueIndex + 1} من ${overdueTasks.length})` : `Overdue walk: Task (${overdueIndex + 1} of ${overdueTasks.length})`}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "الانتقال للتالية" : "Next overdue"} onPress={nextOverdue} {...mouseClick(nextOverdue)} style={({ pressed }) => [styles.overdueHelperBtn, { borderColor: "#FFFFFF88", opacity: pressed ? 0.6 : 1 }]}><Text style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "900" }}>{language === "ar" ? "الانتقال للتالية" : "Next"}</Text><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={15} color="#FFFFFF" /></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إنهاء الاستعراض" : "Finish walk"} onPress={(event) => { event?.stopPropagation?.(); clearCustomRange(); }} {...mouseClick(clearCustomRange)} style={({ pressed }) => ({ padding: 2, opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={15} color="#FFFFFF" /></Pressable></View> : null}
+
     {tab === "active" ? <>
       {visibleTasks.length ? visibleTasks.map((task) => {
         const tone = cardTone(task);
@@ -674,7 +727,7 @@ export default function MaintenanceDashboard() {
         const unitLabel = allUnits ? (language === "ar" ? "كافة الوحدات" : "All units") : task.chaletName ?? "—";
         const dueColor = isMaintenanceOverdue(task, now) ? colors.error : isMaintenanceDueToday(task, now) ? colors.warning : colors.primary;
         const attribution = maintenanceAttribution(task, language);
-        return <View key={task.id} style={[styles.taskCard, { backgroundColor: colors.surface, borderColor: tone.color + "55", zIndex: menuOpen ? 2 : 0 }]}>
+        return <View key={task.id} style={[styles.taskCard, { backgroundColor: colors.surface, borderColor: tone.color + "55", zIndex: menuOpen ? 2 : 0 }, overdueIndex >= 0 && task.nextDueDate === dateFilter ? { borderColor: colors.error, borderWidth: 2, backgroundColor: colors.error + "10" } : null]}>
           {menuOpen ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق القائمة" : "Close menu"} onPress={() => setMenuFor(null)} style={StyleSheet.absoluteFill} /> : null}
           <View style={[styles.cardRow, { alignItems: "flex-start" }]}>
             <View style={[styles.taskIcon, { backgroundColor: tone.color + "18" }]}><MaterialIcons name={tone.icon} size={20} color={tone.color} /></View>
@@ -958,6 +1011,9 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 11, fontWeight: "600" },
   header: { alignItems: "center", gap: 10, marginBottom: 12 },
   statsRow: { gap: 8 },
+  overdueHelper: { alignItems: "center", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, gap: 8, marginTop: 12, shadowColor: "#000000", shadowOpacity: 0.2, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  overdueHelperText: { flex: 1, color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
+  overdueHelperBtn: { flexDirection: "row", alignItems: "center", borderRadius: 8, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 4, gap: 3 },
   statCard: { flex: 1, borderRadius: 16, borderWidth: 1, padding: 11, alignItems: "center" },
   tabRow: { borderRadius: 15, padding: 4, gap: 4, marginTop: 14 },
   tab: { flex: 1, minHeight: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 },

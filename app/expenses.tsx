@@ -8,6 +8,7 @@ import { showAlert } from "@/lib/confirm";
 import { CalendarDatePicker } from "@/components/calendar-date-picker";
 import { normalizeArabic } from "@/components/ui/HighlightedText";
 import { HighlightedText } from "@/components/ui/HighlightedText";
+import { normalizeArabicText } from "@/utils/textNormalization";
 import { DateRangePicker, type DateRange } from "@/components/ui/DateRangePicker";
 import { ConfirmDeleteModal } from "@/components/ui/ConfirmDeleteModal";
 import { RipplePressable } from "@/components/ripple-pressable";
@@ -204,7 +205,7 @@ export default function ExpensesScreen() {
     }).filter((expense) => {
       const query = normalizeArabic(searchQuery);
       if (!query) return true;
-      return normalizeArabic(expenseSearchText(expense, language)).includes(query);
+      return normalizeArabicText(expenseSearchText(expense, language)).includes(query);
     }).sort((left, right) => (right.date || right.createdAt.slice(0, 10)).localeCompare(left.date || left.createdAt.slice(0, 10)) || right.createdAt.localeCompare(left.createdAt)), [scopedExpenses, period, customStart, customEnd, todayAnchor, weekAnchor, monthAnchor, searchQuery]);
   /** نافذة 14 يومًا ممركزة على التاريخ النشط لشريط الأيام الأفقي. */
   const expenseStripDates = useMemo(() => {

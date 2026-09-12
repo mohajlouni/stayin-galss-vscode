@@ -6,6 +6,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
 import { DateRangePicker, type DateRange } from "@/components/ui/DateRangePicker";
 import { useColors } from "@/hooks/use-colors";
+import { useSmartSearch, type SmartSearchExtractor } from "@/hooks/useSmartSearch";
 import { formatMoney, staffFloatAccounts, todayISO } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { useAppPreferences } from "@/lib/app-preferences";
@@ -27,21 +28,25 @@ const CHANNEL_LABELS: Record<string, { ar: string; en: string }> = {
   bank: { ar: "بنكي", en: "Bank" },
 };
 
-function matchesQuery(entry: SettlementArchiveEntry, q: string, language: string): boolean {
-  if (!q) return true;
-  const lower = q.toLowerCase();
+/** حقول السند المدعومة بمحرّك البحث الذكي المشترك (أسماء القنوات بالعربية والإنجليزية معًا). */
+const settlementSearchValues: SmartSearchExtractor<SettlementArchiveEntry> = (entry) => {
   const { settlement, memberName, floatLabel, bookings, expenses } = entry;
-  const channel = settlement.channel ? (CHANNEL_LABELS[settlement.channel]?.[language === "ar" ? "ar" : "en"] ?? "") : "";
-  const texts = [
-    memberName, floatLabel, settlement.id,
-    String(settlement.amount), channel,
-    settlement.recipientAccountLabel, settlement.note,
-    settlement.requestedByName, settlement.settledByName,
+  const channelMeta = settlement.channel ? CHANNEL_LABELS[settlement.channel] : undefined;
+  return [
+    memberName,
+    floatLabel,
+    settlement.id,
+    settlement.amount,
+    channelMeta?.ar,
+    channelMeta?.en,
+    settlement.recipientAccountLabel,
+    settlement.note,
+    settlement.requestedByName,
+    settlement.settledByName,
     ...bookings.map((b) => b.customerName),
     ...expenses.map((e) => e.note),
   ];
-  return texts.some((text) => typeof text === "string" && text.toLowerCase().includes(lower));
-}
+};
 
 function inPeriod(dateISO: string, period: PeriodKey, today: string, customRange: DateRange): boolean {
   if (period === "all") return true;
@@ -85,13 +90,16 @@ export default function SettlementsHistoryScreen() {
 
   const allEntries = useMemo(() => settlementArchiveEntries({ bookings, staffFloatSettlements, settings, expenses }), [bookings, staffFloatSettlements, settings, expenses]);
 
-  const entries = useMemo(() => allEntries.filter((entry) => {
-    const staffMatch = staffFilter === "all" || entry.floatId === staffFilter;
-    const dateISO = entry.settlement.settlementDate ?? entry.settlement.settledAt.slice(0, 10);
-    const periodMatch = inPeriod(dateISO, period, today, customRange);
-    const queryMatch = matchesQuery(entry, query, language);
-    return staffMatch && periodMatch && queryMatch;
-  }), [allEntries, staffFilter, period, today, customRange, query, language]);
+  const entries = useSmartSearch(
+    useMemo(() => allEntries.filter((entry) => {
+      const staffMatch = staffFilter === "all" || entry.floatId === staffFilter;
+      const dateISO = entry.settlement.settlementDate ?? entry.settlement.settledAt.slice(0, 10);
+      const periodMatch = inPeriod(dateISO, period, today, customRange);
+      return staffMatch && periodMatch;
+    }), [allEntries, staffFilter, period, today, customRange]),
+    query,
+    settlementSearchValues,
+  );
 
   if (!allowed) return <ScreenContainer edges={["top", "bottom", "left", "right"]}><ScrollView style={{ flex: 1, backgroundColor: "transparent" }} contentContainerStyle={styles.content}>
     <SubScreenHeader title={language === "ar" ? "أرشيف التسويات العامة" : "General settlements archive"} fallbackHref="/float-settlements" />
@@ -109,6 +117,8 @@ export default function SettlementsHistoryScreen() {
       <TextInput value={query} onChangeText={setQuery} placeholder={language === "ar" ? "بحث: اسم الموظف، رقم السند، المبلغ، طريقة الدفع، الحساب..." : "Search: staff name, voucher ID, amount, payment method, account..."} placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground, textAlign: align }]} />
       {query ? <Pressable onPress={() => setQuery("")}><MaterialIcons name="close" size={17} color={colors.muted} /></Pressable> : null}
     </View>
+
+    {query.trim() ? <View style={[styles.searchSummary, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="filter-list" size={13} color="#F59E0B" /><Text numberOfLines={1} style={[styles.flex, { color: colors.foreground, fontSize: 10.5, fontWeight: "800", textAlign: align }]}>{language === "ar" ? `عرض (${entries.length}) نتائج مطابقة لـ "${query.trim()}"` : `Showing (${entries.length}) matches for "${query.trim()}"`}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setQuery("")} hitSlop={8}><MaterialIcons name="close" size={15} color={colors.muted} /></Pressable></View> : null}
 
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsRow}>
       {staffChips.map((chip) => { const selected = staffFilter === chip.id; return <Pressable key={chip.id} onPress={() => setStaffFilter(chip.id)} style={({ pressed }) => [styles.chip, { backgroundColor: selected ? colors.primary : colors.surface, borderColor: selected ? colors.primary : colors.border, opacity: pressed ? 0.72 : 1 }]}><Text style={{ color: selected ? colors.background : colors.foreground, fontSize: 11.5, fontWeight: "800" }}>{chip.label}</Text></Pressable>; })}
@@ -165,6 +175,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
   lockCard: { borderWidth: 1, borderRadius: 16, padding: 14, alignItems: "center", gap: 10, marginTop: 13 },
   searchRow: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, alignItems: "center", gap: 8, minHeight: 46, marginTop: 12 },
+  searchSummary: { borderRadius: 11, paddingHorizontal: 10, paddingVertical: 8, alignItems: "center", gap: 6, marginTop: 10, borderWidth: 1 },
   searchInput: { flex: 1, fontSize: 12, fontWeight: "700", paddingVertical: 10 },
   chipsScroll: { marginTop: 10 },
   chipsRow: { gap: 7 },

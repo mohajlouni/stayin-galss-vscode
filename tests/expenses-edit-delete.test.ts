@@ -95,13 +95,17 @@ describe("expenses UI/UX overhaul: zero-default form, cascading dropdowns, edit,
     expect(store).toContain("task.id === existing.maintenanceTaskId ? { ...task, cost: amount, actualCost: amount } : task");
   });
 
-  it("confirms deletion through the web-aware helper so the delete button works on the web build", () => {
+  it("confirms deletion through the branded dark modal instead of native browser dialogs", () => {
     const helper = read("lib/confirm.ts");
-    expect(screen).toContain('import { confirmAction, showAlert } from "@/lib/confirm";');
-    expect(screen).toContain("confirmAction({");
-    expect(screen).toContain("onConfirm: () => void deleteExpense(expense.id).catch");
-    expect(helper).toContain('Platform.OS === "web"');
-    expect(helper).toContain("webWindow.confirm?.(message)");
-    expect(helper).toContain('{ text: confirmLabel, style: destructive ? "destructive" : "default", onPress: onConfirm }');
+    expect(screen).toContain('import { ConfirmDeleteModal } from "@/components/ui/ConfirmDeleteModal";');
+    expect(screen).toContain("<ConfirmDeleteModal");
+    expect(screen).toContain("setPendingDeletion(expense)");
+    expect(screen).toContain("onConfirm={() => { const expense = pendingDeletion; setPendingDeletion(null); if (expense) void deleteExpense(expense.id).catch("); 
+    expect(screen).toContain("deleteExpense(expense.id).catch");
+    expect(screen).not.toContain("confirmAction");
+    expect(screen).not.toContain("window.confirm");
+    expect(helper).not.toContain("webWindow.confirm");
+    expect(helper).not.toContain("ConfirmOptions");
+    expect(helper).toContain("webWindow.alert");
   });
 });

@@ -3,12 +3,13 @@ import * as ImagePicker from "expo-image-picker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { router } from "expo-router";
 import { ActivityIndicator, Dimensions, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, View, type LayoutChangeEvent } from "react-native";
-import { confirmAction, showAlert } from "@/lib/confirm";
+import { showAlert } from "@/lib/confirm";
 
 import { CalendarDatePicker } from "@/components/calendar-date-picker";
 import { normalizeArabic } from "@/components/ui/HighlightedText";
 import { HighlightedText } from "@/components/ui/HighlightedText";
 import { DateRangePicker, type DateRange } from "@/components/ui/DateRangePicker";
+import { ConfirmDeleteModal } from "@/components/ui/ConfirmDeleteModal";
 import { RipplePressable } from "@/components/ripple-pressable";
 import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
@@ -147,6 +148,7 @@ export default function ExpensesScreen() {
   const [customStart, setCustomStart] = useState(todayISO());
   const [customEnd, setCustomEnd] = useState(todayISO());
   const [rangePickerOpen, setRangePickerOpen] = useState(false);
+  const [pendingDeletion, setPendingDeletion] = useState<Expense | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [stripCenter, setStripCenter] = useState(todayISO());
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
@@ -488,17 +490,12 @@ export default function ExpensesScreen() {
       endSubmit();
     }
   };
-  const remove = (expense: Expense) => {
+  const pendingDeleteDescription = (expense: Expense) => {
     const linkedTaskTitle = expense.maintenanceTaskId ? maintenanceTasks.find((task) => task.id === expense.maintenanceTaskId)?.title : undefined;
-    confirmAction({
-      title: language === "ar" ? "حذف المصروف" : "Delete expense",
-      message: language === "ar" ? (linkedTaskTitle ? `هذا المصروف مرتبط بمهمة صيانة مكتملة (${linkedTaskTitle}). هل تريد حذف السند المالي وتصفير تكلفة المهمة؟` : "هل أنت متأكد من حذف هذا المصروف نهائيًا؟") : (linkedTaskTitle ? `This expense is linked to a completed maintenance task (${linkedTaskTitle}). Delete the voucher and reset the task cost to zero?` : "Delete this expense permanently?"),
-      cancelLabel: language === "ar" ? "إلغاء" : "Cancel",
-      confirmLabel: language === "ar" ? "حذف" : "Delete",
-      destructive: true,
-      onConfirm: () => void deleteExpense(expense.id).catch(() => showAlert(language === "ar" ? "تعذر الحذف" : "Could not delete", language === "ar" ? "لا تملك صلاحية حذف المصروف." : "You do not have permission to delete this expense.")),
-    });
+    if (!expense.maintenanceTaskId) return language === "ar" ? "هل أنت متأكد من حذف هذا المصروف نهائيًا؟" : "Delete this expense permanently?";
+    return language === "ar" ? `هذا المصروف مرتبط بمهمة صيانة مكتملة (${linkedTaskTitle ?? ""}). هل تريد حذف السند المالي وتصفير تكلفة المهمة؟` : `This expense is linked to a completed maintenance task (${linkedTaskTitle ?? ""}). Delete the voucher and reset the task cost to zero?`;
   };
+  const remove = (expense: Expense) => setPendingDeletion(expense);
 
   if (!can("view_financial_reports")) return <ScreenContainer><View style={[styles.locked, { backgroundColor: colors.surface, borderColor: colors.border }]}><MaterialIcons name="lock" size={30} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "900", marginTop: 9, textAlign: align }}>{language === "ar" ? "المصروفات للإدارة فقط" : "Expenses are for management only"}</Text></View></ScreenContainer>;
   return <ScreenContainer edges={["top", "left", "right"]}><View style={styles.screen}>
@@ -516,6 +513,7 @@ export default function ExpensesScreen() {
         {searchQuery.trim() ? <View style={[styles.searchSummary, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="filter-list" size={13} color="#F59E0B" /><Text numberOfLines={1} style={[styles.flex, { color: colors.foreground, fontSize: 10.5, fontWeight: "800", textAlign: align }]}>{language === "ar" ? `عرض (${visibleExpenses.length}) نتائج مطابقة لـ "${searchQuery.trim()}"` : `Showing (${visibleExpenses.length}) matches for "${searchQuery.trim()}"`}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح البحث" : "Clear search"} onPress={() => setSearchQuery("")} hitSlop={8}><MaterialIcons name="close" size={15} color={colors.muted} /></Pressable></View> : null}
         {period === "custom" ? <View style={[styles.customRange, { flexDirection: row }]}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "بداية فترة المصروفات" : "Expense period start"} onPress={() => setRangePickerOpen(true)} style={[styles.rangeField, { backgroundColor: colors.surface, borderColor: colors.border }]}><MaterialIcons name="event" size={15} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 10.5, fontWeight: "800", textAlign: align }}>{language === "ar" ? "من" : "From"} · {formatDate(customStart)}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "نهاية فترة المصروفات" : "Expense period end"} onPress={() => setRangePickerOpen(true)} style={[styles.rangeField, { backgroundColor: colors.surface, borderColor: colors.border }]}><MaterialIcons name="event" size={15} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 10.5, fontWeight: "800", textAlign: align }}>{language === "ar" ? "إلى" : "To"} · {formatDate(customEnd)}</Text></Pressable></View> : null}
         <DateRangePicker visible={rangePickerOpen} start={customStart} end={customEnd} onClose={() => setRangePickerOpen(false)} onApply={applyRange} />
+        <ConfirmDeleteModal language={language} visible={pendingDeletion !== null} title={language === "ar" ? "تأكيد حذف المصروف" : "Confirm expense deletion"} description={pendingDeletion ? pendingDeleteDescription(pendingDeletion) : ""} confirmLabel={language === "ar" ? "حذف المصروف" : "Delete expense"} cancelLabel={language === "ar" ? "تراجع" : "Cancel"} onConfirm={() => { const expense = pendingDeletion; setPendingDeletion(null); if (expense) void deleteExpense(expense.id).catch(() => showAlert(language === "ar" ? "تعذر الحذف" : "Could not delete", language === "ar" ? "لا تملك صلاحية حذف المصروف." : "You do not have permission to delete this expense.")); }} onCancel={() => setPendingDeletion(null)} />
     <FlatList data={ledgerRows} showsVerticalScrollIndicator={false} keyExtractor={(row) => (row.kind === "header" ? `header-${row.date}` : row.item.id)} contentContainerStyle={styles.content} ListEmptyComponent={<View style={[styles.empty, { backgroundColor: colors.surface, borderColor: colors.border }]}><MaterialIcons name="receipt-long" size={28} color={colors.muted} /><Text style={{ color: colors.foreground, fontWeight: "900", marginTop: 9, textAlign: align }}>{language === "ar" ? (selectedChaletId ? "لا توجد مصروفات لهذا الشاليه" : "لا توجد مصروفات مسجلة") : "No recorded expenses"}</Text></View>} renderItem={({ item, index }) => {
       if (item.kind === "header") return <View style={[styles.dateHeaderBar, { borderBottomColor: "rgba(30, 41, 59, 0.8)" }]}><View style={[styles.dateBadge, { backgroundColor: colors.surfaceMuted, flexDirection: row }]}><MaterialIcons name="event" size={13} color="#F59E0B" /><Text style={{ color: colors.foreground, fontSize: 10.5, fontWeight: "900", writingDirection: "ltr" }}>{weekdayLabel(item.date, language)}، {formatDate(item.date)}</Text></View>{index === 0 ? <View style={[styles.dateHeaderActions, { flexDirection: row }]}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "سجل الحركات (المصروفات)" : "Expenses activity log"} onPress={() => router.push("/audit-log?action=expense-added")} style={({ pressed, hovered }) => [styles.quickAction, hovered ? { borderColor: "#334155" } : null, pressed ? { transform: [{ scale: 0.95 }], opacity: 0.8 } : { opacity: 1 }]}><MaterialIcons name="receipt-long" size={15} color="#F59E0B" /><Text style={{ color: "#E2E8F0", fontSize: 12, fontWeight: "600" }}>{language === "ar" ? "سجل الحركات" : "Activity log"}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تقارير المصروفات" : "Expenses reports"} onPress={() => router.push("/reports")} style={({ pressed, hovered }) => [styles.quickAction, hovered ? { borderColor: "#334155" } : null, pressed ? { transform: [{ scale: 0.95 }], opacity: 0.8 } : { opacity: 1 }]}><MaterialIcons name="bar-chart" size={15} color="#F59E0B" /><Text style={{ color: "#E2E8F0", fontSize: 12, fontWeight: "600" }}>{language === "ar" ? "تقارير المصروفات" : "Reports"}</Text></Pressable></View> : null}</View>;
       const meta = CATEGORY_META[item.item.category];

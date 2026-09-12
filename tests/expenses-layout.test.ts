@@ -26,7 +26,7 @@ describe("expenses management", () => {
   });
 
   it("renders expense cards with scope, payment method, actor, and receipt metadata", () => {
-    expect(screen).toContain("المسجل:");
+    expect(screen).toContain("بواسطة:");
     expect(screen).toContain("الفاتورة");
     expect(screen).toContain("formatRecordedAt");
   });

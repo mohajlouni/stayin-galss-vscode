@@ -186,7 +186,7 @@ export default function MaintenanceDashboard() {
     return false;
   };
   const completionNextDate = completion ? nextMaintenanceDueDate(completion.task) : "";
-  const now = useMemo(() => Date.now(), []);
+  const now = Date.now();
   const todayISO = localDateISO(new Date(now));
   const stats = useMemo(() => maintenanceStats(maintenanceTasks ?? [], now), [maintenanceTasks, now]);
 
@@ -599,7 +599,7 @@ export default function MaintenanceDashboard() {
     <View style={styles.rollerWrap}>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
         <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير الأيام للخلف" : "Scroll days backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} {...mouseClick(() => nudgeRoller(-1))} disabled={false} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color="#EA580C" /></Pressable>
-        <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip}>
+        <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} style={styles.rollerScroll}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
             const isToday = date === todayISO;
@@ -610,7 +610,7 @@ export default function MaintenanceDashboard() {
             return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, singleSelected ? { backgroundColor: "#EA580C", borderColor: "#EA580C" } : isToday ? { backgroundColor: "rgba(234, 88, 12, 0.15)", borderColor: "#EA580C", borderWidth: 2 } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
               <Text numberOfLines={1} style={{ color: singleSelected ? "#FFFFFF" : isToday ? "#FDBA74" : "#94A3B8", fontSize: 9, fontWeight: singleSelected || isToday ? "900" : "600", textAlign: "center" }}>{topLabel}</Text>
               <Text style={{ color: singleSelected ? "#FFFFFF" : isToday ? "#FDBA74" : colors.foreground, fontSize: 13, fontWeight: singleSelected || isToday ? "900" : "700", textAlign: "center" }}>{date.slice(8, 10)}</Text>
-              <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#EA580C" : "transparent" }]} />
+              {hasTaskOnDate ? <View style={styles.rollerDot} /> : null}
             </Pressable>;
           })}
         </ScrollView>
@@ -635,7 +635,7 @@ export default function MaintenanceDashboard() {
       </View>
       <View onLayout={measureMenuSide("cadence")} style={styles.toolbarMenuAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "قائمة دورية الصيانة" : "Recurrence list"} onPress={() => { setCadenceMenuOpen(!cadenceMenuOpen); setUnitMenuOpen(false); setMenuFor(null); }} style={[styles.toolbarSelect, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, flexDirection: row }]}><MaterialIcons name="schedule" size={15} color={colors.primary} /><Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "800", flex: 1, textAlign: align }}>{language === "ar" ? "دورية الصيانة / الفترات" : "Recurrence / periods"}</Text><MaterialIcons name={cadenceMenuOpen ? "expand-less" : "expand-more"} size={16} color={colors.muted} /></Pressable>
         {cadenceMenuOpen ? <View style={[styles.toolbarMenu, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, left: isRTL ? 0 : undefined, right: isRTL ? undefined : 0 }, { backgroundColor: colors.background, width: 220, elevation: 18, shadowColor: "#000000", shadowOpacity: 0.35, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, left: menuSides.cadence === "left" ? 0 : undefined, right: menuSides.cadence === "left" ? undefined : 0 }]}>
-          {CADENCE_FILTERS.map((cadence) => { const selected = cadenceFilter === cadence.id; return <Pressable key={cadence.id} accessibilityRole="button" accessibilityLabel={cadence.label[language === "ar" ? 0 : 1]} onPress={() => { setCadenceFilter(selected ? "all" : cadence.id); setCadenceMenuOpen(false); }} style={({ pressed }) => [styles.toolbarRow, { backgroundColor: selected ? colors.primary + "22" : pressed ? colors.surfaceMuted : "transparent", borderStartWidth: selected ? 2 : 0, borderEndWidth: 0, borderStartColor: selected ? colors.primary : "transparent", flexDirection: row }]}><MaterialIcons name={cadence.icon} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{cadence.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}
+          {CADENCE_FILTERS.map((cadence) => { const selected = cadenceFilter === cadence.id; return <Pressable key={cadence.id} accessibilityRole="button" accessibilityLabel={cadence.label[language === "ar" ? 0 : 1]} onPress={() => { setCadenceFilter(selected ? "all" : cadence.id); setCadenceMenuOpen(false); resetTimeline(); }} style={({ pressed }) => [styles.toolbarRow, { backgroundColor: selected ? colors.primary + "22" : pressed ? colors.surfaceMuted : "transparent", borderStartWidth: selected ? 2 : 0, borderEndWidth: 0, borderStartColor: selected ? colors.primary : "transparent", flexDirection: row }]}><MaterialIcons name={cadence.icon} size={15} color={selected ? colors.primary : colors.muted} /><Text style={{ flex: 1, color: selected ? colors.primary : colors.foreground, fontSize: 12, fontWeight: "800", textAlign: align }}>{cadence.label[language === "ar" ? 0 : 1]}</Text></Pressable>; })}
         </View> : null}
       </View>
     </View>
@@ -955,12 +955,13 @@ const styles = StyleSheet.create({
   cancelDismiss: { minHeight: 46, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center", marginTop: 12 },
   filterRow: { marginTop: 12 },
   clickAway: { zIndex: 1, backgroundColor: "rgba(0, 0, 0, 0.2)" },
-  rollerWrap: { marginTop: 13 },
+  rollerWrap: { marginTop: 13, width: "100%", maxWidth: 1024, alignSelf: "center", paddingHorizontal: 8 },
   rollerScroller: { alignItems: "center", gap: 6 },
+  rollerScroll: { flex: 1, minWidth: 0 },
   rollerArrow: { width: 30, height: 30, borderRadius: 10, alignItems: "center", justifyContent: "center", borderWidth: 1, flexShrink: 0 },
-  rollerStrip: { flexDirection: "row", gap: 2, paddingVertical: 3, paddingHorizontal: 2 },
+  rollerStrip: { flexDirection: "row", flexGrow: 1, justifyContent: "space-between", gap: 2, paddingVertical: 3, paddingHorizontal: 2 },
   rollerChip: { width: 38, minWidth: 38, maxWidth: 38, height: 54, borderRadius: 12, borderWidth: 1, paddingVertical: 6, alignItems: "center", justifyContent: "center", gap: 2 },
-  rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2 },
+  rollerDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2, alignSelf: "center", backgroundColor: "#EA580C" },
   invalidInputGlow: { borderWidth: 2, shadowColor: "#F43F5E", shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 0 }, elevation: 6 },
   fieldError: { color: "#F43F5E", fontSize: 10, fontWeight: "800", marginTop: 5, textAlign: "right" },
   assetHelper: { minHeight: 36, borderRadius: 12, borderWidth: 1, padding: 10 },

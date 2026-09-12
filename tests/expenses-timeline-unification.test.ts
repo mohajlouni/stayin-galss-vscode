@@ -30,7 +30,7 @@ describe("expenses unified timeline", () => {
     expect(screen).toMatch(/backgroundColor: "#EA580C", borderColor: "#EA580C"/);
     expect(screen).toContain('backgroundColor: "rgba(234, 88, 12, 0.15)"');
     expect(screen).toContain('isToday ? "#FDBA74"');
-    expect(screen).toContain('hasExpense ? "#EA580C"');
+    expect(screen).toContain("hasExpense ? <View style={styles.stripDot} /> : null");
     expect(screen).not.toContain("#FCD34D");
     expect(screen).not.toContain("#FDE68A");
     expect(screen).not.toContain("rgba(245, 158, 11, 0.18)");

@@ -524,7 +524,7 @@ describe("ROLLER STEP: ultra-compact timeline strip & strict scope isolation", (
 
   it("shows the orange task dot ONLY on dates that actually have active maintenance tasks", () => {
     expect(source).toContain("activeTasks.some((task) => task.nextDueDate === date)");
-    expect(source).toContain('backgroundColor: hasTaskOnDate ? "#EA580C" : "transparent"');
+    expect(source).toContain("hasTaskOnDate ? <View style={styles.rollerDot} /> : null");
     expect(source).not.toContain("overdue ? colors.error : colors.warning");
   });
 

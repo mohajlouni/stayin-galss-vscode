@@ -21,7 +21,7 @@ describe("expenses UI/UX sync", () => {
     expect(screen).toContain("styles.stripChip");
     expect(screen).toContain("styles.stripDot");
     expect(screen).toMatch(/backgroundColor: "#EA580C", borderColor: "#EA580C"/);
-    expect(screen).toContain('backgroundColor: hasExpense ? "#EA580C"');
+    expect(screen).toContain("hasExpense ? <View style={styles.stripDot} /> : null");
   });
 
   it("uses the compact card layout with an amber amount and badge cluster", () => {

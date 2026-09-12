@@ -584,7 +584,7 @@ describe("ROLLER STEP: unified tiles, floating popover & card flow polish", () =
 
   it("marks Today with a border-2 orange ring instead of a harsh white outline", () => {
     expect(source).toContain('const framed = isToday || singleSelected;');
-    expect(source).toContain('backgroundColor: "rgba(249, 115, 22, 0.2)", borderColor: "#F97316", borderWidth: 2');
+    expect(source).toContain('backgroundColor: colors.surfaceMuted, borderColor: "#EA580C", borderWidth: 2');
     expect(source).toContain('const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;');
     expect(source).not.toContain("rollerTodayBadge");
   });

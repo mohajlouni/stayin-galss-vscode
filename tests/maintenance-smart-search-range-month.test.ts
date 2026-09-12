@@ -135,14 +135,14 @@ describe("custom range: no forced +1 month, amber pill, amber strip band", () =>
     expect(source).toContain('fontWeight: rollerRange.kind === "custom" ? "900"');
   });
 
-  it("paints the strip inside the applied range amber with solid edge days", () => {
+  it("highlights the strip inside the applied range with orange text and rings over the dark slate base", () => {
     const source = dashboard();
     expect(source).toContain("const isCustomEdge = Boolean(customRange");
     expect(source).toContain("const isCustomInside = Boolean(customRange");
-    expect(source).toContain('isCustomEdge ? { backgroundColor: "#EA580C"');
-    expect(source).toContain('isCustomInside ? { backgroundColor: "rgba(234, 88, 12, 0.15)"');
-    expect(source).toContain('"rgba(234, 88, 12, 0.3)"');
-    expect(source).toContain('isCustomInside ? "#FDBA74"');
+    expect(source).toContain('isCustomEdge ? { backgroundColor: colors.surfaceMuted, borderColor: "#EA580C"');
+    expect(source).toContain('isCustomInside ? { backgroundColor: colors.surfaceMuted, borderColor: "rgba(234, 88, 12, 0.35)"');
+    expect(source).toContain('"rgba(234, 88, 12, 0.35)"');
+    expect(source).toContain('isCustomInside ? "#F97316"');
     expect(source).toContain("rollerRange.kind === \"custom\" && rollerRange.start && rollerRange.end");
   });
 });
@@ -195,10 +195,10 @@ describe("overdue KPI sequential walk", () => {
 });
 
 describe("single-selected date chip in brand amber", () => {
-  it("paints the picked day solid amber with slate-950 text and font-black weight", () => {
+  it("rings the picked day in amber with vibrant orange text over the dark slate base", () => {
     const source = dashboard();
-    expect(source).toContain("const topColor = singleSelected ? \"#FFFFFF\" : isCustomEdge ? \"#FFFFFF\"");
-    expect(source).toContain("singleSelected ? { backgroundColor: \"#EA580C\", borderColor: \"#EA580C\", borderRadius: 12 }");
+    expect(source).toContain("const topColor = singleSelected ? \"#EA580C\" : isCustomEdge ? \"#EA580C\"");
+    expect(source).toContain("singleSelected ? { backgroundColor: colors.surfaceMuted, borderColor: \"#EA580C\", borderWidth: 2, borderRadius: 12 }");
     expect(source).toContain('fontWeight: singleSelected ? "900"');
   });
 });

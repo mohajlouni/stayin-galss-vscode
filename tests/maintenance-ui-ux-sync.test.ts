@@ -33,7 +33,7 @@ describe("maintenance mobile UI/UX sync", () => {
 
   it("auto-centers the active day chip on tap, Today nav and overdue jumps", () => {
     expect(source).toContain("const centerRollerOnDate = useCallback(");
-    expect(source).toContain("index * ROLLER_PILL_STEP - 3 * ROLLER_PILL_STEP");
+    expect(source).toContain("index * ROLLER_PILL_STEP - 2 * ROLLER_PILL_STEP");
     expect(source).toContain("(timelineDates.length - 7) * ROLLER_PILL_STEP");
     expect(source).toContain("anchorDate, timelineDates");
     expect(source).toMatch(/centerRollerOnDate\(dateFilter\);[\s\S]*?horizon === "today"\) centerRollerOnDate\(todayISO\)/);

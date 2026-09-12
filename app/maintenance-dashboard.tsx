@@ -591,7 +591,7 @@ export default function MaintenanceDashboard() {
     const index = timelineDates.indexOf(date);
     if (index < 0) return;
     const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
-    rollerRef.current?.scrollTo({ x: Math.min(Math.max(index * ROLLER_PILL_STEP - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
+    rollerRef.current?.scrollTo({ x: Math.min(Math.max(index * ROLLER_PILL_STEP - 2 * ROLLER_PILL_STEP, 0), max), animated: true });
   }, [timelineDates]);
   /** يُبقي مرساة اليوم/الفترة المختارة في مقدمة النافذة بعد كل تنقّل حتى لا تضيع الأيام خارج الشاشة. */
   useEffect(() => {
@@ -600,7 +600,7 @@ export default function MaintenanceDashboard() {
     if (index < 0) return;
     const raw = index * ROLLER_PILL_STEP;
     const max = Math.max(0, (timelineDates.length - 7) * ROLLER_PILL_STEP);
-    rollerRef.current?.scrollTo({ x: Math.min(Math.max(raw - 3 * ROLLER_PILL_STEP, 0), max), animated: true });
+    rollerRef.current?.scrollTo({ x: Math.min(Math.max(raw - 2 * ROLLER_PILL_STEP, 0), max), animated: true });
   }, [anchorDate, timelineDates]);
   /** عند تغيّر اليوم المحدد (نقر على خانة اليوم، زر «اليوم»، أو القفز المتأخر) يوسِّط الشريط اليوم النشط تلقائياً. */
   useEffect(() => {
@@ -689,7 +689,7 @@ export default function MaintenanceDashboard() {
         <View style={styles.rollerRangeAnchor}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "فترة مخصصة" : "Custom range"} onPress={openRangePanel} style={[styles.rollerRangeChip, { backgroundColor: rollerRange.kind === "custom" ? "#EA580C" : colors.surface, borderColor: rollerRange.kind === "custom" ? "#EA580C" : colors.border, shadowColor: rollerRange.kind === "custom" ? "#EA580C" : "transparent", shadowOpacity: rollerRange.kind === "custom" ? 0.4 : 0, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: rollerRange.kind === "custom" ? 4 : 0 }]}><MaterialIcons name="date-range" size={14} color={rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted} /><Text numberOfLines={1} style={{ maxWidth: 96, color: rollerRange.kind === "custom" ? "#FFFFFF" : colors.muted, fontSize: 12, fontWeight: rollerRange.kind === "custom" ? "900" : "700" }}>{rollerRange.kind === "custom" && rollerRange.start && rollerRange.end ? `${rollerRange.start.slice(8, 10)}/${rollerRange.start.slice(5, 7)} - ${rollerRange.end.slice(8, 10)}/${rollerRange.end.slice(5, 7)}` : (language === "ar" ? "من - إلى" : "From - To")}</Text>{rollerRange.kind === "custom" ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "مسح الفترة" : "Clear range"} onPress={(event) => { event?.stopPropagation?.(); clearCustomRange(); }} {...mouseClick(clearCustomRange)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}><MaterialIcons name="close" size={13} color="#FFFFFF" /></Pressable> : null}</Pressable></View>
       </View>
       <View style={[styles.rollerScroller, { flexDirection: row }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} {...mouseClick(() => nudgeRoller(1))} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للأمام" : "Scroll forward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(1); }} {...mouseClick(() => nudgeRoller(1))} disabled={false} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-left" : "chevron-right"} size={18} color={colors.primary} /></Pressable>
         <ScrollView ref={rollerRef} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rollerStrip} onScroll={(event) => { rollerOffsetRef.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
           {timelineDates.map((date) => {
             const singleSelected = dateFilter === date;
@@ -703,17 +703,17 @@ export default function MaintenanceDashboard() {
             const weekday = ROLLER_WEEKDAYS[language === "ar" ? "ar" : "en"][new Date(`${date}T12:00:00Z`).getUTCDay()];
             const topLabel = isToday ? (language === "ar" ? "اليوم" : "Today") : weekday;
             const strong = framed || inWindow || isCustomInside || isCustomEdge;
-            const topColor = singleSelected ? "#FFFFFF" : isCustomEdge ? "#FFFFFF" : isCustomInside ? "#FDBA74" : isToday ? "#FED7AA" : (strong ? colors.primary : "#94A3B8");
-            const dayColor = singleSelected ? "#FFFFFF" : isCustomEdge ? "#FFFFFF" : isCustomInside ? "#FDBA74" : isToday ? "#FED7AA" : (strong ? colors.primary : "#94A3B8");
-            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, isCustomEdge ? { backgroundColor: "#EA580C", borderColor: "#EA580C", borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 12 } : isCustomInside ? { backgroundColor: "rgba(234, 88, 12, 0.15)", borderColor: "rgba(234, 88, 12, 0.3)", borderTopWidth: 1, borderBottomWidth: 1 } : singleSelected ? { backgroundColor: "#EA580C", borderColor: "#EA580C", borderRadius: 12 } : framed ? { backgroundColor: "rgba(249, 115, 22, 0.2)", borderColor: "#F97316", borderWidth: 2 } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, singleSelected ? { shadowColor: "#EA580C", shadowOpacity: 0.26, shadowRadius: 9, shadowOffset: { width: 0, height: 2 } } : framed ? { shadowColor: "#F97316", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } } : null]}>
+            const topColor = singleSelected ? "#EA580C" : isCustomEdge ? "#EA580C" : isCustomInside ? "#F97316" : isToday ? "#EA580C" : (strong ? colors.primary : "#94A3B8");
+            const dayColor = singleSelected ? "#EA580C" : isCustomEdge ? "#EA580C" : isCustomInside ? "#F97316" : isToday ? "#EA580C" : (strong ? colors.primary : "#94A3B8");
+            return <Pressable key={date} accessibilityRole="button" accessibilityLabel={language === "ar" ? `تاريخ ${date}` : `Date ${date}`} onPress={() => setDateFilter(framed && singleSelected ? null : date)} style={[styles.rollerChip, { borderWidth: 1 }, isCustomEdge ? { backgroundColor: colors.surfaceMuted, borderColor: "#EA580C", borderTopWidth: 1, borderBottomWidth: 1, borderRadius: 12 } : isCustomInside ? { backgroundColor: colors.surfaceMuted, borderColor: "rgba(234, 88, 12, 0.35)", borderTopWidth: 1, borderBottomWidth: 1 } : singleSelected ? { backgroundColor: colors.surfaceMuted, borderColor: "#EA580C", borderWidth: 2, borderRadius: 12 } : framed ? { backgroundColor: colors.surfaceMuted, borderColor: "#EA580C", borderWidth: 2 } : { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, singleSelected ? { shadowColor: "#EA580C", shadowOpacity: 0.26, shadowRadius: 9, shadowOffset: { width: 0, height: 2 } } : framed ? { shadowColor: "#EA580C", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } } : null]}>
               <Text numberOfLines={1} style={{ color: topColor, fontSize: 10, fontWeight: strong ? "900" : "500", textAlign: "center" }}>{topLabel}</Text>
-              <Text style={{ color: dayColor, fontSize: 14, fontWeight: singleSelected ? "900" : isCustomEdge ? "900" : isCustomInside ? "600" : strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
+              <Text style={{ color: dayColor, fontSize: 14, fontWeight: singleSelected ? "900" : isCustomEdge ? "900" : isCustomInside ? "700" : strong ? "800" : "600", textAlign: "center" }}>{date.slice(8, 10)}</Text>
               <View style={[styles.rollerDot, { backgroundColor: hasTaskOnDate ? "#EA580C" : "transparent" }]} />
-              {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: singleSelected || isCustomEdge ? "#FFFFFF" : isCustomInside ? "#FDBA74" : "#F97316" }]} /> : null}
+              {isToday ? <View pointerEvents="none" style={[styles.rollerTodayUnderline, { backgroundColor: singleSelected || isCustomEdge ? "#EA580C" : isCustomInside ? "#F97316" : "#EA580C" }]} /> : null}
             </Pressable>;
           })}
         </ScrollView>
-        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} {...mouseClick(() => nudgeRoller(-1))} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تمرير للخلف" : "Scroll backward"} onPress={(event) => { event?.stopPropagation?.(); nudgeRoller(-1); }} {...mouseClick(() => nudgeRoller(-1))} disabled={false} pointerEvents="auto" style={({ pressed }) => [styles.rollerArrow, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, opacity: pressed ? 0.6 : 1, position: "relative", zIndex: 30, elevation: 30, cursor: "pointer", userSelect: "none" }]}><MaterialIcons name={isRTL ? "chevron-right" : "chevron-left"} size={18} color={colors.primary} /></Pressable>
       </View>
     </View>
 

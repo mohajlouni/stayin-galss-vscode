@@ -1,12 +1,11 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import * as Clipboard from "expo-clipboard";
 import { useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AppToggle } from "@/components/app-toggle";
 import { useColors } from "@/hooks/use-colors";
-import { buildInviteCode } from "@/lib/invite-code";
 import { GRANULAR_PERMISSIONS, OPERATIONAL_PERMISSION_COUNT, capabilitiesForRole, capabilitiesToPermissions, type GranularCapability } from "@/lib/permissions";
+import { normalizeUid, phoneKey } from "@/lib/staff-directory";
 import type { WorkspacePermissions } from "@/shared/workspace-permissions";
 
 /** دور العضو في المنشأة: موظف حجوزات / مدير تشغيلي / حارس (يُترجم إلى صلاحيات عبر رقم هاتفه). */
@@ -20,6 +19,8 @@ type AddUserModalProps = {
   onClose: () => void;
   /** يعالج الحفظ والدعوة تلقائيًا (ربط العضو بمنشأته عبر رقم الهاتف) ويعيد رسالة خطأ مترجمة أو null عند النجاح. */
   onSubmit: (entry: { name: string; phone: string; role: AddUserRole; permissions: WorkspacePermissions }) => Promise<string | null>;
+  /** يبحث عن حساب تطبيق مسجّل مسبقًا بالمعرّف الشخصي (userCode) ويعيد اسمه وهاتفه للتحقق المزدوج، أو null إذا لم يُعثر عليه. */
+  lookupUserCode?: (code: string) => { name: string; phone: string } | null;
 };
 
 const ORANGE = "#F97316";
@@ -32,27 +33,27 @@ const ROLES: { id: AddUserRole; emoji: string; ar: string; en: string }[] = [
   { id: "mini-admin", emoji: "⚙️", ar: "مدير تشغيلي", en: "Operational manager" },
 ];
 
-export default function AddUserModal({ visible, language, isRTL, colors, onClose, onSubmit }: AddUserModalProps) {
+export default function AddUserModal({ visible, language, isRTL, colors, onClose, onSubmit, lookupUserCode }: AddUserModalProps) {
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [userCode, setUserCode] = useState("");
   const [role, setRole] = useState<AddUserRole>("staff");
   const [caps, setCaps] = useState<readonly GranularCapability[]>(() => capabilitiesForRole("staff"));
   const [permsOpen, setPermsOpen] = useState(false);
-  const [focused, setFocused] = useState<"name" | "phone" | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [focused, setFocused] = useState<"name" | "phone" | "userCode" | null>(null);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     setName("");
     setPhone("");
+    setUserCode("");
     setRole("staff");
     setCaps(capabilitiesForRole("staff"));
     setPermsOpen(false);
     setFocused(null);
-    setCopied(false);
     setPending(false);
   }, [visible]);
 
@@ -64,11 +65,23 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
   const toggleCap = (key: GranularCapability) => setCaps((current) => (current.includes(key) ? current.filter((cap) => cap !== key) : [...current, key]));
 
   const activeCount = GRANULAR_PERMISSIONS.filter((perm) => caps.includes(perm.key)).length;
-  const inviteCode = buildInviteCode(phone);
+
+  const verification = userCode.trim()
+    ? (() => {
+        const resolved = lookupUserCode ? lookupUserCode(normalizeUid(userCode)) : null;
+        if (!resolved || !resolved.phone.trim()) return { state: "unknown" as const };
+        const matches = phone.trim().length >= 6 && phoneKey(resolved.phone) === phoneKey(phone);
+        return matches ? { state: "matched" as const, name: resolved.name } : { state: "mismatch" as const, name: resolved.name, phone: resolved.phone };
+      })()
+    : null;
 
   const submit = async () => {
     if (name.trim().length < 2 || phone.trim().length < 6) {
       Alert.alert(language === "ar" ? "بيانات ناقصة" : "Missing details", language === "ar" ? "أدخل اسم العضو ورقم هاتفه بشكل صحيح." : "Enter the member's name and phone number.");
+      return;
+    }
+    if (verification && verification.state !== "matched") {
+      Alert.alert(language === "ar" ? "التحقق من الهوية فشل" : "Identity check failed", verification.state === "unknown" ? (language === "ar" ? "لا يوجد حساب مسجل بهذا المعرّف — اتركه فارغًا إذا كان العضو جديدًا ولم يسجل بعد." : "No registered account matches this user ID — leave it empty if the member hasn't registered yet.") : (language === "ar" ? `رقم الهاتف لا يتطابق مع هذا المعرّف — «${verification.name}» مسجل برقم آخر. راجع الرقم أو المعرّف.` : `The phone number doesn't match this user ID — "${verification.name}" is registered with another number. Review the phone or the ID.`));
       return;
     }
     setPending(true);
@@ -126,12 +139,29 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
               />
             </View>
 
-            {inviteCode ? (
-              <View style={[styles.linkCard, { borderColor: colors.primary + "66", backgroundColor: colors.primary + "0D" }]}>
-                <View style={[styles.linkHead, { flexDirection: row }]}><MaterialIcons name="verified-user" size={17} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "رمز الدعوة والربط" : "Invite / linking code"}</Text></View>
-                <Text style={[styles.linkCode, { color: colors.primary }]}>#{inviteCode}</Text>
-                <Text style={{ color: colors.muted, fontSize: 10.5, lineHeight: 15, textAlign: "center" }}>{language === "ar" ? "اقرأه للموظف وأعطه إياه ليُدخله عند تفعيل حسابه — يضمن تطابق هويته 100%." : "Read it to the employee to enter while claiming their account — guaranteeing a 100% verified identity match."}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "نسخ رمز الدعوة" : "Copy invite code"} onPress={() => { void Clipboard.setStringAsync(`#${inviteCode}`); setCopied(true); setTimeout(() => setCopied(false), 1600); }} style={({ pressed }) => [styles.copyButton, { borderColor: colors.primary + "55", backgroundColor: colors.primary + "16", flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="content-copy" size={14} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "900", fontSize: 11 }}>{copied ? (language === "ar" ? "✓ تم النسخ" : "✓ Copied") : (language === "ar" ? "نسخ الرمز" : "Copy code")}</Text></Pressable>
+            <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "المعرّف الشخصي للمستخدم (اختياري للتأكيد)" : "User ID (optional, for confirmation)"}</Text>
+            <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "للتحقق المزدوج إذا كان الموظف مسجلاً مسبقاً بالتطبيق لتجنب الخطأ برقم الهاتف." : "Double-checks if the employee is already registered on the app, to avoid a phone-number mistake."}</Text>
+            <TextInput
+              value={userCode}
+              onChangeText={(text) => setUserCode(text.toUpperCase().slice(0, 24))}
+              onFocus={() => setFocused("userCode")}
+              onBlur={() => setFocused(null)}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              placeholder={language === "ar" ? "مثال: U1024#" : "e.g. U1024#"}
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.inputMono, { backgroundColor: FIELD_BG, borderColor: focused === "userCode" ? ORANGE : FIELD_BORDER, borderWidth: focused === "userCode" ? 2 : 1, color: colors.foreground, writingDirection: "ltr", textAlign: "left" }]}
+            />
+            {verification && verification.state === "matched" ? (
+              <View style={[styles.verifyBadge, { backgroundColor: colors.success + "14", borderColor: colors.success + "55", flexDirection: row }]}>
+                <MaterialIcons name="verified" size={15} color={colors.success} />
+                <Text style={{ color: colors.success, fontSize: 11.5, fontWeight: "900", flex: 1 }}>{language === "ar" ? "✓ تم التحقق: الحساب مطابق" : "✓ Verified: account matched"}</Text>
+              </View>
+            ) : null}
+            {verification && verification.state !== "matched" ? (
+              <View style={[styles.verifyBadge, { backgroundColor: colors.error + "12", borderColor: colors.error + "55", flexDirection: row }]}>
+                <MaterialIcons name={verification.state === "unknown" ? "help-outline" : "error-outline"} size={15} color={colors.error} />
+                <Text style={{ color: colors.error, fontSize: 11.5, fontWeight: "800", flex: 1 }}>{verification.state === "unknown" ? (language === "ar" ? "لا يوجد حساب مسجل بهذا المعرّف" : "No registered account with this user ID") : (language === "ar" ? "رقم الهاتف لا يتطابق مع هذا المعرّف" : "The phone number does not match this user ID")}</Text>
               </View>
             ) : null}
 
@@ -177,14 +207,12 @@ const styles = StyleSheet.create({
   close: { width: 35, height: 35, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   label: { fontSize: 12.5, fontWeight: "800", marginTop: 13 },
   input: { minHeight: 48, borderRadius: 13, paddingHorizontal: 12, marginTop: 10 },
+  inputMono: { fontFamily: "monospace" },
   phoneRow: { minHeight: 48, borderRadius: 13, marginTop: 10, flexDirection: "row", alignItems: "center", overflow: "hidden" },
   prefixPill: { backgroundColor: "#1E293B", paddingHorizontal: 13, alignSelf: "stretch", justifyContent: "center", borderRightWidth: 1, borderRightColor: "rgba(255, 255, 255, 0.10)" },
   prefixText: { color: "#94A3B8", fontWeight: "900", fontSize: 14, writingDirection: "ltr" },
   phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, fontFamily: "monospace", color: "#FFFFFF", writingDirection: "ltr", textAlign: "left" },
-  linkCard: { borderRadius: 16, borderWidth: 1, padding: 13, marginTop: 12, alignItems: "center" },
-  linkHead: { alignItems: "center", gap: 6 },
-  linkCode: { fontSize: 26, fontWeight: "900", letterSpacing: 3, fontFamily: "monospace", marginVertical: 9, writingDirection: "ltr" },
-  copyButton: { minHeight: 34, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 14, marginTop: 3 },
+  verifyBadge: { minHeight: 34, borderRadius: 11, borderWidth: 1, alignItems: "center", gap: 7, paddingHorizontal: 11, paddingVertical: 8, marginTop: 9 },
   roleRow: { gap: 8, marginTop: 8 },
   roleChip: { flex: 1, minHeight: 48, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, paddingHorizontal: 6 },
   permsHead: { minHeight: 46, borderRadius: 12, borderWidth: 1, alignItems: "center", gap: 9, paddingHorizontal: 12, marginTop: 12 },

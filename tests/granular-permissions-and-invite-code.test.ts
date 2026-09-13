@@ -54,15 +54,15 @@ describe("granular permissions engine (محرك الصلاحيات التفصي�
 });
 
 describe("granular permissions UI (واجهة الصلاحيات التفصيلية)", () => {
-  it("AddUserModal يعرض حقولًا عالية التباين + هاتف LTR ببادئة دولة + رمز ربط قابل للنسخ", () => {
+  it("AddUserModal يعرض حقولًا عالية التباين + هاتف LTR ببادئة دولة + تحقق اختياري من معرّف المستخدم", () => {
     expect(addUserModal).toContain('borderColor: focused === "name" ? ORANGE : FIELD_BORDER');
     expect(addUserModal).toContain("#F97316");
     expect(addUserModal).toContain('"#334155"');
     expect(addUserModal).toContain('borderColor: focused === "phone" ? ORANGE : FIELD_BORDER');
     expect(addUserModal).toContain("+962");
     expect(addUserModal).toContain('writingDirection: "ltr"');
-    expect(addUserModal).toContain("رمز الدعوة والربط");
-    expect(addUserModal).toContain("نسخ الرمز");
+    expect(addUserModal).toContain("المعرّف الشخصي للمستخدم (اختياري للتأكيد)");
+    expect(addUserModal).toContain("تم التحقق");
     expect(addUserModal).toContain("حارس / شفت");
   });
 
@@ -77,11 +77,12 @@ describe("granular permissions UI (واجهة الصلاحيات التفصيل�
     }
   });
 
-  it("user-management يخزّن رمز الربط ويعرضه بنسخ من بطاقات الفريق والمنتسبين", () => {
+  it("user-management يخزّن رمز الربط ويتيح نسخه من بطاقات الفريق والمنتسبين", () => {
     expect(userMgmt).toContain("inviteCode");
     expect(userMgmt).toContain("inviteCode: inviteCode ?? undefined");
     expect(userMgmt).toContain("buildInviteCode(phone)");
-    expect(userMgmt).toContain("buildInviteCode(member.phone)");
+    expect(userMgmt).toContain("buildInviteCode(entry.phone)");
+    expect(userMgmt).toContain("نسخ رابط الدعوة");
     expect(staffDirectory).toContain("inviteCode?: string");
   });
 

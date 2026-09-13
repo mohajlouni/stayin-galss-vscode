@@ -28,11 +28,11 @@ describe("claim staff account (تفعيل حساب التطبيق للمنتسب
 });
 
 describe("user management on-book section (قسم المنتسبين الميدانيين)", () => {
-  it("يربط زر التفعيل بمسار المطالبة محملًا بالهاتف والمعرّف", () => {
-    expect(userMgmt).toContain("المنتسبون الميدانيون (على الكتاب)");
+  it("يربط زر التفعيل بمسار المطالبة محملًا بالهاتف والمعرّف ضمن قائمة فريق العمل الموحدة", () => {
+    expect(userMgmt).toContain("بانتظار تفعيل التطبيق");
     expect(userMgmt).toContain("تفعيل حساب التطبيق");
-    expect(userMgmt).toContain("router.push(`/auth/claim-staff-account?phone=${encodeURIComponent(member.phone)}&uid=${encodeURIComponent(member.uid)}` as never)");
-    expect(userMgmt).toContain("تطبيق مفعّل");
+    expect(userMgmt).toContain("router.push(`/auth/claim-staff-account?phone=${encodeURIComponent(entry.phone)}&uid=${encodeURIComponent(entry.uid)}` as never)");
+    expect(userMgmt).toContain("نشط على التطبيق");
   });
 
   it("يفتح نافذة إضافة العضو بنمط منتسب على الكتاب", () => {

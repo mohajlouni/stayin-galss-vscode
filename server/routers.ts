@@ -246,8 +246,15 @@ export const appRouter = router({
       if (summary.member.role !== "owner" && input.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can invite an operational manager" });
       const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-      const invitationId = await db.createWorkspaceInvitation({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
-      return { invitationId, pin, expiresAt };
+      return db.addWorkspaceStaff({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
+    }),
+    refreshInvitationCode: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32), employeeName: z.string().trim().min(2).max(255), role: workspaceInviteRoleSchema, permissions: workspacePermissionsSchema })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      if (summary.member.role !== "owner" && input.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can invite an operational manager" });
+      const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      return db.addWorkspaceStaff({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
     }),
     updateMemberPermissions: protectedProcedure.input(z.object({ memberId: z.number().int().positive(), permissions: workspacePermissionsSchema })).mutation(async ({ ctx, input }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);

@@ -32,7 +32,7 @@ describe("workspace roles and invitations", () => {
 
   it("offers the owner detailed invitation controls and uses granular permissions in the app", () => {
     expect(management).toContain("inviteFromAddModal");
-    expect(management).toContain("تفعيل دعوة الموظف");
+    expect(management).toContain("محور المنشأة — سجّل الدخول");
     expect(management).toContain("تخصيص الصلاحيات");
     expect(management).toContain("updateMemberPermissions");
     expect(routers).toContain("workspacePermissionsSchema");

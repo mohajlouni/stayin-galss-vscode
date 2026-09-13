@@ -1,8 +1,8 @@
 import { nextCodeForRole, type UserIdentityRole } from "@/lib/user-code";
 
-/** المسار الثاني للهوية (Track B): موظف/حارس ميداني على الكتاب محليًا بدون حساب تطبيق.
- *  يُخزَّن في ذاكرة الجهاز (إعدادات موثقة محليًا) يديره المالك، ويمكنه لاحقًا
- *  تفعيل حسابه عبر /auth/claim-staff-account فيرتفع إلى مستخدم تطبيق (Track A).
+/** مسار الهوية المحلي (دفتر العهدة): موظف/حارس ميداني يُسجَّل على كتاب العهدة
+ *  بالجهاز ويُدار بإشراف المالك. كل منتسب يصحبه دعوة خادمية (رمز 6 أرقام)؛
+ *  وعند قبول الموظف لدعوته يُرفع إلى عضو نشط في stayInWorkspaceMembers.
  */
 
 export type OnbookStaffRole = "staff" | "guard";
@@ -13,12 +13,7 @@ export type OnbookStaff = {
   phone: string;
   role: OnbookStaffRole;
   email?: string;
-  isAppUser: boolean;
   createdAt?: string;
-  /** حساب التطبيق المرتبط (auth_uid) بعد تفعيل المنتسب عبر رمز التحقق. */
-  authUid?: string;
-  /** رمز الدعوة والربط المكوّن من 6 أرقام (491-820) الذي يقرؤه المالك للموظف للمطابقة عند تفعيل الحساب. */
-  inviteCode?: string;
 };
 
 export const ONBOOK_ROLE_TO_IDENTITY: Record<OnbookStaffRole, Exclude<UserIdentityRole, "internal">> = {
@@ -54,13 +49,6 @@ export function findOnbookByPhone(staff: ReadonlyArray<OnbookStaff>, phone: stri
   const key = phoneKey(phone);
   if (!key) return undefined;
   return staff.find((entry) => phoneKey(entry.phone) === key);
-}
-
-/** صلاحية فريدة مضبوطة: يطابق المنتسب فقط عندما يتطابق الهاتف والمعرّف معًا (لا أحدهما فقط). */
-export function claimMatches(entry: OnbookStaff, phone: string | null | undefined, uid: string | null | undefined): boolean {
-  const phoneMatch = Boolean(phoneKey(phone)) && phoneKey(entry.phone) === phoneKey(phone);
-  const uidMatch = Boolean(normalizeUid(uid)) && normalizeUid(entry.uid) === normalizeUid(uid);
-  return phoneMatch && uidMatch;
 }
 
 export function hasDuplicatePhone(knownMemberPhones: ReadonlyArray<string | null | undefined>, existingStaff: ReadonlyArray<OnbookStaff>, phone: string | null | undefined, excludeUid?: string): boolean {
@@ -101,10 +89,7 @@ export function normalizeOnbookStaff(value: unknown): OnbookStaff[] {
       phone,
       role,
       email: typeof item.email === "string" && item.email.trim() ? item.email.trim().slice(0, 120) : undefined,
-      isAppUser: item.isAppUser === true,
       createdAt: typeof item.createdAt === "string" ? item.createdAt.slice(0, 40) : undefined,
-      ...(typeof item.authUid === "string" && item.authUid.trim() ? { authUid: item.authUid.trim().slice(0, 80) } : {}),
-      ...(typeof item.inviteCode === "string" && /^\d{3}-\d{3}$/.test(item.inviteCode.trim()) ? { inviteCode: item.inviteCode.trim() } : {}),
     });
   }
   return out;

@@ -200,6 +200,25 @@ export async function ensureAlwaysPromptColumn(): Promise<void> {
   }
 }
 
+/** تمديد جدول أعضاء المنشأة لدعم الانضمام المنتظر (idempotent): سمة "pending"
+ *  وفتح عمود userId لأنه يصبح فارغًا لأي عضو أضافه المالك ولم ينضم للتطبيق بعد. */
+export async function ensureMemberPendingSupport(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.execute(sql`ALTER TABLE stayInWorkspaceMembers MODIFY COLUMN status enum('active','pending','disabled') NOT NULL DEFAULT 'active'`);
+    console.log("[Database] Extended stayInWorkspaceMembers status enum with 'pending'");
+  } catch (error) {
+    console.warn("[Database] Could not extend stayInWorkspaceMembers status enum:", error);
+  }
+  try {
+    await db.execute(sql`ALTER TABLE stayInWorkspaceMembers MODIFY COLUMN userId int NULL`);
+    console.log("[Database] Opened stayInWorkspaceMembers.userId for pending rows");
+  } catch (error) {
+    console.warn("[Database] Could not open stayInWorkspaceMembers.userId:", error);
+  }
+}
+
 /** حفظ تفضيل "اعرض شاشة اختيار المنشآت دائماً عند تسجيل الدخول" للمستخدم الحالي (idempotent). */
 export async function setWorkspaceSelectionPreference(userId: number, enabled: boolean): Promise<void> {
   const db = await getDb();
@@ -232,6 +251,7 @@ export async function ensureUserCodes(): Promise<void> {
     const memberships = await db.select({ userId: workspaceMembers.userId, role: workspaceMembers.role }).from(workspaceMembers);
     const rolesByUser = new Map<number, Set<string>>();
     for (const membership of memberships) {
+      if (membership.userId === null) continue;
       const roles = rolesByUser.get(membership.userId) ?? new Set<string>();
       roles.add(membership.role);
       rolesByUser.set(membership.userId, roles);
@@ -362,10 +382,12 @@ export function isImmutableRootAccount(user: { openId?: string | null; email?: s
   return matchesSuperAdminIdentity({ openId: user.openId, email: user.email, phone: user.phone }, ENV.ownerOpenId);
 }
 
-/** Does a given user-id belong to the immune root account? */
-export async function isImmutableRootUserId(userId: number): Promise<boolean> {
+/** Does a given user-id belong to the immune root account? Pending members
+ *  (userId null) have no linked account and are never treated as the root. */
+export async function isImmutableRootUserId(userId: number | null): Promise<boolean> {
   const database = await getDb();
   if (!database) return false;
+  if (userId === null) return false;
   const row = (await database.select({ openId: users.openId, email: users.email, phone: users.phone, userCode: users.userCode, role: users.role }).from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!row) return false;
   return isImmutableRootAccount(row);
@@ -1211,8 +1233,9 @@ export async function listWorkspaceMembers(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const members = await database.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
-  const userCodes = new Map((await database.select({ id: users.id, userCode: users.userCode }).from(users).where(inArray(users.id, members.map((m) => m.userId)))).map((u) => [u.id, u.userCode ?? null]));
-  return members.map((m) => ({ ...withPermissions(m), userCode: userCodes.get(m.userId) ?? null }));
+  const linkedUserIds = members.map((m) => m.userId).filter((id): id is number => id !== null);
+  const userCodes = new Map((linkedUserIds.length ? await database.select({ id: users.id, userCode: users.userCode }).from(users).where(inArray(users.id, linkedUserIds)) : []).map((u) => [u.id, u.userCode ?? null]));
+  return members.map((m) => ({ ...withPermissions(m), userCode: m.userId !== null ? (userCodes.get(m.userId) ?? null) : null }));
 }
 
 export async function listWorkspaceCollectionRecipients(workspaceId: number) {
@@ -1265,16 +1288,53 @@ export async function updateWorkspaceInvitation(input: { workspaceId: number; in
   return { updated: true as const };
 }
 
+/** ينشئ أو يحدّث صف عضو المنشأة (pending إن لم يوجد) ويصكّ رمز دعوة جديدًا
+ *  صالحًا لرابط/نسخ الدعوة، مع إبطال الدعوات المعلقة السابقة لنفس الهاتف حتى
+ *  يبقى رمز واحد صالح لكل رقم. يُستدعى من إضافة العضو ومن "نسخ كود الدعوة". */
+export async function addWorkspaceStaff(input: { workspaceId: number; employeeName: string; phone: string; pin: string; createdByUserId: number; role?: Exclude<WorkspaceRole, "owner">; permissions: WorkspacePermissions; expiresAt: Date }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const role = input.role ?? "staff";
+  const permissions = JSON.stringify(input.permissions);
+  const existing = (await database.select({ id: workspaceMembers.id, displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.phone, input.phone), ne(workspaceMembers.role, "owner"))).limit(1))[0];
+  let memberId: number;
+  if (existing) {
+    await database.update(workspaceMembers).set({ displayName: input.employeeName, role, permissions }).where(eq(workspaceMembers.id, existing.id));
+    memberId = existing.id;
+  } else {
+    const inserted = await database.insert(workspaceMembers).values({ workspaceId: input.workspaceId, userId: null, displayName: input.employeeName, phone: input.phone, role, permissions, status: "pending" });
+    memberId = Number(inserted[0].insertId);
+  }
+  await database.update(workspaceInvitations).set({ revokedAt: new Date() }).where(and(eq(workspaceInvitations.workspaceId, input.workspaceId), eq(workspaceInvitations.phone, input.phone), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt)));
+  const invitation = await database.insert(workspaceInvitations).values({ workspaceId: input.workspaceId, employeeName: input.employeeName, phone: input.phone, pinHash: pinHash(input.pin), createdByUserId: input.createdByUserId, role, permissions, expiresAt: input.expiresAt });
+  const invitationId = Number(invitation[0].insertId);
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.createdByUserId, action: existing ? "employee-re-invited" : "employee-invited", subject: input.employeeName, details: `دعوة موظف: ${input.phone}` });
+  return { memberId, invitationId, pin: input.pin, expiresAt: input.expiresAt };
+}
+
 export async function acceptWorkspaceInvitation(input: { userId: number; phone: string; pin: string }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const invitation = (await database.select().from(workspaceInvitations).where(and(eq(workspaceInvitations.phone, input.phone), eq(workspaceInvitations.pinHash, pinHash(input.pin)), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt), gt(workspaceInvitations.expiresAt, new Date()))).orderBy(desc(workspaceInvitations.createdAt)).limit(1))[0];
   if (!invitation) throw new Error("Invitation is invalid or expired");
-  await database.insert(workspaceMembers).values({ workspaceId: invitation.workspaceId, userId: input.userId, displayName: invitation.employeeName, phone: invitation.phone, role: invitation.role, permissions: JSON.stringify(parseStoredPermissions(invitation.permissions, invitation.role)), status: "active" });
+
+  // ربط صف العضو الذي أنشأه المالك مسبقًا (pending / أي صف سابق بنفس الهاتف)
+  // بدلًا من إنشاء صف جديد — فلا تكرارات، ويُربط userId فور قبول الدعوة.
+  const permissions = JSON.stringify(parseStoredPermissions(invitation.permissions, invitation.role));
+  const existing = (await database.select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.phone, invitation.phone), ne(workspaceMembers.role, "owner"))).limit(1))[0];
+  let member: (typeof workspaceMembers.$inferSelect);
+  if (existing) {
+    await database.update(workspaceMembers).set({ userId: input.userId, displayName: invitation.employeeName, role: invitation.role, permissions, status: "active" }).where(eq(workspaceMembers.id, existing.id));
+    member = (await database.select().from(workspaceMembers).where(eq(workspaceMembers.id, existing.id)).limit(1))[0];
+  } else {
+    const inserted = await database.insert(workspaceMembers).values({ workspaceId: invitation.workspaceId, userId: input.userId, displayName: invitation.employeeName, phone: invitation.phone, role: invitation.role, permissions, status: "active" });
+    member = (await database.select().from(workspaceMembers).where(eq(workspaceMembers.id, Number(inserted[0].insertId))).limit(1))[0];
+  }
   await database.update(workspaceInvitations).set({ usedAt: new Date() }).where(eq(workspaceInvitations.id, invitation.id));
   await database.insert(workspaceActivity).values({ workspaceId: invitation.workspaceId, actorUserId: input.userId, action: "employee-joined", subject: invitation.employeeName, details: invitation.phone });
   await setActiveWorkspace(input.userId, invitation.workspaceId);
-  return getActiveWorkspaceMember(input.userId);
+  if (!member) throw new Error("Invitation is invalid or expired");
+  return withPermissions(member);
 }
 
 /**
@@ -1340,7 +1400,7 @@ export async function deleteWorkspaceStaffByPhone(input: { workspaceId: number; 
     await database.update(workspaceInvitations).set({ revokedAt: new Date() }).where(and(eq(workspaceInvitations.id, invitation.id), eq(workspaceInvitations.workspaceId, input.workspaceId)));
     await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "invitation-revoked", subject: invitation.employeeName, details: `حذف نهائي بالهاتف: ${input.phone}` });
   }
-  const activeMembers = await database.select({ id: workspaceMembers.id, displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.phone, input.phone), eq(workspaceMembers.status, "active"), ne(workspaceMembers.role, "owner")));
+  const activeMembers = await database.select({ id: workspaceMembers.id, displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.phone, input.phone), inArray(workspaceMembers.status, ["active", "pending"]), ne(workspaceMembers.role, "owner")));
   for (const member of activeMembers) {
     await database.update(workspaceMembers).set({ status: "disabled" }).where(and(eq(workspaceMembers.id, member.id), eq(workspaceMembers.workspaceId, input.workspaceId)));
     await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "employee-removed", subject: member.displayName, details: `حذف نهائي بالهاتف: ${input.phone}` });

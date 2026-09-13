@@ -7,7 +7,7 @@ import { registerOAuthRoutes, registerSupabaseAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { ensureAlwaysPromptColumn, ensureGlobalFeatureFlagsTable, ensureSessionsTable, ensureSuperAdminAuditTable, ensureSystemErrorLogsTable, ensureUserCodeColumn, ensureUserCodes, ensureWorkspaceCodes, ensureWorkspaceFeatureSettingsTable, pruneExpiredSessions, seedDemoData } from "../db";
+import { ensureAlwaysPromptColumn, ensureGlobalFeatureFlagsTable, ensureMemberPendingSupport, ensureSessionsTable, ensureSuperAdminAuditTable, ensureSystemErrorLogsTable, ensureUserCodeColumn, ensureUserCodes, ensureWorkspaceCodes, ensureWorkspaceFeatureSettingsTable, pruneExpiredSessions, seedDemoData } from "../db";
 import { isAllowedWebOrigin } from "./security";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -97,6 +97,7 @@ async function startServer() {
   await ensureWorkspaceFeatureSettingsTable();
   await ensureUserCodeColumn();
   await ensureAlwaysPromptColumn();
+  await ensureMemberPendingSupport();
   await ensureUserCodes();
   await ensureWorkspaceCodes();
   await pruneExpiredSessions();

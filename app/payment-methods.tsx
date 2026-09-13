@@ -9,7 +9,6 @@ import { RipplePressable } from "@/components/ripple-pressable";
 import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
 import { useColors } from "@/hooks/use-colors";
-import { buildInviteCode } from "@/lib/invite-code";
 import { normalizeOwnerTreasuryAccounts, normalizeStaffFloatAccounts, type OwnerTreasuryAccount, type OwnerTreasuryKind, type StaffFloatAccount, type StaffFloatChannel, ownerTreasuryAccounts } from "@/lib/booking-model";
 import { useBookings } from "@/lib/booking-store";
 import { appendPaymentMethodAudit, loadPaymentMethodAudit, PAYMENT_METHOD_AUDIT_LABELS, type PaymentMethodAuditAction, type PaymentMethodAuditEntry } from "@/lib/payment-audit";
@@ -264,7 +263,7 @@ const membersData = overview.data?.members ?? [];
 const issue = validateOnbookEntry({ name: label, phone: floatDraft.phone }, membersData.map((item) => item.phone), onbookStaff);
 if (issue) { Alert.alert(language === "ar" ? "بيانات المنتسب غير مكتملة" : "On-book staff data incomplete", language === "ar" ? "أعد اختيار المسؤول من القائمة، أو أضِفه من إدارة المستخدمين ثم أعد فتح النموذج." : "Re-pick the person from the list, or add them in User Management and reopen the form."); return; }
 const uid = suggestOnbookUid(floatDraft.entity, [...membersData.map((item) => item.userCode).filter((code): code is string => Boolean(code)), ...onbookStaff.map((item) => item.uid)]);
-const entry: OnbookStaff = { uid, name: label, phone: floatDraft.phone.trim(), role: floatDraft.entity, isAppUser: false, createdAt: new Date().toISOString() };
+const entry: OnbookStaff = { uid, name: label, phone: floatDraft.phone.trim(), role: floatDraft.entity, createdAt: new Date().toISOString() };
 await commit([...onbookStaff, entry]);
 memberName = entry.name; memberUid = entry.uid;
 }
@@ -611,14 +610,13 @@ const missingIdLabel = () => language === "ar" ? "⚠️ بدون معرف" : "�
       try {
         await updateMemberPermissions.mutateAsync({ memberId: byPhone.id, permissions });
         await overview.refetch();
-        applyPersonChoice({ key: "member:" + byPhone.userId, kind: "member", userId: byPhone.userId, icon: "person", name: byPhone.displayName, phone: byPhone.phone ?? "", userCode: byPhone.userCode, roleLabel: memberRoleLabel(byPhone.role, language) });
+        applyPersonChoice({ key: "member:" + byPhone.userId, kind: "member", userId: byPhone.userId as number, icon: "person", name: byPhone.displayName, phone: byPhone.phone ?? "", userCode: byPhone.userCode, roleLabel: memberRoleLabel(byPhone.role, language) });
         Alert.alert(language === "ar" ? "✓ تم ربط العضو" : "✓ Member linked", language === "ar" ? "رُبط العضو بالمنشأة واختير افتراضيًا لنقطة التحصيل." : "Member linked to the workspace and pre-selected for the collection point.");
         return null;
       } catch {
         return language === "ar" ? "تعذر ربط العضو المسجل. حاول مرة أخرى." : "Could not link the registered member. Try again.";
       }
     }
-    const inviteCode = buildInviteCode(phone);
     const existingOnbook = findOnbookByPhone(onbookStaff, phone);
     let newUid = "";
     if (!existingOnbook) {
@@ -627,12 +625,12 @@ const missingIdLabel = () => language === "ar" ? "⚠️ بدون معرف" : "�
       if (issue === "name") return language === "ar" ? "أدخل اسم العضو (حرفان على الأقل)." : "Enter the member's name (at least 2 characters).";
       if (issue === "duplicate-phone") return language === "ar" ? "رقم الهاتف مستخدم مسبقًا في التطبيق أو سجل الفريق." : "This phone is already used by an app member or another team record.";
       const uid = suggestOnbookUid(role === "guard" ? "guard" : "staff", [...membersData.map((item) => item.userCode).filter((code): code is string => Boolean(code)), ...onbookStaff.map((item) => item.uid)]);
-      const entry: OnbookStaff = { uid, name: name.trim(), phone: phone.trim(), role: role === "guard" ? "guard" : "staff", inviteCode: inviteCode ?? undefined, isAppUser: false, createdAt: new Date().toISOString() };
+      const entry: OnbookStaff = { uid, name: name.trim(), phone: phone.trim(), role: role === "guard" ? "guard" : "staff", createdAt: new Date().toISOString() };
       newUid = uid;
       await commit([...onbookStaff, entry]);
     } else {
       newUid = existingOnbook.uid;
-      await commit(onbookStaff.map((item) => item.uid === existingOnbook.uid ? { ...item, name: name.trim(), role: role === "guard" ? "guard" : "staff", inviteCode: item.inviteCode ?? inviteCode ?? undefined } : item));
+      await commit(onbookStaff.map((item) => item.uid === existingOnbook.uid ? { ...item, name: name.trim(), role: role === "guard" ? "guard" : "staff" } : item));
     }
     try {
       await inviteEmployee.mutateAsync({ employeeName: name.trim(), phone: phone.trim(), role: inviteRole, permissions });

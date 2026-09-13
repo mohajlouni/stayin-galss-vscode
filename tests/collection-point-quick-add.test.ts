@@ -33,7 +33,7 @@ describe("نقطة التحصيل: تعبئة فريق المسؤولين وال
     expect(payment).toContain("updateMemberPermissions.mutateAsync({ memberId: byPhone.id, permissions })");
     expect(payment).toContain("suggestOnbookUid(");
     expect(payment).toContain("validateOnbookEntry({ name, phone }");
-    expect(payment).toContain("buildInviteCode(phone)");
+    expect(payment).toContain("inviteEmployee.mutateAsync({ employeeName: name.trim(), phone: phone.trim(), role: inviteRole, permissions })");
     expect(payment).toContain("applyPersonChoice({ key: \"onbook:\" + newUid");
     expect(payment).toContain("commit([...onbookStaff, entry])");
   });

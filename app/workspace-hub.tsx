@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Redirect, router, usePathname } from "expo-router";
-import { useState } from "react";
+import { Redirect, router, useLocalSearchParams, usePathname } from "expo-router";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
@@ -38,6 +38,7 @@ export default function WorkspaceHubScreen() {
   const selectWorkspace = trpc.workspace.select.useMutation();
   const createWorkspace = trpc.workspace.create.useMutation();
   const acceptCode = trpc.workspace.acceptInvitationCode.useMutation();
+  const acceptInvitation = trpc.workspace.acceptInvitation.useMutation();
   const setAlwaysPrompt = trpc.workspace.setAlwaysPrompt.useMutation();
 
   const [createVisible, setCreateVisible] = useState(false);
@@ -48,9 +49,20 @@ export default function WorkspaceHubScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
+  const [invitePhone, setInvitePhone] = useState("");
   const [codeBusy, setCodeBusy] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
   const [switchBusy, setSwitchBusy] = useState<number | null>(null);
+  const searchParams = useLocalSearchParams<{ phone?: string; code?: string }>();
+
+  useEffect(() => {
+    let changed = false;
+    const phone = typeof searchParams.phone === "string" ? searchParams.phone.trim() : "";
+    const code = typeof searchParams.code === "string" ? searchParams.code.trim() : "";
+    if (phone) { setInvitePhone(phone.replace(/[^\d]/g, "").slice(0, 20)); changed = true; }
+    if (code) { setInviteCode(code.replace(/\D/g, "").slice(0, 6)); changed = true; }
+    if (changed) setCodeError(null);
+  }, [searchParams?.phone, searchParams?.code]);
 
   const memberships = routing.data?.memberships ?? [];
   const workspaceCount = memberships.length;
@@ -151,12 +163,17 @@ export default function WorkspaceHubScreen() {
     setCodeBusy(true);
     setCodeError(null);
     try {
-      await acceptCode.mutateAsync({ code });
+      if (invitePhone.trim()) {
+        await acceptInvitation.mutateAsync({ phone: invitePhone.trim(), pin: code });
+      } else {
+        await acceptCode.mutateAsync({ code });
+      }
       setInviteCode("");
+      setInvitePhone("");
       await utils.workspace.invalidate();
       router.replace("/(tabs)");
     } catch {
-      setCodeError(language === "ar" ? "رمز الدعوة غير صالح أو منتهي الصلاحية. تأكد من الكود المرسل من المالك." : "The invite code is invalid or has expired. Check the code sent by the owner.");
+      setCodeError(language === "ar" ? "رمز الدعوة غير صالح أو منتهي الصلاحية. تأكد من الكود والهاتف المرسلين من المالك." : "The invite code is invalid or has expired. Check the code and phone sent by the owner.");
     } finally {
       setCodeBusy(false);
     }
@@ -226,7 +243,8 @@ export default function WorkspaceHubScreen() {
         <View style={[styles.optionCard, { backgroundColor: colors.success + "10", borderColor: colors.success + "55" }]}>
           <View style={[styles.optionIcon, { backgroundColor: colors.success + "18" }]}><MaterialIcons name="badge" size={23} color={colors.success} /></View>
           <Text style={[styles.optionTitle, { color: colors.success, textAlign: align }]}>{language === "ar" ? "موظف / حارس — كود دعوة" : "Staff / guard — invite code"}</Text>
-          <Text style={[styles.optionDetail, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "أدخل الرمز المكوّن من 6 أرقام المرسل من المالك." : "Enter the 6-digit code sent by the owner."}</Text>
+          <Text style={[styles.optionDetail, { color: colors.muted, textAlign: align }]}>{language === "ar" ? "أدخل الرمز المكوّن من 6 أرقام المرسل من المالك (والهاتف إن أُرسل الربط به)." : "Enter the 6-digit code sent by the owner (plus the phone when the link carried it)."}</Text>
+          <TextInput value={invitePhone} onChangeText={(value) => { setInvitePhone(value.replace(/[^\d]/g, "").slice(0, 20)); setCodeError(null); }} placeholder={language === "ar" ? "رقم الهاتف المدعو (اختياري)" : "Invited phone (optional)"} keyboardType="phone-pad" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.surfaceMuted, textAlign: align, fontFamily: "monospace", writingDirection: "ltr" }]} accessibilityLabel={language === "ar" ? "رقم الهاتف المدعو" : "Invited phone"} />
           <TextInput value={inviteCode} onChangeText={(value) => { setInviteCode(value.replace(/[^\d]/g, "").slice(0, 6)); setCodeError(null); }} placeholder={language === "ar" ? "أدخل رمز الدعوة" : "Invite code"} keyboardType="number-pad" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground, borderColor: codeError ? colors.error : colors.border, backgroundColor: colors.surfaceMuted, textAlign: align }]} accessibilityLabel={language === "ar" ? "أدخل رمز الدعوة" : "Enter invite code"} />
           {codeError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, { backgroundColor: colors.error + "12", flexDirection: row }]}><MaterialIcons name="error-outline" size={15} color={colors.error} /><Text style={[styles.flex, { color: colors.error, fontSize: 10, fontWeight: "800", textAlign: align }]}>{codeError}</Text></View> : null}
           <Pressable disabled={codeBusy} onPress={() => void activate()} style={({ pressed }) => [styles.optionPrimary, { backgroundColor: colors.success, opacity: pressed || codeBusy ? 0.66 : 1, flexDirection: row }]}>

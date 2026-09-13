@@ -32,20 +32,19 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
     expect(userManagementSource).toContain("rolePill");
     expect(userManagementSource).toContain("entry.roleBadge");
     expect(userManagementSource).toContain("\"✏️ تعديل\"");
-    expect(userManagementSource).toContain("\"📋 نسخ الرابط\"");
+    expect(userManagementSource).toContain("\"📋 نسخ كود الدعوة\"");
     expect(userManagementSource).toContain("\"🗑️ حذف\"");
     expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"حذف العضو\" : \"Delete member\"}");
   });
 
   it("routes card actions through explicit named handlers", () => {
-    expect(userManagementSource).toContain("const handleCopyInvite = (entry: UnifiedEntry) => {");
+    expect(userManagementSource).toContain("const handleCopyInvite = async (entry: UnifiedEntry) => {");
     expect(userManagementSource).toContain("const handleEditStaff = (entry: UnifiedEntry) => {");
     expect(userManagementSource).toContain("const handleDeleteStaff = (entry: UnifiedEntry) => {");
-    expect(userManagementSource).toContain("const handleRevokeInvitation = (entry: UnifiedEntry) => {");
-    expect(userManagementSource).toContain("onCopyLink={entry.inviteCode ? () => handleCopyInvite(entry) : undefined}");
+    expect(userManagementSource).toContain("onCopyLink={!entry.appActive ? () => void handleCopyInvite(entry) : undefined}");
+    expect(userManagementSource).toContain("onLongCopyLink={!entry.appActive ? () => void handleLongCopyInvite(entry) : undefined}");
     expect(userManagementSource).toContain("onEdit={entry.onEdit ? () => handleEditStaff(entry) : undefined}");
     expect(userManagementSource).toContain("onDelete={entry.onDelete ? () => handleDeleteStaff(entry) : undefined}");
-    expect(userManagementSource).toContain("onRevoke={entry.kind === \"invitation\" ? () => handleRevokeInvitation(entry) : undefined}");
   });
 
   it("opens an in-app dark confirmation dialog instead of the browser-native window.confirm", () => {
@@ -74,12 +73,14 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
     expect(userManagementSource).toContain("writingDirection: \"ltr\"");
   });
 
-  it("keeps the app-status and invite-link accessibility pins", () => {
-    expect(userManagementSource).toContain("\"نشط على التطبيق\"");
-    expect(userManagementSource).toContain("\"بانتظار تفعيل التطبيق\"");
-    expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"نسخ رابط الدعوة\" : \"Copy invite link\"}");
-    expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"تفعيل حساب التطبيق\" : \"Activate app account\"}");
-    expect(userManagementSource).not.toContain("رمزه برمجيًا مخصص (داخل نطاق مربعات الإدخال)");
+  it("keeps the app-status and invite-code accessibility pins", () => {
+    expect(userManagementSource).toContain("\"نشط\"");
+    expect(userManagementSource).toContain("\"بانتظار انضمام العضو\"");
+    expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"نسخ كود الدعوة\" : \"Copy invitation code\"}");
+    expect(userManagementSource).not.toContain("نسخ رابط الدعوة");
+    expect(userManagementSource).not.toContain("تفعيل حساب التطبيق");
+    expect(userManagementSource).not.toContain("نشط على التطبيق");
+    expect(userManagementSource).not.toContain("رمز برمجيًا مخصص (داخل نطاق مربعات الإدخال)");
   });
 
   it("keeps the LTR phone start-side placement", () => {
@@ -136,10 +137,14 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
     expect(routerSource).toContain("db.deleteWorkspaceStaffByPhone({ workspaceId: summary.member.workspaceId, phone: input.phone, actorUserId: ctx.user.id })");
   });
 
-  it("lets invited members be resent, revoked, and reactivated directly from the card", () => {
-    expect(userManagementSource).toContain("\"🔄 إعادة إرسال\"");
-    expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"إلغاء الدعوة\" : \"Revoke invitation\"}");
-    expect(userManagementSource).toContain("const revokeInvitation = async (entry: UnifiedEntry) => {");
+  it("lets invited members copy a fresh server PIN minted via refreshInvitationCode on demand", () => {
+    expect(userManagementSource).toContain("const refreshInvite = trpc.workspace.refreshInvitationCode.useMutation();");
+    expect(userManagementSource).toContain("const mintInviteCode = async (entry: UnifiedEntry): Promise<{ pin: string } | null> => {");
+    expect(userManagementSource).toContain("delayLongPress={500}");
+    expect(userManagementSource).toContain("\"📋 نسخ كود الدعوة\"");
+    expect(userManagementSource).not.toContain("إعادة إرسال");
+    expect(userManagementSource).not.toContain("إلغاء الدعوة");
+    expect(userManagementSource).not.toContain("const revokeInvitation =");
   });
 
   it("deletes a pending invitation from BOTH the backend and the local onbook record", () => {
@@ -170,7 +175,7 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
   });
 
   it("renders member cards as a plain container View so action buttons are not nested interactive elements", () => {
-    expect(userManagementSource).toContain("function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onEdit, onDelete, language, isRTL, colors }");
+    expect(userManagementSource).toContain("function MemberRow({ entry, copied, onCopyLink, onLongCopyLink, onEdit, onDelete, language, isRTL, colors }");
     expect(userManagementSource).toContain("<View style={[styles.member, { backgroundColor: colors.surface,");
     expect(userManagementSource).not.toContain("accessibilityRole=\"button\" disabled={!entry.onPress} onPress={entry.onPress}");
     expect(userManagementSource).not.toContain("onPress={entry.onPress}");
@@ -179,9 +184,9 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
   it("stops propagation on every per-member action button", () => {
     expect(userManagementSource).toContain("event?.stopPropagation?.(); onEdit();");
     expect(userManagementSource).toContain("event?.stopPropagation?.(); onCopyLink();");
-    expect(userManagementSource).toContain("event?.stopPropagation?.(); onResend();");
-    expect(userManagementSource).toContain("event?.stopPropagation?.(); onRevoke();");
-    expect(userManagementSource).toContain("event?.stopPropagation?.(); entry.onActivate?.();");
+    expect(userManagementSource).toContain("event?.stopPropagation?.(); onLongCopyLink?.();");
     expect(userManagementSource).toContain("event?.stopPropagation?.(); onDelete();");
+    expect(userManagementSource).not.toContain("event?.stopPropagation?.(); onResend();");
+    expect(userManagementSource).not.toContain("entry.onActivate?.();");
   });
 });

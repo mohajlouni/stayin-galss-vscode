@@ -2,28 +2,29 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildInviteCode, matchesInviteCode, normalizeInviteCode } from "../lib/invite-code";
 import { GRANULAR_PERMISSIONS, OPERATIONAL_PERMISSION_COUNT, capabilitiesForPreset, capabilitiesForRole, capabilitiesToPermissions } from "../lib/permissions";
 import { GUEST_PERMISSIONS, MANAGER_PERMISSIONS, STAFF_PERMISSIONS } from "../shared/workspace-permissions";
 
 const addUserModal = readFileSync(resolve(process.cwd(), "components/users/AddUserModal.tsx"), "utf8");
 const permissionsLib = readFileSync(resolve(process.cwd(), "lib/permissions.ts"), "utf8");
 const userMgmt = readFileSync(resolve(process.cwd(), "app/user-management.tsx"), "utf8");
-const claim = readFileSync(resolve(process.cwd(), "app/auth/claim-staff-account.tsx"), "utf8");
+const routers = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
+const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
 const staffDirectory = readFileSync(resolve(process.cwd(), "lib/staff-directory.ts"), "utf8");
 
-describe("invite linking code (رمز الدعوة والربط)", () => {
-  it("يبني رمزًا ثابتًا من 6 أرقام (491-820) من رقم الهاتف مهما كانت صيغة الإدخال", () => {
-    const local = buildInviteCode("0791234567");
-    expect(local).toMatch(/^\d{3}-\d{3}$/);
-    expect(buildInviteCode("+962791234567")).toBe(local);
-    expect(buildInviteCode("0791234567")).toBe(local);
-    expect(normalizeInviteCode(local ?? "")).toHaveLength(6);
-    expect(matchesInviteCode("0791234567", buildInviteCode("0791234567"))).toBe(true);
-    expect(matchesInviteCode("0791234567", "000000")).toBe(false);
-    expect(matchesInviteCode("123", "111111")).toBe(false);
-    expect(buildInviteCode("0770000000")).not.toBe(local);
-    expect(buildInviteCode("12345")).toBeNull();
+describe("invitation pins (رمز دعوة خادمي 6 أرقام)", () => {
+  it("يولّد الخادم رمزًا من 6 أرقام بصيغة xxx-xxx بمدة صلاحية 15 دقيقة", () => {
+    expect(routers).toContain("randomInt(0, 1_000_000)");
+    expect(routers).toContain("15 * 60 * 1000");
+    expect(dbSource).toContain("const pinHash = (pin: string) =>");
+    expect(dbSource).toContain("pinHash: pinHash(input.pin)");
+  });
+
+  it("يضيف الدعوة/إعادة الإصدار عبر addWorkspaceStaff ويصدر رمزًا جديدًا عبر refreshInvitationCode", () => {
+    expect(routers).toContain("refreshInvitationCode");
+    expect(routers).toContain("addWorkspaceStaff");
+    expect(routers).toContain("workspaceInviteRoleSchema");
+    expect(routers).toContain("workspacePermissionsSchema");
   });
 });
 
@@ -86,19 +87,15 @@ describe("granular permissions UI (واجهة الصلاحيات التفصيل�
     }
   });
 
-  it("user-management يخزّن رمز الربط ويتيح نسخه من بطاقات الفريق والمنتسبين", () => {
-    expect(userMgmt).toContain("inviteCode");
-    expect(userMgmt).toContain("inviteCode: inviteCode ?? undefined");
-    expect(userMgmt).toContain("buildInviteCode(phone)");
-    expect(userMgmt).toContain("buildInviteCode(entry.phone)");
-    expect(userMgmt).toContain("نسخ رابط الدعوة");
-    expect(staffDirectory).toContain("inviteCode?: string");
-  });
-
-  it("verifies the linking code during claim (تفعيل الحساب مرتبط برمز الدعوة)", () => {
-    expect(claim).toContain("رمز الدعوة والربط (6 أرقام)");
-    expect(claim).toContain("matchesInviteCode(phone, code)");
-    expect(claim).toContain("buildInviteCode(matched?.phone)");
-    expect(claim).toContain('textAlign: "left", writingDirection: "ltr"');
+  it("user-management يخزّن رمز الدعوة الخادمي ويعرضه على بطاقات الفريق لنسخه (بدون buildInviteCode المحلي)", () => {
+    expect(userMgmt).toContain("mintInviteCode");
+    expect(userMgmt).toContain("refreshInvite");
+    expect(userMgmt).toContain("copyInviteLink");
+    expect(userMgmt).toContain("handleCopyInvite");
+    expect(userMgmt).toContain("handleLongCopyInvite");
+    expect(userMgmt).toContain("نسخ كود الدعوة");
+    expect(userMgmt).toContain("/workspace-hub?phone=");
+    expect(userMgmt).not.toContain("buildInviteCode(phone)");
+    expect(staffDirectory).not.toContain("inviteCode?: string");
   });
 });

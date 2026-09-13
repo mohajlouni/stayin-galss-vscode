@@ -11,15 +11,17 @@ describe("unified team directory (قائمة فريق العمل الموحدة)
   it("يدمج الأعضاء والمنتسبين والدعوات في قائمة واحدة تبدأ بأعضاء التطبيق", () => {
     expect(userMgmt).toContain("const unifiedTeam");
     expect(userMgmt).toContain('kind: "member"');
-    expect(userMgmt).toContain('entry.isAppUser ? "member" : "onbook"');
+    expect(userMgmt).toContain('kind: "onbook"');
     expect(userMgmt).toContain('kind: "invitation"');
+    expect(userMgmt).toContain("const appActive = member.status === \"active\";");
     expect(userMgmt).toContain("!entry.usedAt && !entry.revokedAt");
     expect(userMgmt).toContain("unifiedTeam.map((entry) => <MemberRow");
   });
 
   it("يعرض شارات حالة النشاط بدل التقسيم القديم (لا منتسبون على الكتاب ولا تطبيق مفعّل)", () => {
-    expect(userMgmt).toContain("نشط على التطبيق");
-    expect(userMgmt).toContain("بانتظار تفعيل التطبيق");
+    expect(userMgmt).toContain("\"نشط\"");
+    expect(userMgmt).toContain("\"بانتظار انضمام العضو\"");
+    expect(userMgmt).not.toContain("نشط على التطبيق");
     expect(userMgmt).not.toContain("تطبيق مفعّل");
     expect(userMgmt).not.toContain("المنتسبون الميدانيون (على الكتاب)");
     expect(userMgmt).not.toContain("generatedInvite");
@@ -27,14 +29,15 @@ describe("unified team directory (قائمة فريق العمل الموحدة)
     expect(userMgmt).not.toContain("رمز الربط (6 أرقام)");
   });
 
-  it("يوفر لأصحاب الدعوى المعلقة: نسخ الرابط + إعادة الإرسال + الإلغاء, وللمنتسب نسخة تفعيل التطبيق", () => {
-    expect(userMgmt).toContain("copyInviteLink");
-    expect(userMgmt).toContain("resendInvitation");
-    expect(userMgmt).toContain("revokeInvitation");
-    expect(userMgmt).toContain("نسخ رابط الدعوة");
-    expect(userMgmt).toContain("إعادة إرسال");
-    expect(userMgmt).toContain("تفعيل حساب التطبيق");
-    expect(userMgmt).toContain("router.push(`/auth/claim-staff-account?phone=${encodeURIComponent(entry.phone)}&uid=${encodeURIComponent(entry.uid)}` as never)");
+  it("يوفر لأصحاب الدعوى المعلقة: نسخ كود دعوة خادمي + رابط انضمام مباشر, بلا إعادة إرسال أو تفعيل محلي", () => {
+    expect(userMgmt).toContain("const mintInviteCode = async");
+    expect(userMgmt).toContain("trpc.workspace.refreshInvitationCode.useMutation()");
+    expect(userMgmt).toContain("const handleLongCopyInvite = async");
+    expect(userMgmt).toContain("نسخ كود الدعوة");
+    expect(userMgmt).toContain("/workspace-hub?phone=");
+    expect(userMgmt).not.toContain("إعادة إرسال");
+    expect(userMgmt).not.toContain("تفعيل حساب التطبيق");
+    expect(userMgmt).not.toContain("claim-staff-account");
   });
 
   it("المالك الأساسي محمي والنقر على الأعضاء يفتح تحرير الصلاحيات", () => {
@@ -84,10 +87,10 @@ describe("staff removal (إزالة عضو من فريق العمل)", () => {
     expect(routers).toContain("Primary owner is immutable");
   });
 
-  it("يعرض رسالة تأكيد بالإزالة ولا يسمح بحذف المالك الأساسي", () => {
-    expect(userMgmt).toContain("هل أنت متأكد من إزالة «");
-    expect(userMgmt).toContain("لن يتمكن من الوصول للعهد أو الحجوزات.");
-    expect(userMgmt).toContain("onDelete: owner ? undefined : () => confirmRemoveMember(member)");
+  it("يعرض رسالة تأكيد بالحذف ولا يسمح بمسح المالك الأساسي", () => {
+    expect(userMgmt).toContain("هل أنت متأكد من حذف هذا العضو؟ («");
+    expect(userMgmt).toContain("سيُحذف سجلُه المحلي وتُلغى الدعوة المعلقة على رقمه.");
+    expect(userMgmt).toContain("onDelete: owner ? undefined : () => confirmRemoveOnbook({ name: member.displayName, phone: member.phone ?? \"\" })");
   });
 
   it("يرشح الأعضاء المعطَّلين من القائمة الموحدة", () => {

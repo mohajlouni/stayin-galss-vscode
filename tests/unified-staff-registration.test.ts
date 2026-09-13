@@ -48,28 +48,32 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(claim).toContain("دعوة للانضمام إلى منشأة StayIn - إدارة الوحدات والعهد");
   });
 
-  it("نافذة الدفع: بحث موحد بالفريق بدون تبويبات أو رموز داخلية, وبطاقات مدمجة", () => {
+  it("نافذة الدفع: قائمة مسؤولين مباشرة بدون تبويبات أو رموز داخلية, وبطاقات مدمجة", () => {
     expect(payment).not.toContain("بحث في أعضاء التطبيق");
     expect(payment).not.toContain("المعرّف الميداني المقترح");
     expect(payment).not.toContain("مستخدم تطبيق (App)");
     expect(payment).not.toContain("منتسب على الكتاب (On-book)");
     expect(payment).not.toContain("معرف المستخدم #UID");
-    expect(payment).toContain("صاحب العهدة / نقطة التحصيل");
-    expect(payment).toContain("const [teamSearch, setTeamSearch]");
-    expect(payment).toContain("filteredTeam");
+    expect(payment).not.toContain("جهة الحساب");
+    expect(payment).toContain("اختيار المسؤول عن نقطة التحصيل");
+    expect(payment).toContain("const [teamPickerOpen, setTeamPickerOpen]");
+    expect(payment).toContain("const teamOptions");
+    expect(payment).toContain("تفعيل القنوات المتاحة لهذه النقطة");
+    expect(payment).toContain("الحد الأقصى للنقدية (سقف الكاش)");
     expect(payment).toContain("phoneKey(item.phone) === phoneKey(floatDraft.phone)");
     expect(payment).toContain("styles.compactChannelCard");
     expect(payment).toContain("styles.compactChannelAction");
     expect(payment).toContain("findOnbookByPhone(onbookStaff, floatDraft.phone)");
   });
 
-  it("يرتّب كيانات الحساب: حارس، موظف، ثم المالك/الخزينة المركزية", () => {
-    const guardIndex = payment.indexOf('{ id: "guard", icon: "security"');
-    const staffIndex = payment.indexOf('{ id: "staff", icon: "badge"');
-    const ownerIndex = payment.indexOf('{ id: "owner", icon: "account-balance"');
-    expect(guardIndex).toBeGreaterThan(0);
-    expect(staffIndex).toBeGreaterThan(guardIndex);
-    expect(ownerIndex).toBeGreaterThan(staffIndex);
-    expect(payment).toContain('ar: "المالك / الخزينة المركزية"');
+  it("يوفّر قائمة مسؤولين موحدة: المالك أولًا ثم أعضاء الفريق والمنتسبين", () => {
+    const ownerIndex = payment.indexOf('{ key: "owner", kind: "owner"');
+    const memberIndex = payment.indexOf('"member:" + member.userId');
+    const onbookIndex = payment.indexOf('"onbook:" + entry.uid');
+    expect(ownerIndex).toBeGreaterThan(0);
+    expect(memberIndex).toBeGreaterThan(ownerIndex);
+    expect(onbookIndex).toBeGreaterThan(memberIndex);
+    expect(payment).toContain('language === "ar" ? "الخزينة المركزية / المالك"');
+    expect(payment).toContain("onPress={() => pickPerson(option)}");
   });
 });

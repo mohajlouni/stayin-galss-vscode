@@ -52,7 +52,7 @@ describe("payment-method settings", () => {
     expect(management).toContain("إضافة صندوق عهدة وتحصيل (موظف / حارس)");
     expect(management).toContain("تعديل حساب الخزينة");
     expect(management).toContain("delete-outline");
-    expect(management).toContain("المالك / الخزينة المركزية");
+    expect(management).toContain("الخزينة المركزية / المالك");
     expect(management).toContain("const active = item.isActive !== false");
     expect(management).toContain("✓ مفعّل وجاهز");
     expect(management).toContain("⚠️ بيانات غير مكتملة");
@@ -93,7 +93,7 @@ describe("payment-method settings", () => {
     expect(management).toContain("ChannelSwitch");
     expect(management).toContain("isActive: complete ? undefined : false");
     expect(management).toContain("⚠️ لا يمكن الحفظ — يرجى إدخال اسم المستلم ورقم الهاتف");
-    expect(management).toContain("اسم المستلم / النقطة (إجباري)");
+    expect(management).toContain("اسم نقطة التحصيل");
     expect(management).toContain("#F43F5E");
     expect(management).toContain("#10B981");
     expect(management).toContain("#334155");

@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import { claimMatches, findOnbookByPhone, findOnbookByUid, normalizeUid } from "@/lib/staff-directory";
+import { buildInviteCode, matchesInviteCode, normalizeInviteCode } from "@/lib/invite-code";
 import { useOnbookStaff } from "@/lib/staff-directory-store";
 
 export default function ClaimStaffAccountScreen() {
@@ -20,6 +21,7 @@ export default function ClaimStaffAccountScreen() {
   const { staff, ready, commit } = useOnbookStaff();
   const [phone, setPhone] = useState(() => (typeof params.phone === "string" ? params.phone.trim() : ""));
   const [uid, setUid] = useState(() => normalizeUid(typeof params.uid === "string" ? params.uid : ""));
+  const [code, setCode] = useState("");
   const [step, setStep] = useState<"identity" | "otp" | "done">("identity");
   const [generated, setGenerated] = useState("");
   const [otp, setOtp] = useState("");
@@ -27,7 +29,6 @@ export default function ClaimStaffAccountScreen() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const row = isRTL ? "row-reverse" : "row";
-  const align = isRTL ? "right" : "left";
   const ar = language === "ar";
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export default function ClaimStaffAccountScreen() {
   const verifyIdentity = () => {
     setError(null);
     if (phone.replace(/\D/g, "").length < 6) { setError(ar ? "أدخل رقم الهاتف المسجل في دليل المنتسبين." : "Enter the phone number recorded in the staff directory."); return; }
+    if (normalizeInviteCode(code).length !== 6 || !matchesInviteCode(phone, code)) { setError(ar ? "رمز الدعوة والربط غير متطابق مع هذا الرقم. اطلب من المالك قراءة الرمز أو نسخه لك من بطاقة العضو." : "The linking code does not match this number. Ask the owner to read it or copy it from the member card."); return; }
     if (uid.trim() && !matched) { setError(ar ? "المعرّف ورقم الهاتف لا يتطابقان مع أي منتسب على الكتاب بجهازك. راجعهما أو اطلب من المالك تحديث القائمة." : "The UID and phone do not match any on-book member on this device. Double-check them or ask the owner to update the list."); return; }
     if (!matched) { setError(ar ? "لم يُعثر على منتسب برقم الهاتف هذا في الدليل المحلي، لذا لا توجد عهد أو تحصيلات مرتبطة به. اطلب من المالك إضافتك على الكتاب أولًا." : "No on-book member with this phone was found in the local directory, so no floats or collections are linked to it. Ask the owner to add you to the book first."); return; }
     setGenerated(String(Math.floor(100000 + Math.random() * 900000)));
@@ -65,7 +67,7 @@ export default function ClaimStaffAccountScreen() {
     await new Promise((resolve) => setTimeout(resolve, 650));
     try {
       if (otp.trim() !== generated) { setError(ar ? "رمز التحقق غير صحيح. أعد المحاولة." : "The verification code is incorrect. Try again."); return; }
-      await commit(staff.map((entry) => (entry.uid === matched?.uid ? { ...entry, isAppUser: true, authUid: user?.id ? String(user.id) : undefined } : entry)));
+      await commit(staff.map((entry) => (entry.uid === matched?.uid ? { ...entry, isAppUser: true, authUid: user?.id ? String(user.id) : undefined, inviteCode: buildInviteCode(matched?.phone) ?? entry.inviteCode } : entry)));
       setStep("done");
     } catch {
       setError(ar ? "تعذر حفظ التفعيل المحلي. أعد المحاولة." : "Could not save the local activation. Retry.");
@@ -103,9 +105,12 @@ export default function ClaimStaffAccountScreen() {
           {step === "identity" ? (
             <View>
               <ThemedText variant="label" color={colors.foreground} style={styles.fieldLabel}>{ar ? "رقم الهاتف المسجل" : "Registered phone number"}</ThemedText>
-              <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={20} placeholder="07XXXXXXXX" placeholderTextColor={colors.muted} autoCorrect={false} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
+              <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" maxLength={20} placeholder="07XXXXXXXX" placeholderTextColor={colors.muted} autoCorrect={false} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground, textAlign: "left", writingDirection: "ltr" }]} />
               <ThemedText variant="label" color={colors.foreground} style={styles.fieldLabel}>{ar ? "معرّف المنتسب (#UID)" : "Staff #UID"}</ThemedText>
               <TextInput value={uid} onChangeText={(text) => setUid(normalizeUid(text))} autoCapitalize="characters" autoCorrect={false} maxLength={40} placeholder="S2001" placeholderTextColor={colors.muted} style={[styles.input, styles.inputMono, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
+              <ThemedText variant="label" color={colors.foreground} style={styles.fieldLabel}>{ar ? "رمز الدعوة والربط (6 أرقام)" : "Invite / linking code (6 digits)"}</ThemedText>
+              <TextInput value={code} onChangeText={(text) => setCode(text.replace(/\D/g, "").slice(0, 6))} keyboardType="number-pad" maxLength={6} placeholder="491820" placeholderTextColor={colors.muted} autoCorrect={false} style={[styles.input, styles.inputMono, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground, textAlign: "left", writingDirection: "ltr", letterSpacing: 4 }]} />
+              <ThemedText variant="caption" color={colors.muted} style={styles.fieldLabel}>{ar ? "الرقم المكتوب أمام «رمز الدعوة والربط» في بطاقة العضو — يعطيك إياه المالك شفهيًا أو من نسخة الرمز." : "The number next to “Invite / linking code” on your member card — the owner reads it to you or shares the copied code."}</ThemedText>
               {ready && staff.length === 0 ? (
                 <View style={[styles.feedback, { borderColor: colors.warning + "62", backgroundColor: colors.warning + "10", flexDirection: row }]}>
                   <MaterialIcons name="info-outline" size={17} color={colors.warning} />

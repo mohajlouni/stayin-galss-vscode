@@ -37,7 +37,7 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(userMgmt).toContain("phoneKey(item.phone) === phoneKey(phone)");
     expect(userMgmt).toContain("updateMemberPermissions.mutateAsync({ memberId: byPhone.id");
     expect(userMgmt).toContain("findOnbookByPhone(onbookStaff, phone)");
-    expect(userMgmt).toContain("inviteFromAddModal(name, phone, preset)");
+    expect(userMgmt).toContain("inviteFromAddModal(name, phone, role, permissions)");
     expect(userMgmt).toContain("<AddUserModal visible={addUserOpen}");
   });
 

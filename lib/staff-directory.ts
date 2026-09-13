@@ -17,6 +17,8 @@ export type OnbookStaff = {
   createdAt?: string;
   /** حساب التطبيق المرتبط (auth_uid) بعد تفعيل المنتسب عبر رمز التحقق. */
   authUid?: string;
+  /** رمز الدعوة والربط المكوّن من 6 أرقام (491-820) الذي يقرؤه المالك للموظف للمطابقة عند تفعيل الحساب. */
+  inviteCode?: string;
 };
 
 export const ONBOOK_ROLE_TO_IDENTITY: Record<OnbookStaffRole, Exclude<UserIdentityRole, "internal">> = {
@@ -102,6 +104,7 @@ export function normalizeOnbookStaff(value: unknown): OnbookStaff[] {
       isAppUser: item.isAppUser === true,
       createdAt: typeof item.createdAt === "string" ? item.createdAt.slice(0, 40) : undefined,
       ...(typeof item.authUid === "string" && item.authUid.trim() ? { authUid: item.authUid.trim().slice(0, 80) } : {}),
+      ...(typeof item.inviteCode === "string" && /^\d{3}-\d{3}$/.test(item.inviteCode.trim()) ? { inviteCode: item.inviteCode.trim() } : {}),
     });
   }
   return out;

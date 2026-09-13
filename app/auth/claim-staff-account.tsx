@@ -113,6 +113,15 @@ export default function ClaimStaffAccountScreen() {
                 </View>
               ) : null}
               {matched ? (
+                <View style={[styles.feedback, { borderColor: colors.primary + "66", backgroundColor: colors.primary + "0F", flexDirection: row }]}>
+                  <MaterialIcons name="business" size={18} color={colors.primary} />
+                  <View style={styles.matchBody}>
+                    <ThemedText variant="label" color={colors.primary} style={styles.matchDone}>{ar ? "دعوة للانضمام إلى منشأة StayIn - إدارة الوحدات والعهد" : "Invitation to join StayIn – units & float management"}</ThemedText>
+                    <ThemedText variant="caption" color={colors.muted} style={styles.matchMeta}>{ar ? "تم العثور على حساب فريد برقم هاتفك — أكّد رمز التحقق أدناه لتفعيل عضويتك وربط عهودك تلقائيًا بالمنشأة." : "A matching profile was found for your phone — confirm the code below to activate your membership and link your floats automatically."}</ThemedText>
+                  </View>
+                </View>
+              ) : null}
+              {matched ? (
                 <View style={[styles.feedback, { borderColor: colors.success + "62", backgroundColor: colors.success + "12", flexDirection: row }]}>
                   <MaterialIcons name="verified" size={17} color={colors.success} />
                   <View style={styles.matchBody}>

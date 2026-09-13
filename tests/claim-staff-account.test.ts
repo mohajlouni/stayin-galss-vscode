@@ -21,6 +21,10 @@ describe("claim staff account (تفعيل حساب التطبيق للمنتسب
     expect(claim).toContain("isAppUser: true");
     expect(claim).toContain('router.replace("/user-management")');
   });
+
+  it("يعرض بطاقة دعوة الانضمام للمنشأة عند تطابق رقم الهاتف", () => {
+    expect(claim).toContain("دعوة للانضمام إلى منشأة StayIn - إدارة الوحدات والعهد");
+  });
 });
 
 describe("user management on-book section (قسم المنتسبين الميدانيين)", () => {
@@ -36,15 +40,20 @@ describe("user management on-book section (قسم المنتسبين الميد�
   });
 });
 
-describe("AddUserModal (المسار المزدوج للإضافة)", () => {
-  it("يدعم تبويبي مستخدم التطبيق ومنتسب الكتاب", () => {
-    expect(addUserModal).toContain('AddUserTrack = "app" | "onbook"');
-    expect(addUserModal).toContain("منتسب على الكتاب");
-    expect(addUserModal).toContain("onInviteAppUser");
-    expect(addUserModal).toContain("onAddOnbookStaff");
-  });
-
-  it("يستخدم بادئة السماء الزرقاء في الهوية المحلية", () => {
-    expect(addUserModal).toContain('("#0EA5E9" + "1A")');
+describe("AddUserModal (نموذج إضافة العضو الموحد)", () => {
+  it("يوفّر نموذجًا من 3 حقول بدون تبويبات أو معرّفات داخلية", () => {
+    expect(addUserModal).toContain('AddUserRole = "staff" | "mini-admin" | "guard"');
+    expect(addUserModal).toContain("إضافة عضو للفريق");
+    expect(addUserModal).toContain("اسم الموظف / العضو");
+    expect(addUserModal).toContain("رقم الهاتف للتواصل");
+    expect(addUserModal).toContain("الدور / الصلاحية");
+    expect(addUserModal).toContain("حفظ وإرسال الدعوة");
+    expect(addUserModal).not.toContain("AddUserTrack");
+    expect(addUserModal).not.toContain("AddUserPreset");
+    expect(addUserModal).not.toContain("منتسب على الكتاب");
+    expect(addUserModal).not.toContain("مستخدم تطبيق");
+    expect(addUserModal).not.toContain("المعرّف الميداني (غير قابل للتعديل)");
+    expect(addUserModal).not.toContain("onInviteAppUser");
+    expect(addUserModal).not.toContain("onAddOnbookStaff");
   });
 });

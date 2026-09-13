@@ -6,11 +6,11 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { AppToggle } from "@/components/app-toggle";
 import { ScreenContainer } from "@/components/screen-container";
 import { SubScreenHeader } from "@/components/sub-screen-header";
-import AddUserModal, { type AddUserPreset } from "@/components/users/AddUserModal";
+import AddUserModal, { type AddUserRole } from "@/components/users/AddUserModal";
 import { startOAuthLogin } from "@/constants/oauth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
-import { suggestOnbookUid, validateOnbookEntry } from "@/lib/staff-directory";
+import { findOnbookByPhone, phoneKey, suggestOnbookUid, validateOnbookEntry, type OnbookStaff } from "@/lib/staff-directory";
 import { useOnbookStaff } from "@/lib/staff-directory-store";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
@@ -87,20 +87,42 @@ export default function UserManagementScreen() {
       return false;
     }
   };
-  const inviteFromAddModal = async (employeeName: string, phoneNumber: string, preset: AddUserPreset) => {
+  const inviteFromAddModal = async (employeeName: string, phoneNumber: string, preset: PermissionPreset) => {
     const role: "admin" | "staff" | "guest" = preset === "mini-admin" ? "admin" : preset === "guard" ? "guest" : "staff";
     return runInvite(employeeName, phoneNumber, role, permissionsForPreset(preset));
   };
-  const addOnbookStaffFromModal = async ({ name: entryName, phone: entryPhone }: { name: string; phone: string }) => {
+  const submitUnifiedTeamMember = async ({ name, phone, role }: { name: string; phone: string; role: AddUserRole }): Promise<string | null> => {
+    const preset: PermissionPreset = role === "mini-admin" ? "mini-admin" : role === "guard" ? "guard" : "staff";
+    const presetName = (p: PermissionPreset) => p === "guard" ? (language === "ar" ? "حارس" : "Guard") : p === "mini-admin" ? (language === "ar" ? "مدير تشغيلي" : "Operational manager") : (language === "ar" ? "موظف حجوزات" : "Booking staff");
     const membersData = overview.data?.members ?? [];
-    const memberPhones = membersData.map((item) => item.phone);
-    const memberCodes = membersData.map((item) => item.userCode).filter((code): code is string => Boolean(code));
-    const issue = validateOnbookEntry({ name: entryName, phone: entryPhone }, memberPhones, onbookStaff);
-    if (issue === "duplicate-phone") return language === "ar" ? "رقم الهاتف مستخدم مسبقًا في التطبيق أو دليل المنتسبين." : "This phone is already used by an app member or another on-book entry.";
-    if (issue === "phone") return language === "ar" ? "أدخل رقم هاتف صحيحًا (6 أرقام على الأقل)." : "Enter a valid phone number (at least 6 digits).";
-    if (issue === "name") return language === "ar" ? "أدخل اسم المنتسب (حرفان على الأقل)." : "Enter the staff name (at least 2 characters).";
-    const uid = suggestOnbookUid("staff", [...memberCodes, ...onbookStaff.map((item) => item.uid)]);
-    await commit([...onbookStaff, { uid, name: entryName.trim(), phone: entryPhone.trim(), role: "staff", isAppUser: false, createdAt: new Date().toISOString() }]);
+    const byPhone = membersData.find((item) => item.status === "active" && phoneKey(item.phone) === phoneKey(phone));
+    if (byPhone) {
+      if (byPhone.role === "owner") {
+        Alert.alert(language === "ar" ? "المالك الأساسي محمي" : "Primary owner protected", language === "ar" ? "رقم الهاتف هذا ملك المالك الأساسي وليس عضوًا جديدًا." : "This phone belongs to the primary owner, not a new member.");
+        return null;
+      }
+      try {
+        await updateMemberPermissions.mutateAsync({ memberId: byPhone.id, permissions: permissionsForPreset(preset) });
+        await overview.refetch();
+        Alert.alert(language === "ar" ? "✓ تم ربط العضو بالمنشأة" : "✓ Member linked", language === "ar" ? `«${byPhone.displayName}» مسجل مسبقًا برقم الهاتف — رُبط مباشرة برتبة «${presetName(preset)}».` : `"${byPhone.displayName}" is already registered — linked directly as ${presetName(preset)}.`);
+        return null;
+      } catch {
+        return language === "ar" ? "تعذر ربط العضو المسجل. حاول مرة أخرى." : "Could not link the registered member. Try again.";
+      }
+    }
+    const existingOnbook = findOnbookByPhone(onbookStaff, phone);
+    if (!existingOnbook) {
+      const issue = validateOnbookEntry({ name, phone }, membersData.map((item) => item.phone), onbookStaff);
+      if (issue === "phone") return language === "ar" ? "أدخل رقم هاتف صحيحًا (6 أرقام على الأقل)." : "Enter a valid phone number (at least 6 digits).";
+      if (issue === "name") return language === "ar" ? "أدخل اسم العضو (حرفان على الأقل)." : "Enter the member's name (at least 2 characters).";
+      if (issue === "duplicate-phone") return language === "ar" ? "رقم الهاتف مستخدم مسبقًا في التطبيق أو سجل الفريق." : "This phone is already used by an app member or another team record.";
+      const uid = suggestOnbookUid(role === "guard" ? "guard" : "staff", [...membersData.map((item) => item.userCode).filter((code): code is string => Boolean(code)), ...onbookStaff.map((item) => item.uid)]);
+      const entry: OnbookStaff = { uid, name: name.trim(), phone: phone.trim(), role: role === "guard" ? "guard" : "staff", isAppUser: false, createdAt: new Date().toISOString() };
+      await commit([...onbookStaff, entry]);
+    } else {
+      await commit(onbookStaff.map((item) => item.uid === existingOnbook.uid ? { ...item, name: name.trim(), role: role === "guard" ? "guard" : "staff" } : item));
+    }
+    await inviteFromAddModal(name, phone, preset);
     return null;
   };
   const acceptInvite = async () => {
@@ -166,7 +188,7 @@ export default function UserManagementScreen() {
     </> : role === "staff" || role === "guest" ? <AccessCard colors={colors} align={align} title={language === "ar" ? (role === "guest" ? "حساب ضيف مفعّل" : "حساب موظف مفعّل") : (role === "guest" ? "Guest account active" : "Staff account active")} detail={language === "ar" ? (role === "guest" ? "تم تفعيل وصولك المحدود إلى المنشأة." : "تُطبّق صلاحياتك التي حددها المدير على المهام اليومية والتقارير والسجل.") : (role === "guest" ? "Your limited property access is active." : "Your manager-defined permissions apply to daily tasks, reports, and activity log.")} /> : <><AccessCard colors={colors} align={align} title={language === "ar" ? "بدء إعداد المنشأة" : "Set up your business workspace"} detail={language === "ar" ? "إذا كنت المالك، أنشئ مساحة المنشأة مرة واحدة. إذا كنت موظفًا، استخدم بيانات دعوتك أدناه." : "If you are the owner, create the workspace once. If you are an employee, activate your invitation below."} actionLabel={language === "ar" ? "أنا المالك — إنشاء المساحة" : "I am the owner — create workspace"} onPress={() => void activateOwnerWorkspace()} /><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "تفعيل دعوة الموظف" : "Activate employee invitation"}</Text><View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder={language === "ar" ? "رقم الهاتف المدعو" : "Invited phone number"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} /><TextInput value={pin} onChangeText={setPin} keyboardType="number-pad" maxLength={6} placeholder={language === "ar" ? "رمز الدعوة من 6 أرقام" : "Six-digit invitation code"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} /><Pressable onPress={() => void acceptInvite()} style={({ pressed }) => [styles.primary, { backgroundColor: colors.success, opacity: pressed || accept.isPending ? 0.66 : 1 }]}><MaterialIcons name="verified-user" size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900" }}>{language === "ar" ? "تفعيل الحساب" : "Activate account"}</Text></Pressable></View></>}
   </ScrollView>
   <EmployeePermissionsModal visible={Boolean(editingMember)} title={editingMember ? (language === "ar" ? `صلاحيات وتحصل ${editingMember.displayName}` : `${editingMember.displayName}'s permissions`) : ""} language={language} isRTL={isRTL} colors={colors} permissions={memberPermissions} onPermissionsChange={setMemberPermissions} permissionsOpen={memberPermissionsOpen} onPermissionsOpenChange={setMemberPermissionsOpen} primaryLabel={language === "ar" ? "حفظ الإعدادات" : "Save settings"} primaryIcon="save" isPending={updateMemberPermissions.isPending || updateMemberCollectionProfile.isPending} onClose={() => setEditingMember(null)} onSubmit={() => void saveMemberPermissions()} lockPermissions={editingMember?.role === "owner"} cliqAlias={memberCliqAlias} onCliqAliasChange={setMemberCliqAlias} bankDetails={memberBankDetails} onBankDetailsChange={setMemberBankDetails} commissionRate={memberCommissionRate} onCommissionRateChange={setMemberCommissionRate} commissionType={memberCommissionType} onCommissionTypeChange={setMemberCommissionType} allowDirectCollection={memberAllowDirectCollection} onAllowDirectCollectionChange={setMemberAllowDirectCollection} />
-  <AddUserModal visible={addUserOpen} language={language} isRTL={isRTL} colors={colors} takenUidCodes={[...(overview.data?.members ?? []).map((item) => item.userCode).filter((code): code is string => Boolean(code)), ...onbookStaff.map((item) => item.uid)]} onClose={() => setAddUserOpen(false)} onInviteAppUser={inviteFromAddModal} onAddOnbookStaff={addOnbookStaffFromModal} />
+  <AddUserModal visible={addUserOpen} language={language} isRTL={isRTL} colors={colors} onClose={() => setAddUserOpen(false)} onSubmit={submitUnifiedTeamMember} />
   </ScreenContainer>;
 }
 

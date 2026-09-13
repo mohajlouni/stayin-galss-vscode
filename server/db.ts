@@ -1289,6 +1289,20 @@ export async function updateWorkspaceMemberCollectionProfile(input: { workspaceI
   return withPermissions(refreshed);
 }
 
+export async function removeWorkspaceMember(input: { workspaceId: number; memberId: number; actorUserId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const member = (await database.select().from(workspaceMembers).where(and(eq(workspaceMembers.id, input.memberId), eq(workspaceMembers.workspaceId, input.workspaceId))).limit(1))[0];
+  if (!member) throw new Error("Workspace member not found");
+  if (member.role === "owner") throw new Error("Primary owner is immutable");
+  // Soft-remove: the member keeps their account but loses workspace access
+  // (memberships filter status === "active"), so floats and bookings are no
+  // longer reachable.
+  await database.update(workspaceMembers).set({ status: "disabled" }).where(eq(workspaceMembers.id, input.memberId));
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "employee-removed", subject: member.displayName, details: `إزالة من فريق العمل: ${member.phone}` });
+  return { removed: true };
+}
+
 export async function listWorkspaceActivity(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");

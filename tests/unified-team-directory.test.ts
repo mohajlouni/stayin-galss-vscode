@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const addUserModal = readFileSync(resolve(process.cwd(), "components/users/AddUserModal.tsx"), "utf8");
 const userMgmt = readFileSync(resolve(process.cwd(), "app/user-management.tsx"), "utf8");
+const db = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
+const routers = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
 
 describe("unified team directory (قائمة فريق العمل الموحدة)", () => {
   it("يدمج الأعضاء والمنتسبين والدعوات في قائمة واحدة تبدأ بأعضاء التطبيق", () => {
@@ -70,5 +72,37 @@ describe("optional user ID verification (التحقق الاختياري من ا
     expect(addUserModal).not.toContain("رمز الدعوة والربط");
     expect(addUserModal).not.toContain("نسخ الرمز");
     expect(addUserModal).not.toContain("نموذج من 4 حقول");
+  });
+});
+
+describe("staff removal (إزالة عضو من فريق العمل)", () => {
+  it("يوفر إجراء removeMember على الخادم: إزالة ناعمة + سجل نشاط", () => {
+    expect(db).toContain("export async function removeWorkspaceMember");
+    expect(db).toContain('status: "disabled"');
+    expect(db).toContain('action: "employee-removed"');
+    expect(routers).toContain("removeMember: protectedProcedure");
+    expect(routers).toContain("Primary owner is immutable");
+  });
+
+  it("يعرض رسالة تأكيد بالإزالة ولا يسمح بحذف المالك الأساسي", () => {
+    expect(userMgmt).toContain("هل أنت متأكد من إزالة «");
+    expect(userMgmt).toContain("لن يتمكن من الوصول للعهد أو الحجوزات.");
+    expect(userMgmt).toContain("onDelete: owner ? undefined : () => confirmRemoveMember(member)");
+  });
+
+  it("يرشح الأعضاء المعطَّلين من القائمة الموحدة", () => {
+    expect(userMgmt).toContain('.filter((item) => item.status !== "disabled")');
+  });
+});
+
+describe("advanced ownership accordion (خيارات الملكية المتقدمة)", () => {
+  it("بطاقة نقل الملكية قابلة للطي وتبقى في أسفل القسم", () => {
+    const transferIndex = userMgmt.indexOf("نقل ملكية المنشأة");
+    const listIndex = userMgmt.indexOf("unifiedTeam.map");
+    expect(transferIndex).toBeGreaterThan(listIndex);
+    expect(userMgmt).toContain("🛡️ خيارات الملكية المتقدمة (نقل ملكية المنشأة)");
+    expect(userMgmt).toContain("const [transferOpen, setTransferOpen] = useState(false)");
+    expect(userMgmt).toContain("{transferOpen ? <>");
+    expect(userMgmt).toContain("اضغط 3 ثوانٍ لطلب نقل الملكية");
   });
 });

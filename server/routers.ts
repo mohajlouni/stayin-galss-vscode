@@ -269,6 +269,16 @@ export const appRouter = router({
       if (summary.member.role !== "owner" && target.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Operational managers cannot modify other managers" });
       return db.updateWorkspaceMemberCollectionProfile({ workspaceId: summary.member.workspaceId, memberId: input.memberId, cliqAlias: input.cliqAlias, bankDetails: input.bankDetails, commissionRate: input.commissionRate, commissionType: input.commissionType, allowDirectCollection: input.allowDirectCollection, actorUserId: ctx.user.id });
     }),
+    removeMember: protectedProcedure.input(z.object({ memberId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      const target = await db.getWorkspaceMemberById(summary.member.workspaceId, input.memberId);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Workspace member not found" });
+      if (target.role === "owner") throw new TRPCError({ code: "FORBIDDEN", message: "Primary owner is immutable" });
+      if (await db.isImmutableRootUserId(target.userId)) throwRootImmunity();
+      if (summary.member.role !== "owner" && target.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Operational managers cannot remove other managers" });
+      return db.removeWorkspaceMember({ workspaceId: summary.member.workspaceId, memberId: input.memberId, actorUserId: ctx.user.id });
+    }),
     requestOwnershipTransfer: protectedProcedure.input(z.object({ targetMemberId: z.number().int().positive(), holdConfirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.workspace || summary.member?.role !== "owner" || summary.workspace.ownerUserId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Primary owner access required" });

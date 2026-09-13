@@ -33,8 +33,27 @@ describe.sequential("Team directory: staff CRUD, card consolidation, strict RTL 
     expect(userManagementSource).toContain("entry.roleBadge");
     expect(userManagementSource).toContain("\"✏️ تعديل\"");
     expect(userManagementSource).toContain("\"📋 نسخ الرابط\"");
-    expect(userManagementSource).toContain("\"حذف\"");
+    expect(userManagementSource).toContain("\"🗑️ حذف\"");
     expect(userManagementSource).toContain("accessibilityLabel={language === \"ar\" ? \"حذف العضو\" : \"Delete member\"}");
+  });
+
+  it("routes card actions through explicit named handlers", () => {
+    expect(userManagementSource).toContain("const handleCopyInvite = (entry: UnifiedEntry) => {");
+    expect(userManagementSource).toContain("const handleEditStaff = (entry: UnifiedEntry) => {");
+    expect(userManagementSource).toContain("const handleDeleteStaff = (entry: UnifiedEntry) => {");
+    expect(userManagementSource).toContain("const handleRevokeInvitation = (entry: UnifiedEntry) => {");
+    expect(userManagementSource).toContain("onCopyLink={entry.inviteCode ? () => handleCopyInvite(entry) : undefined}");
+    expect(userManagementSource).toContain("onEdit={entry.onEdit ? () => handleEditStaff(entry) : undefined}");
+    expect(userManagementSource).toContain("onDelete={entry.onDelete ? () => handleDeleteStaff(entry) : undefined}");
+    expect(userManagementSource).toContain("onRevoke={entry.kind === \"invitation\" ? () => handleRevokeInvitation(entry) : undefined}");
+  });
+
+  it("provides a web-safe confirmation dialog and a success toast", () => {
+    expect(userManagementSource).toContain("const confirmDialog = (titleAr: string, titleEn: string, ar: string, en: string, actionLabel: string, onConfirm: () => void) => {");
+    expect(userManagementSource).toContain("window.confirm");
+    expect(userManagementSource).toContain("const notify = (text: string, tone: \"success\" | \"error\" = \"success\") => {");
+    expect(userManagementSource).toContain("toastWrap");
+    expect(userManagementSource).toContain("Platform.OS === \"web\"");
   });
 
   it("keeps the app-status and invite-link accessibility pins", () => {

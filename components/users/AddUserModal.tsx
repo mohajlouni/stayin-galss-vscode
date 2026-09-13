@@ -5,6 +5,7 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View 
 import { AppToggle } from "@/components/app-toggle";
 import { useColors } from "@/hooks/use-colors";
 import { GRANULAR_PERMISSIONS, OPERATIONAL_PERMISSION_COUNT, capabilitiesForRole, capabilitiesToPermissions, type GranularCapability } from "@/lib/permissions";
+import { normalizePhoneInput } from "@/lib/phone-number";
 import { normalizeUid, phoneKey } from "@/lib/staff-directory";
 import type { WorkspacePermissions } from "@/shared/workspace-permissions";
 
@@ -86,7 +87,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
     }
     setPending(true);
     try {
-      const error = await onSubmit({ name, phone, role, permissions: capabilitiesToPermissions(caps) });
+      const error = await onSubmit({ name, phone: normalizePhoneInput(phone), role, permissions: capabilitiesToPermissions(caps) });
       if (error) {
         Alert.alert(language === "ar" ? "تعذر الحفظ والدعوة" : "Could not save & invite", error);
         return;
@@ -122,36 +123,39 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
               style={[styles.input, { backgroundColor: FIELD_BG, borderColor: focused === "name" ? ORANGE : FIELD_BORDER, borderWidth: focused === "name" ? 2 : 1, color: colors.foreground, textAlign: align }]}
             />
 
-            <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "رقم الهاتف للتواصل" : "Contact phone number"}</Text>
-            <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "رقم الهاتف هو المفتاح الأساسي لربط العهود والتحصيلات بالعضو." : "The phone is the primary key that links floats and collections to the member."}</Text>
-            <View style={[styles.phoneRow, { backgroundColor: FIELD_BG, borderColor: focused === "phone" ? ORANGE : FIELD_BORDER, borderWidth: focused === "phone" ? 2 : 1 }]}>
-              <View style={styles.prefixPill}><Text style={styles.prefixText}>+962</Text></View>
-              <TextInput
-                value={phone}
-                onChangeText={setPhone}
-                onFocus={() => setFocused("phone")}
-                onBlur={() => setFocused(null)}
-                keyboardType="phone-pad"
-                maxLength={20}
-                placeholder="07XXXXXXXX"
-                placeholderTextColor={colors.muted}
-                style={[styles.phoneInput, { color: colors.foreground }]}
-              />
+            <View style={[styles.fieldsRow, { flexDirection: row }]}>
+              <View style={styles.fieldCol}>
+                <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "رقم الهاتف للتواصل" : "Contact phone number"}</Text>
+                <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "المفتاح الأساسي لربط العهود، ويُحوَّل تلقائيًا للصيغة الدولية." : "Primary key for linking floats; auto-converts to the international format."}</Text>
+                <TextInput
+                  value={phone}
+                  onChangeText={(text) => setPhone(normalizePhoneInput(text))}
+                  onFocus={() => setFocused("phone")}
+                  onBlur={() => setFocused(null)}
+                  keyboardType="phone-pad"
+                  maxLength={20}
+                  autoCorrect={false}
+                  placeholder={language === "ar" ? "مثال: 079xxxxxxx أو مع رمز البلد (+962 / 00962)" : "e.g. 07xxxxxxx or with country code (+962 / 00962)"}
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, styles.inputMono, { backgroundColor: FIELD_BG, borderColor: focused === "phone" ? ORANGE : FIELD_BORDER, borderWidth: focused === "phone" ? 2 : 1, color: colors.foreground, writingDirection: "ltr", textAlign: "left" }]}
+                />
+              </View>
+              <View style={styles.fieldCol}>
+                <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "المعرّف الشخصي (اختياري للتأكيد)" : "User ID (optional, for confirmation)"}</Text>
+                <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "للتحقق المزدوج إذا كان الموظف مسجلاً مسبقاً بالتطبيق." : "Double-checks if the employee is already registered on the app."}</Text>
+                <TextInput
+                  value={userCode}
+                  onChangeText={(text) => setUserCode(text.toUpperCase().slice(0, 24))}
+                  onFocus={() => setFocused("userCode")}
+                  onBlur={() => setFocused(null)}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  placeholder={language === "ar" ? "مثال: U1024#" : "e.g. U1024#"}
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, styles.inputMono, { backgroundColor: FIELD_BG, borderColor: focused === "userCode" ? ORANGE : FIELD_BORDER, borderWidth: focused === "userCode" ? 2 : 1, color: colors.foreground, writingDirection: "ltr", textAlign: "left" }]}
+                />
+              </View>
             </View>
-
-            <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "المعرّف الشخصي للمستخدم (اختياري للتأكيد)" : "User ID (optional, for confirmation)"}</Text>
-            <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "للتحقق المزدوج إذا كان الموظف مسجلاً مسبقاً بالتطبيق لتجنب الخطأ برقم الهاتف." : "Double-checks if the employee is already registered on the app, to avoid a phone-number mistake."}</Text>
-            <TextInput
-              value={userCode}
-              onChangeText={(text) => setUserCode(text.toUpperCase().slice(0, 24))}
-              onFocus={() => setFocused("userCode")}
-              onBlur={() => setFocused(null)}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              placeholder={language === "ar" ? "مثال: U1024#" : "e.g. U1024#"}
-              placeholderTextColor={colors.muted}
-              style={[styles.input, styles.inputMono, { backgroundColor: FIELD_BG, borderColor: focused === "userCode" ? ORANGE : FIELD_BORDER, borderWidth: focused === "userCode" ? 2 : 1, color: colors.foreground, writingDirection: "ltr", textAlign: "left" }]}
-            />
             {verification && verification.state === "matched" ? (
               <View style={[styles.verifyBadge, { backgroundColor: colors.success + "14", borderColor: colors.success + "55", flexDirection: row }]}>
                 <MaterialIcons name="verified" size={15} color={colors.success} />
@@ -208,10 +212,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 12.5, fontWeight: "800", marginTop: 13 },
   input: { minHeight: 48, borderRadius: 13, paddingHorizontal: 12, marginTop: 10 },
   inputMono: { fontFamily: "monospace" },
-  phoneRow: { minHeight: 48, borderRadius: 13, marginTop: 10, flexDirection: "row", alignItems: "center", overflow: "hidden" },
-  prefixPill: { backgroundColor: "#1E293B", paddingHorizontal: 13, alignSelf: "stretch", justifyContent: "center", borderRightWidth: 1, borderRightColor: "rgba(255, 255, 255, 0.10)" },
-  prefixText: { color: "#94A3B8", fontWeight: "900", fontSize: 14, writingDirection: "ltr" },
-  phoneInput: { flex: 1, minHeight: 48, paddingHorizontal: 12, paddingVertical: 8, fontSize: 15, fontFamily: "monospace", color: "#FFFFFF", writingDirection: "ltr", textAlign: "left" },
+  fieldsRow: { gap: 10, alignItems: "flex-start" },
+  fieldCol: { flex: 1, minWidth: 0 },
   verifyBadge: { minHeight: 34, borderRadius: 11, borderWidth: 1, alignItems: "center", gap: 7, paddingHorizontal: 11, paddingVertical: 8, marginTop: 9 },
   roleRow: { gap: 8, marginTop: 8 },
   roleChip: { flex: 1, minHeight: 48, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, paddingHorizontal: 6 },

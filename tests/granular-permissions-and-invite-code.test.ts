@@ -54,16 +54,25 @@ describe("granular permissions engine (محرك الصلاحيات التفصي�
 });
 
 describe("granular permissions UI (واجهة الصلاحيات التفصيلية)", () => {
-  it("AddUserModal يعرض حقولًا عالية التباين + هاتف LTR ببادئة دولة + تحقق اختياري من معرّف المستخدم", () => {
+  it("AddUserModal يعرض حقولًا عالية التباين + هاتف LTR بدون بادئة ثابتة + تحقق اختياري من معرّف المستخدم", () => {
     expect(addUserModal).toContain('borderColor: focused === "name" ? ORANGE : FIELD_BORDER');
     expect(addUserModal).toContain("#F97316");
     expect(addUserModal).toContain('"#334155"');
     expect(addUserModal).toContain('borderColor: focused === "phone" ? ORANGE : FIELD_BORDER');
-    expect(addUserModal).toContain("+962");
     expect(addUserModal).toContain('writingDirection: "ltr"');
-    expect(addUserModal).toContain("المعرّف الشخصي للمستخدم (اختياري للتأكيد)");
+    expect(addUserModal).not.toContain("prefixPill");
+    expect(addUserModal).toContain("مثال: 079xxxxxxx أو مع رمز البلد (+962 / 00962)");
     expect(addUserModal).toContain("تم التحقق");
     expect(addUserModal).toContain("حارس / شفت");
+  });
+
+  it("AddUserModal يجعل الهاتف والمعرّف جنبًا إلى جنب مع تحويل تلقائي للرقم", () => {
+    expect(addUserModal).toContain("styles.fieldsRow");
+    expect(addUserModal).toContain("styles.fieldCol");
+    expect(addUserModal).toContain("flexDirection: row");
+    expect(addUserModal).toContain("setPhone(normalizePhoneInput(text))");
+    expect(addUserModal).toContain("phone: normalizePhoneInput(phone)");
+    expect(addUserModal).not.toContain("07XXXXXXXX");
   });
 
   it("AddUserModal يوفر درج تخصيص الصلاحيات (X من 7 مفعلة) مع القوائم السبع", () => {

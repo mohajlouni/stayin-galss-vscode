@@ -31,6 +31,11 @@ export function normalizeInternationalPhone(input: string | null | undefined, co
   return E164.test(cleaned) ? { value: cleaned, error: null } : { value: null, error: "invalid" };
 }
 
+/** يعيد رقم الهاتف مُوحَّدًا تلقائيًا: 079… ← +9627…، 00… ← +…، ويحافظ على +7xxxx… كما هو. يُرجع المدخل نفسه ما لم يكتمل رقم دولي صحيح (يبدأ الـ 07 بمعالجة عند اكتمال الأرقام العشرة). */
+export function normalizePhoneInput(input: string | null | undefined): string {
+  return normalizeInternationalPhone(input).value ?? (input ?? "").trim();
+}
+
 export function countryForInternationalPhone(phone: string | null | undefined) {
   const value = phone ?? "";
   return [...COUNTRY_DIALING_CODES].sort((a, b) => b.code.length - a.code.length).find((country) => value.startsWith(country.code)) ?? DEFAULT_COUNTRY_DIALING_CODE;

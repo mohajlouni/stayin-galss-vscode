@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
 import { useColors } from "@/hooks/use-colors";
+import { saveOnbookStaff } from "@/lib/staff-directory-store";
 
 type Group = {
   key: "operational" | "customers-financial" | "structural";
@@ -25,6 +26,7 @@ const GROUPS: Group[] = [
       { key: "waitlist", ar: "طلبات وقائمة الانتظار", en: "Guest Waitlist" },
       { key: "maintenance", ar: "الصيانة الوقائية والأصول وجرد المعدات", en: "Maintenance & Asset Logs" },
       { key: "notifications", ar: "مركز الإشعارات والتنبيهات السابقة", en: "Notification History" },
+      { key: "staff", ar: "سجلات فريق العمل والموظفين والدعوات المعلقة", en: "Staff Directory & Pending Invitations" },
     ],
   },
   {
@@ -103,6 +105,7 @@ export function WorkspacePurgeModal({ visible, onClose, onExecuted }: { visible:
         onExecuted(language === "ar" ? `تم حذف المنشأة «${result.deletedWorkspaceName ?? workspaceName}» وكل بياناتها نهائيًا.` : `Workspace "${result.deletedWorkspaceName ?? workspaceName}" and all its data were permanently deleted.`, true);
         return;
       }
+      if (selectedKeys.includes("staff")) await saveOnbookStaff([]);
       void utils.workspace.invalidate();
       const removed = result.removed;
       const detail = Object.entries(removed).filter(([, count]) => count > 0).map(([key, count]) => `${key}: ${count}`).join(" · ");

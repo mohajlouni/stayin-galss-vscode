@@ -294,6 +294,19 @@ export const appRouter = router({
       await db.revokeWorkspaceInvitation(summary.member.workspaceId, input.invitationId, ctx.user.id);
       return { success: true };
     }),
+    deleteStaffMember: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32) })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      // حذف حقيقي من قاعدة البيانات: إلغاء الدعوات المعلقة وإعطال الأعضاء
+      // المطابقين للرقم داخل هذه المنشأة فقط.
+      return db.deleteWorkspaceStaffByPhone({ workspaceId: summary.member.workspaceId, phone: input.phone, actorUserId: ctx.user.id });
+    }),
+    updateInvitation: protectedProcedure.input(z.object({ invitationId: z.number().int().positive(), employeeName: z.string().trim().min(2).max(255).optional(), phone: z.string().trim().min(6).max(32).optional(), role: workspaceInviteRoleSchema.optional(), permissions: workspacePermissionsSchema.optional() })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      await db.updateWorkspaceInvitation({ workspaceId: summary.member.workspaceId, invitationId: input.invitationId, employeeName: input.employeeName, phone: input.phone, role: input.role, permissions: input.permissions, actorUserId: ctx.user.id });
+      return { success: true };
+    }),
     acceptInvitation: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32), pin: z.string().regex(/^\d{6}$/, "PIN must contain 6 digits") })).mutation(async ({ ctx, input }) => {
       try {
         const member = await db.acceptWorkspaceInvitation({ userId: ctx.user.id, phone: input.phone, pin: input.pin });
@@ -358,7 +371,7 @@ export const appRouter = router({
     }),
     purgeRecords: protectedProcedure.input(z.object({
       workspaceId: z.number().int().positive(),
-      categories: z.array(z.enum(["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "units", "workspace"])).min(1),
+      categories: z.array(z.enum(["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "staff", "units", "workspace"])).min(1),
       challenge: z.string().trim().max(16),
     })).mutation(async ({ ctx, input }) => {
       // Only the verified Property Owner of that workspace or the Super Admin

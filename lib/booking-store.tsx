@@ -101,7 +101,7 @@ type BookingContextValue = AppData & {
   clearLastDeleted: () => void;
 };
 
-type PurgeCategoryKey = "bookings" | "waitlist" | "maintenance" | "notifications" | "customers" | "loyalty" | "financials" | "analytics" | "units" | "workspace";
+type PurgeCategoryKey = "bookings" | "waitlist" | "maintenance" | "notifications" | "customers" | "loyalty" | "financials" | "analytics" | "staff" | "units" | "workspace";
 
 const BookingContext = createContext<BookingContextValue | null>(null);
 

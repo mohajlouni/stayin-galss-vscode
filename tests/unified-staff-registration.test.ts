@@ -38,7 +38,7 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(userMgmt).toContain("updateMemberPermissions.mutateAsync({ memberId: byPhone.id");
     expect(userMgmt).toContain("findOnbookByPhone(onbookStaff, phone)");
     expect(userMgmt).toContain("inviteFromAddModal(name, phone, role, permissions)");
-    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen || Boolean(editingOnbook)}");
+    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen || Boolean(editingOnbook) || Boolean(editingInvitation)}");
   });
 
   it("مطالبة الهاتف أولًا مع ربط العهود وحساب التطبيق", () => {

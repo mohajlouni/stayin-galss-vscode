@@ -82,7 +82,7 @@ type BookingContextValue = AppData & {
   updatePayment: (bookingId: string, paymentId: string, update: Pick<Payment, "amount" | "note" | "paymentMethod">) => Promise<void>;
   voidPayment: (bookingId: string, paymentId: string, reason?: string) => Promise<void>;
   addDepositRefund: (bookingId: string, refund: DepositRefund) => Promise<void>;
-  settleStaffFloat: (floatId: string, note?: string, options?: { recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; settlementDate?: string; amount?: number }) => Promise<void>;
+  settleStaffFloat: (floatId: string, note?: string, options?: { recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; settlementDate?: string; amount?: number; staffBonus?: number }) => Promise<void>;
   requestStaffFloatSettlement: (floatId: string, input: { amount: number; recipientAccountId?: string; recipientAccountLabel?: string; channel?: FloatSettlementChannel; settlementDate?: string; note?: string; receiptUri?: string }) => Promise<void>;
   approveStaffFloatSettlement: (settlementId: string, note?: string) => Promise<void>;
   rejectStaffFloatSettlement: (settlementId: string, reason?: string) => Promise<void>;
@@ -946,11 +946,15 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       if (!account) throw new Error("float-account-not-found");
       const outstanding = staffFloatOutstanding(data, floatId);
       if (outstanding <= 0.005) throw new Error("float-nothing-to-settle");
+      const settlementBonus = Number(options?.staffBonus);
+      const hasBonus = Number.isFinite(settlementBonus) && Math.abs(settlementBonus) > 0.005;
+      const staffBonus = hasBonus ? Math.round(settlementBonus * 100) / 100 : undefined;
+      const netOutstanding = Math.max(0, Math.round((outstanding - (hasBonus && settlementBonus > 0 ? settlementBonus : 0)) * 100) / 100);
       const requestedAmount = Number(options?.amount);
       const hasRequestedAmount = Number.isFinite(requestedAmount) && requestedAmount > 0;
-      if (hasRequestedAmount && requestedAmount > outstanding + 0.005) throw new Error("float-settlement-amount-invalid");
-      const settleAmount = hasRequestedAmount && requestedAmount < outstanding - 0.005 ? Math.max(0.01, Math.round(requestedAmount * 100) / 100) : outstanding;
-      const isFull = Math.abs(settleAmount - outstanding) <= 0.005;
+      if (hasRequestedAmount && requestedAmount > netOutstanding + 0.005) throw new Error("float-settlement-amount-invalid");
+      const settleAmount = hasRequestedAmount && requestedAmount < netOutstanding - 0.005 ? Math.max(0.01, Math.round(requestedAmount * 100) / 100) : netOutstanding;
+      const isFull = Math.abs(settleAmount - netOutstanding) <= 0.005;
       if (settleAmount <= 0.005) throw new Error("float-settlement-amount-invalid");
       const settledAt = new Date().toISOString();
       const settlementId = `float-settlement-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1008,9 +1012,12 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const actorName = auditActorName ?? "مستخدم التطبيق";
       const requestedSettlementDate = options?.settlementDate;
       const settlementDate = typeof requestedSettlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(requestedSettlementDate) ? requestedSettlementDate : settledAt.slice(0, 10);
-      const settlement: StaffFloatSettlement = { id: settlementId, floatId, amount: settleAmount, settledAt, createdAt: settledAt, settlementDate, recipientAccountId: options?.recipientAccountId?.trim() || undefined, recipientAccountLabel: options?.recipientAccountLabel?.trim() || undefined, channel: options?.channel === "cliq" || options?.channel === "bank" || options?.channel === "vault" ? options?.channel : undefined, coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, note: note?.trim() || undefined, settledByUserId: user?.id, settledByName: actorName, status: "CONFIRMED" as FloatSettlementStatus, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined };
+      const commissionPayable = Math.round((commissionEarned + (staffBonus && staffBonus > 0 ? staffBonus : 0)) * 100) / 100;
+      const commissionVoucher: Expense | undefined = commissionPayable > 0.005 ? { id: `expense-commission-${settlementId}`, category: "commissions-bonuses", note: `عمولات ومكافآت موظفين — مدفوعة مقاصة من الكاش${note?.trim() ? ` · ${note.trim()}` : ""}`, amount: commissionPayable, date: settlementDate, fundingEntity: "staff", fundingSourceId: floatId, fundingSourceLabel: account.label, isSettled: true, settlementId, createdAt: settledAt, createdByName: actorName } : undefined;
+      const nextExpenses = commissionVoucher ? [...expenses, commissionVoucher] : expenses;
+      const settlement: StaffFloatSettlement = { id: settlementId, floatId, amount: settleAmount, settledAt, createdAt: settledAt, settlementDate, recipientAccountId: options?.recipientAccountId?.trim() || undefined, recipientAccountLabel: options?.recipientAccountLabel?.trim() || undefined, channel: options?.channel === "cliq" || options?.channel === "bank" || options?.channel === "vault" ? options?.channel : undefined, coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, note: note?.trim() || undefined, settledByUserId: user?.id, settledByName: actorName, status: "CONFIRMED" as FloatSettlementStatus, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined, staffBonus };
       const partialDetail = !isFull ? ` · توريد جزئي ${settleAmount}` : "";
-      await persist({ ...data, bookings, expenses, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settled" as AuditAction, subjectName: account.label, details: `قام المالك بتسجيل توريد عهدة بقيمة ${settleAmount} ${data.settings.currency} من الموظف ${account.memberName ?? account.label} بتاريخ تسوية ${settlementDate} في ${settledAt}${partialDetail}${note?.trim() ? ` · ملاحظة: ${note.trim()}` : ""}`, createdAt: settledAt, actorName }, ...data.auditLog] });
+      await persist({ ...data, bookings, expenses: nextExpenses, staffFloatSettlements: [settlement, ...(data.staffFloatSettlements ?? [])], auditLog: [{ id: `audit-${Date.now()}`, action: "float-settled" as AuditAction, subjectName: account.label, details: `قام المالك بتسجيل توريد عهدة بقيمة ${settleAmount} ${data.settings.currency} من الموظف ${account.memberName ?? account.label} بتاريخ تسوية ${settlementDate} في ${settledAt}${partialDetail}${staffBonus ? ` · مكافأة/خصم ${staffBonus}` : ""}${note?.trim() ? ` · ملاحظة: ${note.trim()}` : ""}`, createdAt: settledAt, actorName }, ...data.auditLog] });
     },
     requestStaffFloatSettlement: async (floatId, input) => {
       if (!isAuthenticated || isGuest) throw new Error("float-request-forbidden");
@@ -1041,13 +1048,17 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
       const approvedAt = new Date().toISOString();
       const actorName = auditActorName ?? "مستخدم التطبيق";
       const outstanding = staffFloatOutstanding(data, pending.floatId);
-      if (outstanding <= 0.005) {
+      const settlementBonus = Number(pending.staffBonus);
+      const hasBonus = Number.isFinite(settlementBonus) && Math.abs(settlementBonus) > 0.005;
+      const staffBonus = hasBonus ? Math.round(settlementBonus * 100) / 100 : undefined;
+      const netOutstanding = Math.max(0, Math.round((outstanding - (hasBonus && settlementBonus > 0 ? settlementBonus : 0)) * 100) / 100);
+      if (netOutstanding <= 0.005) {
         const record: StaffFloatSettlement = { ...pending, status: "REJECTED", rejectReason: "لا يوجد رصيد متبقٍ للتأكيد", approvedAt, approvedByUserId: user?.id, approvedByName: actorName };
         await persist({ ...data, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-rejected" as AuditAction, subjectName: account.label, details: `رفض توريد عهدة "${account.label}" (لا رصيد متبقٍ للتأكيد)`, createdAt: approvedAt, actorName }, ...data.auditLog] });
         return;
       }
-      const settleAmount = Math.min(outstanding, Math.max(0.01, Number(pending.amount || 0)));
-      const isFull = Math.abs(settleAmount - outstanding) <= 0.005;
+      const settleAmount = Math.min(netOutstanding, Math.max(0.01, Number(pending.amount || 0)));
+      const isFull = Math.abs(settleAmount - netOutstanding) <= 0.005;
       const target = `float-${pending.floatId}`;
       const coveredPaymentIds: string[] = [];
       const bookings = data.bookings.map((booking) => {
@@ -1099,10 +1110,13 @@ export function BookingProvider({ children }: { children: React.ReactNode }) {
         return expense;
       }) : (data.expenses ?? []);
       const commissionEarned = staffFloatCommissionEarned(data, pending.floatId);
-      const record: StaffFloatSettlement = { ...pending, amount: settleAmount, status: "CONFIRMED", coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, approvedAt, approvedByUserId: user?.id, approvedByName: actorName, note: [pending.note, note?.trim()].filter(Boolean).join(" · ") || undefined, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined };
+      const commissionPayable = Math.round((commissionEarned + (staffBonus && staffBonus > 0 ? staffBonus : 0)) * 100) / 100;
+      const commissionVoucher: Expense | undefined = commissionPayable > 0.005 ? { id: `expense-commission-${settlementId}`, category: "commissions-bonuses", note: `عمولات ومكافآت موظفين — مدفوعة مقاصة من الكاش${note?.trim() ? ` · ${note.trim()}` : ""}`, amount: commissionPayable, date: approvedAt.slice(0, 10), fundingEntity: "staff", fundingSourceId: pending.floatId, fundingSourceLabel: account.label, isSettled: true, settlementId, createdAt: approvedAt, createdByName: actorName } : undefined;
+      const nextExpenses = commissionVoucher ? [...expenses, commissionVoucher] : expenses;
+      const record: StaffFloatSettlement = { ...pending, amount: settleAmount, status: "CONFIRMED", coveredPaymentIds: coveredPaymentIds.length ? coveredPaymentIds : undefined, coveredExpenseIds: coveredExpenseIds.length ? coveredExpenseIds : undefined, approvedAt, approvedByUserId: user?.id, approvedByName: actorName, note: [pending.note, note?.trim()].filter(Boolean).join(" · ") || undefined, commissionOffset: commissionEarned > 0.005 ? commissionEarned : undefined, staffBonus };
       const recipientDetail = record.recipientAccountLabel ? ` · إلى ${record.recipientAccountLabel}` : "";
       const partialDetail = !isFull ? ` · توريد جزئي ${settleAmount}` : "";
-      await persist({ ...data, bookings, expenses, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-approved" as AuditAction, subjectName: account.label, details: `تأكيد توريد عهدة "${account.label}" من ${record.requestedByName ?? "موظف"}: ${settleAmount} ${data.settings.currency}${recipientDetail}${partialDetail}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: approvedAt, actorName }, ...data.auditLog] });
+      await persist({ ...data, bookings, expenses: nextExpenses, staffFloatSettlements: (data.staffFloatSettlements ?? []).map((item) => item.id === settlementId ? record : item), auditLog: [{ id: `audit-${Date.now()}`, action: "float-settlement-approved" as AuditAction, subjectName: account.label, details: `تأكيد توريد عهدة "${account.label}" من ${record.requestedByName ?? "موظف"}: ${settleAmount} ${data.settings.currency}${recipientDetail}${partialDetail}${staffBonus ? ` · مكافأة/خصم ${staffBonus}` : ""}${note?.trim() ? ` · ${note.trim()}` : ""}`, createdAt: approvedAt, actorName }, ...data.auditLog] });
     },
     rejectStaffFloatSettlement: async (settlementId, reason) => {
       if (!can("manage_payments")) throw new Error("manage-payments-forbidden");

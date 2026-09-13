@@ -25,7 +25,7 @@ export function propertyTypeFrameRadius(value: unknown) {
   const type = normalizePropertyType(value);
   return type === "farm" ? 24 : type === "cabin" ? 30 : type === "villa" ? 26 : type === "camp" ? 20 : type === "other" ? 26 : 28;
 }
-export const EXPENSE_CATEGORIES = ["maintenance", "fuel-gas", "cleaning-supplies", "utilities", "hospitality", "guards-salaries", "other"] as const;
+export const EXPENSE_CATEGORIES = ["maintenance", "fuel-gas", "cleaning-supplies", "utilities", "hospitality", "guards-salaries", "commissions-bonuses", "other"] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export const EXPENSE_PAYMENT_METHODS = ["cash", "click", "iban"] as const;
 export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
@@ -142,6 +142,8 @@ export type FloatSettlementRecord = {
   approvedByName?: string;
   /** عمولات الموظف المخصومة ضمن هذه التسوية (نقدية مقابل تحصيلاته). */
   commissionOffset?: number;
+  /** مكافأة إضافية متفق عليها لحظة التسوية (موجبة = خصم من النقدية للموظف، سالبة = خصم إضافي على الموظف). */
+  staffBonus?: number;
 };
 /** تسوية وتوريد عهدة: المالك يصفّر ذمة الموظف وينقل المبلغ لخزينته. */
 export type StaffFloatSettlement = FloatSettlementRecord;
@@ -253,7 +255,7 @@ export function normalizeStaffFloatSettlements(value: unknown): StaffFloatSettle
     const amount = Number.isFinite(Number(candidate.amount)) && Number(candidate.amount) > 0 ? Math.round(Number(candidate.amount) * 100) / 100 : undefined;
     if (!id || !floatId || !settledAt || amount === undefined || ids.has(id)) return [];
     ids.add(id);
-    return [{ id, floatId, amount, settledAt, createdAt: typeof candidate.createdAt === "string" && !Number.isNaN(new Date(candidate.createdAt).getTime()) ? candidate.createdAt : undefined, settlementDate: typeof candidate.settlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.settlementDate) ? candidate.settlementDate : undefined, recipientAccountId: typeof candidate.recipientAccountId === "string" ? candidate.recipientAccountId.trim().slice(0, 72) || undefined : undefined, recipientAccountLabel: typeof candidate.recipientAccountLabel === "string" ? candidate.recipientAccountLabel.trim().slice(0, 120) || undefined : undefined, channel: candidate.channel === "cliq" || candidate.channel === "bank" ? candidate.channel : candidate.channel === "vault" ? "vault" : undefined, coveredPaymentIds: Array.isArray(candidate.coveredPaymentIds) ? candidate.coveredPaymentIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, coveredExpenseIds: Array.isArray(candidate.coveredExpenseIds) ? candidate.coveredExpenseIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, settledByUserId: Number.isInteger(candidate.settledByUserId) ? candidate.settledByUserId : undefined, settledByName: typeof candidate.settledByName === "string" ? candidate.settledByName.trim().slice(0, 120) || undefined : undefined, status: candidate.status === "PENDING_APPROVAL" || candidate.status === "CONFIRMED" || candidate.status === "REJECTED" ? candidate.status : "CONFIRMED", requestedByUserId: Number.isInteger(candidate.requestedByUserId) ? candidate.requestedByUserId : undefined, requestedByName: typeof candidate.requestedByName === "string" ? candidate.requestedByName.trim().slice(0, 120) || undefined : undefined, receiptUri: typeof candidate.receiptUri === "string" ? candidate.receiptUri.trim().slice(0, 600) || undefined : undefined, rejectReason: typeof candidate.rejectReason === "string" ? candidate.rejectReason.trim().slice(0, 400) || undefined : undefined, approvedAt: typeof candidate.approvedAt === "string" && !Number.isNaN(new Date(candidate.approvedAt).getTime()) ? candidate.approvedAt : undefined, approvedByUserId: Number.isInteger(candidate.approvedByUserId) ? candidate.approvedByUserId : undefined, approvedByName: typeof candidate.approvedByName === "string" ? candidate.approvedByName.trim().slice(0, 120) || undefined : undefined, commissionOffset: Number.isFinite(Number(candidate.commissionOffset)) && Number(candidate.commissionOffset) > 0 ? Math.round(Number(candidate.commissionOffset) * 100) / 100 : undefined } satisfies StaffFloatSettlement];
+    return [{ id, floatId, amount, settledAt, createdAt: typeof candidate.createdAt === "string" && !Number.isNaN(new Date(candidate.createdAt).getTime()) ? candidate.createdAt : undefined, settlementDate: typeof candidate.settlementDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(candidate.settlementDate) ? candidate.settlementDate : undefined, recipientAccountId: typeof candidate.recipientAccountId === "string" ? candidate.recipientAccountId.trim().slice(0, 72) || undefined : undefined, recipientAccountLabel: typeof candidate.recipientAccountLabel === "string" ? candidate.recipientAccountLabel.trim().slice(0, 120) || undefined : undefined, channel: candidate.channel === "cliq" || candidate.channel === "bank" ? candidate.channel : candidate.channel === "vault" ? "vault" : undefined, coveredPaymentIds: Array.isArray(candidate.coveredPaymentIds) ? candidate.coveredPaymentIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, coveredExpenseIds: Array.isArray(candidate.coveredExpenseIds) ? candidate.coveredExpenseIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim().slice(0, 72)).slice(0, 400) : undefined, note: typeof candidate.note === "string" ? candidate.note.trim().slice(0, 400) || undefined : undefined, settledByUserId: Number.isInteger(candidate.settledByUserId) ? candidate.settledByUserId : undefined, settledByName: typeof candidate.settledByName === "string" ? candidate.settledByName.trim().slice(0, 120) || undefined : undefined, status: candidate.status === "PENDING_APPROVAL" || candidate.status === "CONFIRMED" || candidate.status === "REJECTED" ? candidate.status : "CONFIRMED", requestedByUserId: Number.isInteger(candidate.requestedByUserId) ? candidate.requestedByUserId : undefined, requestedByName: typeof candidate.requestedByName === "string" ? candidate.requestedByName.trim().slice(0, 120) || undefined : undefined, receiptUri: typeof candidate.receiptUri === "string" ? candidate.receiptUri.trim().slice(0, 600) || undefined : undefined, rejectReason: typeof candidate.rejectReason === "string" ? candidate.rejectReason.trim().slice(0, 400) || undefined : undefined, approvedAt: typeof candidate.approvedAt === "string" && !Number.isNaN(new Date(candidate.approvedAt).getTime()) ? candidate.approvedAt : undefined, approvedByUserId: Number.isInteger(candidate.approvedByUserId) ? candidate.approvedByUserId : undefined, approvedByName: typeof candidate.approvedByName === "string" ? candidate.approvedByName.trim().slice(0, 120) || undefined : undefined, commissionOffset: Number.isFinite(Number(candidate.commissionOffset)) && Number(candidate.commissionOffset) > 0 ? Math.round(Number(candidate.commissionOffset) * 100) / 100 : undefined, staffBonus: Number.isFinite(Number(candidate.staffBonus)) && Math.abs(Number(candidate.staffBonus)) > 0.005 ? Math.round(Number(candidate.staffBonus) * 100) / 100 : undefined } satisfies StaffFloatSettlement];
   });
 }
 /** إيرادات تعويضات مخصومة من تأمين الحجز (أضرار/غرامات) — بند مستقل عن الإيجار. */
@@ -1527,20 +1529,54 @@ export function bookingEarnedCommission(settings: Settings, booking: Pick<Bookin
 export function staffFloatCommissionEarned(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string): number {
   if (!data.settings) return 0;
   const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
-  if (!account || account.isCommissionEnabled !== true) return 0;
+  if (!account) return 0;
+  return Math.round(staffFloatCommissionRows(data, floatId, account).reduce((sum, row) => sum + row.amount, 0) * 100) / 100;
+}
+/** تفصيل عمولات العهدة المستحقة لكل حجز (الأرقام الترابطية) لعرضها قابلة للنقر في شاشة التسوية. */
+export function staffFloatCommissionBreakdown(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string): { bookingId: string; reference: string; customerName: string; amount: number }[] {
+  if (!data.settings) return [];
+  const account = staffFloatAccounts(data.settings).find((item) => item.id === floatId);
+  if (!account) return [];
+  return staffFloatCommissionRows(data, floatId, account).map((row) => ({ bookingId: row.bookingId, reference: row.reference, customerName: row.customerName, amount: row.amount }));
+}
+function staffFloatCommissionRows(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string, account: StaffFloatAccount): { bookingId: string; reference: string; customerName: string; amount: number }[] {
   const target = `float-${floatId}`;
-  let total = 0;
+  const rows: { bookingId: string; reference: string; customerName: string; amount: number }[] = [];
   for (const booking of data.bookings) {
     if (!booking || booking.status === "cancelled" || booking.status === "waitlisted") continue;
     let collected = 0;
+    let memberCommission = 0;
+    let hasMemberCommission = false;
     for (const payment of booking.payments ?? []) {
-      if (!payment.voidedAt && payment.recipientTargetId === target) collected += Math.max(0, Number(payment.amount || 0));
+      if (payment.voidedAt || payment.recipientTargetId !== target) continue;
+      collected += Math.max(0, Number(payment.amount || 0));
+      const perPayment = Math.max(0, Number(payment.calculatedCommission || 0));
+      if (perPayment > 0.005) {
+        hasMemberCommission = true;
+        memberCommission += perPayment;
+      }
     }
     const deposit = booking.depositCollection;
-    if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target) collected += Math.max(0, Number(deposit.amount || 0));
-    if (collected > 0.005) total += staffCommissionForBooking(account, collected);
+    if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target) {
+      collected += Math.max(0, Number(deposit.amount || 0));
+      const perDeposit = Math.max(0, Number(deposit.calculatedCommission || 0));
+      if (perDeposit > 0.005) {
+        hasMemberCommission = true;
+        memberCommission += perDeposit;
+      }
+    }
+    if (collected <= 0.005) continue;
+    // عمولات ملف الموظف (المحتسبة لحظة التحصيل) تُفعّل عند تسجيل الوصول/إتمام الحجز؛
+    // عمولات العهدة القديمة (إعدادات النقطة) تبقى كما كانت لكل الحجوزات المفعّلة.
+    const accrued = booking.status === "completed" || Boolean(booking.checkedInAt);
+    if (accrued && hasMemberCommission) {
+      if (memberCommission > 0.005) rows.push({ bookingId: booking.id, reference: booking.bookingReference?.trim() || booking.id, customerName: booking.customerName ?? "", amount: Math.round(memberCommission * 100) / 100 });
+      continue;
+    }
+    const legacyEarned = staffCommissionForBooking(account, collected);
+    if (legacyEarned > 0.005) rows.push({ bookingId: booking.id, reference: booking.bookingReference?.trim() || booking.id, customerName: booking.customerName ?? "", amount: Math.round(legacyEarned * 100) / 100 });
   }
-  return Math.round(total * 100) / 100;
+  return rows;
 }
 /** الرصيد المعلّق على الموظف (عهدة) = المستلم - المدفوع خارجاً - المسوّى للمالك - عمولاته المستحقة. */
 export function staffFloatOutstanding(data: Pick<AppData, "bookings" | "staffFloatSettlements" | "expenses"> & Partial<Pick<AppData, "settings">>, floatId: string): number {

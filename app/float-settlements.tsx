@@ -42,6 +42,7 @@ export default function FloatSettlementsScreen() {
   const [reimbursementNote, setReimbursementNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [settleAmount, setSettleAmount] = useState<string>("");
+  const [settleBonus, setSettleBonus] = useState("");
   const [requestFor, setRequestFor] = useState<{ floatId: string; label: string; outstanding: number } | null>(null);
   const [requestAmount, setRequestAmount] = useState<string>("");
   const [requestAccountId, setRequestAccountId] = useState<string | null>(null);
@@ -64,7 +65,16 @@ export default function FloatSettlementsScreen() {
     setSettlementDate(todayISO());
     setSettlementNote("");
     setSettleAmount(String(statement.outstanding > 0 ? Math.round(statement.outstanding * 100) / 100 : 0));
+    setSettleBonus("");
     setSettleFor({ floatId: statement.float.id, label: statement.float.label, collectedTotal: statement.collectedTotal, paidOutTotal: statement.paidOutTotal, settledTotal: statement.settledTotal, outstanding: statement.outstanding });
+  };
+  const handleBonusChange = (raw: string) => {
+    setSettleBonus(raw);
+    if (!settleFor) return;
+    const parsed = Number(raw.replace(",", "."));
+    const bonusValue = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) / 100 : 0;
+    const net = Math.max(0, Math.round((settleFor.outstanding - bonusValue) * 100) / 100);
+    setSettleAmount(String(net));
   };
   const openRequest = (statement: StaffFloatStatement) => {
     setRequestAccountId(defaultAccount?.id ?? null);
@@ -90,13 +100,16 @@ export default function FloatSettlementsScreen() {
     }
     const parsed = Number(settleAmount.replace(",", "."));
     const requested = Number.isFinite(parsed) && parsed > 0 ? parsed : settleFor.outstanding;
-    if (requested > settleFor.outstanding + 0.005) {
-      Alert.alert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? `المبلغ المتاح للتوريد هو ${formatMoney(settleFor.outstanding, settings.currency)} فقط.` : `The handover amount cannot exceed ${formatMoney(settleFor.outstanding, settings.currency)}.`);
+    const parsedBonus = Number(settleBonus.replace(",", "."));
+    const bonusValue = Number.isFinite(parsedBonus) && Math.abs(parsedBonus) > 0.005 ? Math.round(parsedBonus * 100) / 100 : undefined;
+    const netDue = settleFor.outstanding - (bonusValue && bonusValue > 0 ? bonusValue : 0);
+    if (requested > netDue + 0.005) {
+      Alert.alert(language === "ar" ? "مبلغ غير صحيح" : "Invalid amount", language === "ar" ? `المبلغ المتاح للتوريد هو ${formatMoney(Math.max(0, netDue), settings.currency)} فقط.` : `The handover amount cannot exceed ${formatMoney(Math.max(0, netDue), settings.currency)}.`);
       return;
     }
     setSaving(true);
     try {
-      await settleStaffFloat(settleFor.floatId, settlementNote.trim() || undefined, { recipientAccountId: account.id, recipientAccountLabel: account.label, channel: channelForKind(account.kind), settlementDate, amount: requested });
+      await settleStaffFloat(settleFor.floatId, settlementNote.trim() || undefined, { recipientAccountId: account.id, recipientAccountLabel: account.label, channel: channelForKind(account.kind), settlementDate, amount: requested, staffBonus: bonusValue });
       setJustSettled(settleFor.floatId);
       setTimeout(() => setJustSettled(null), 2600);
       setSettleFor(null);
@@ -243,6 +256,8 @@ export default function FloatSettlementsScreen() {
       target={settleFor}
       settleAmount={settleAmount}
       onSettleAmountChange={setSettleAmount}
+      bonus={settleBonus}
+      onBonusChange={handleBonusChange}
       recipientAccountId={recipientAccountId}
       onRecipientAccountIdChange={setRecipientAccountId}
       settlementDate={settlementDate}

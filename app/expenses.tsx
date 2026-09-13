@@ -54,6 +54,7 @@ const CATEGORY_META: Record<ExpenseCategory, { ar: string; en: string; icon: Ico
   utilities: { ar: "كهرباء ومياه", en: "Electricity & water", icon: "bolt" },
   hospitality: { ar: "ضيافة", en: "Hospitality", icon: "room-service" },
   "guards-salaries": { ar: "رواتب ومكافآت", en: "Salaries & bonuses", icon: "badge" },
+  "commissions-bonuses": { ar: "عمولات ومكافآت موظفين", en: "Commissions & staff bonuses", icon: "payments" },
   other: { ar: "أخرى", en: "Other", icon: "receipt-long" },
 };
 

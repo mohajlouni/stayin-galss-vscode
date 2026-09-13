@@ -6,14 +6,16 @@ import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from "react
 
 import { ScreenContainer } from "@/components/screen-container";
 import { ThemedText } from "@/components/themed-text";
+import { useAuth } from "@/hooks/use-auth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
-import { claimMatches, findOnbookByUid, normalizeUid } from "@/lib/staff-directory";
+import { claimMatches, findOnbookByPhone, findOnbookByUid, normalizeUid } from "@/lib/staff-directory";
 import { useOnbookStaff } from "@/lib/staff-directory-store";
 
 export default function ClaimStaffAccountScreen() {
   const colors = useColors();
   const { language, isRTL } = useI18n();
+  const { user } = useAuth();
   const params = useLocalSearchParams<{ phone?: string; uid?: string }>();
   const { staff, ready, commit } = useOnbookStaff();
   const [phone, setPhone] = useState(() => (typeof params.phone === "string" ? params.phone.trim() : ""));
@@ -36,16 +38,20 @@ export default function ClaimStaffAccountScreen() {
 
   const matched = useMemo(() => {
     if (!ready) return undefined;
-    const candidate = findOnbookByUid(staff, uid);
-    if (!candidate || !claimMatches(candidate, phone, uid)) return undefined;
-    return candidate;
+    const byPhone = findOnbookByPhone(staff, phone);
+    if (!byPhone) return undefined;
+    if (uid.trim()) {
+      const byUid = findOnbookByUid(staff, uid);
+      return byUid && claimMatches(byUid, phone, uid) ? byUid : undefined;
+    }
+    return byPhone;
   }, [ready, staff, phone, uid]);
 
   const verifyIdentity = () => {
     setError(null);
     if (phone.replace(/\D/g, "").length < 6) { setError(ar ? "أدخل رقم الهاتف المسجل في دليل المنتسبين." : "Enter the phone number recorded in the staff directory."); return; }
-    if (!uid.trim()) { setError(ar ? "أدخل معرّف المنتسب (#UID) الظاهر بجانب اسمه." : "Enter the staff #UID shown next to their name."); return; }
-    if (!matched) { setError(ar ? "المعرّف ورقم الهاتف لا يتطابقان مع أي منتسب على الكتاب بجهازك. راجعهما أو اطلب من المالك تحديث القائمة." : "The UID and phone do not match any on-book member on this device. Double-check them or ask the owner to update the list."); return; }
+    if (uid.trim() && !matched) { setError(ar ? "المعرّف ورقم الهاتف لا يتطابقان مع أي منتسب على الكتاب بجهازك. راجعهما أو اطلب من المالك تحديث القائمة." : "The UID and phone do not match any on-book member on this device. Double-check them or ask the owner to update the list."); return; }
+    if (!matched) { setError(ar ? "لم يُعثر على منتسب برقم الهاتف هذا في الدليل المحلي، لذا لا توجد عهد أو تحصيلات مرتبطة به. اطلب من المالك إضافتك على الكتاب أولًا." : "No on-book member with this phone was found in the local directory, so no floats or collections are linked to it. Ask the owner to add you to the book first."); return; }
     setGenerated(String(Math.floor(100000 + Math.random() * 900000)));
     setOtp("");
     setStep("otp");
@@ -59,7 +65,7 @@ export default function ClaimStaffAccountScreen() {
     await new Promise((resolve) => setTimeout(resolve, 650));
     try {
       if (otp.trim() !== generated) { setError(ar ? "رمز التحقق غير صحيح. أعد المحاولة." : "The verification code is incorrect. Try again."); return; }
-      await commit(staff.map((entry) => (entry.uid === matched?.uid ? { ...entry, isAppUser: true } : entry)));
+      await commit(staff.map((entry) => (entry.uid === matched?.uid ? { ...entry, isAppUser: true, authUid: user?.id ? String(user.id) : undefined } : entry)));
       setStep("done");
     } catch {
       setError(ar ? "تعذر حفظ التفعيل المحلي. أعد المحاولة." : "Could not save the local activation. Retry.");
@@ -90,7 +96,7 @@ export default function ClaimStaffAccountScreen() {
             <View style={styles.glow}><MaterialIcons name="badge" size={40} color={colors.primary} /></View>
             <ThemedText variant="titleLarge" style={styles.title}>{ar ? "تفعيل حساب التطبيق (Claim)" : "Claim an app account"}</ThemedText>
             <ThemedText variant="bodySmall" color={colors.muted} style={styles.subtitle}>
-              {ar ? "إذا كنت منتسبًا مسجلًا على الكتاب حاليًا، يمكنك تفعيل وضع التطبيق بمطابقة هويتك (الهاتف + #UID) مع الدليل المحلي ثم تأكيد رمز تحقق." : "If you are an on-book member, activate app mode by matching your identity (phone + #UID) against the local directory, then confirm a verification code."}
+              {ar ? "إذا كنت منتسبًا مسجلًا على الكتاب حاليًا، أدخل رقم هاتفك المسجل (المعرّف #UID اختياري للمطابقة الأقوى) ثم أكّد رمز تحقق محليًا لربط العهود المالية بحسابك." : "If you are an on-book member, enter your registered phone number (the #UID is optional for a stricter match) then confirm a local verification code to bind your custody floats to your account."}
             </ThemedText>
           </View>
 
@@ -114,6 +120,12 @@ export default function ClaimStaffAccountScreen() {
                     <ThemedText variant="label" color={colors.foreground} style={styles.matchName}>{matched.name} · {matched.uid}</ThemedText>
                     <ThemedText variant="caption" color={colors.muted} style={styles.matchMeta}>{matched.role === "guard" ? (ar ? "حارس ميداني" : "Field guard") : (ar ? "موظف / محاسب" : "Staff / accountant")} · {matched.phone}</ThemedText>
                   </View>
+                </View>
+              ) : null}
+              {matched ? (
+                <View style={[styles.feedback, { borderColor: colors.primary + "55", backgroundColor: colors.primary + "0D", flexDirection: row }]}>
+                  <MaterialIcons name="account-balance-wallet" size={17} color={colors.primary} />
+                  <ThemedText variant="caption" color={colors.foreground} style={styles.feedbackText}>{ar ? "تم العثور على سجل مالي وعهد سابقة مرتبطة برقمك، هل ترغب بربط حسابك؟" : "Financial and custody records were found linked to your number. Would you like to link your account?"}</ThemedText>
                 </View>
               ) : null}
               {error ? (

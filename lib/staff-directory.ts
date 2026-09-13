@@ -15,6 +15,8 @@ export type OnbookStaff = {
   email?: string;
   isAppUser: boolean;
   createdAt?: string;
+  /** حساب التطبيق المرتبط (auth_uid) بعد تفعيل المنتسب عبر رمز التحقق. */
+  authUid?: string;
 };
 
 export const ONBOOK_ROLE_TO_IDENTITY: Record<OnbookStaffRole, Exclude<UserIdentityRole, "internal">> = {
@@ -99,6 +101,7 @@ export function normalizeOnbookStaff(value: unknown): OnbookStaff[] {
       email: typeof item.email === "string" && item.email.trim() ? item.email.trim().slice(0, 120) : undefined,
       isAppUser: item.isAppUser === true,
       createdAt: typeof item.createdAt === "string" ? item.createdAt.slice(0, 40) : undefined,
+      ...(typeof item.authUid === "string" && item.authUid.trim() ? { authUid: item.authUid.trim().slice(0, 80) } : {}),
     });
   }
   return out;

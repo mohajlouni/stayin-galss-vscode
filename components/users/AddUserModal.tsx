@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { useColors } from "@/hooks/use-colors";
-import { suggestOnbookUid, type OnbookStaffRole } from "@/lib/staff-directory";
+import { suggestOnbookUid } from "@/lib/staff-directory";
 
 export type AddUserTrack = "app" | "onbook";
+
+/** صلاحية مسبقة لدعوة عضو التطبيق: staff / mini-admin / guard (يُترجم إلى دور Guard + صلاحيات). */
+export type AddUserPreset = "staff" | "mini-admin" | "guard";
 
 type AddUserModalProps = {
   visible: boolean;
@@ -16,14 +19,15 @@ type AddUserModalProps = {
   takenUidCodes: string[];
   onClose: () => void;
   /** مسار التطبيق (Track A): ينشئ دعوة موظف عبر الخادم ويعيد نتيجة النجاح. */
-  onInviteAppUser: (name: string, phone: string) => Promise<boolean>;
+  onInviteAppUser: (name: string, phone: string, preset: AddUserPreset) => Promise<boolean>;
   /** مسار الكتاب (Track B): يضيف منتسبًا محليًا ويعيد رسالة خطأ مترجمة أو null عند النجاح. */
-  onAddOnbookStaff: (entry: { name: string; phone: string; role: OnbookStaffRole; email?: string }) => Promise<string | null>;
+  onAddOnbookStaff: (entry: { name: string; phone: string }) => Promise<string | null>;
 };
 
-const ONBOOK_ROLES: { id: OnbookStaffRole; icon: "badge" | "security"; ar: string; en: string }[] = [
-  { id: "staff", icon: "badge", ar: "موظف / محاسب", en: "Staff / accountant" },
-  { id: "guard", icon: "security", ar: "حارس ميداني", en: "Field guard" },
+const INVITE_PRESETS: { id: AddUserPreset; icon: "badge" | "admin-panel-settings" | "security"; ar: string; en: string }[] = [
+  { id: "staff", icon: "badge", ar: "موظف حجوزات", en: "Booking staff" },
+  { id: "mini-admin", icon: "admin-panel-settings", ar: "مدير تشغيلي", en: "Mini-admin" },
+  { id: "guard", icon: "security", ar: "حارس / ضيف", en: "Guard / guest" },
 ];
 
 export default function AddUserModal({ visible, language, isRTL, colors, takenUidCodes, onClose, onInviteAppUser, onAddOnbookStaff }: AddUserModalProps) {
@@ -32,8 +36,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, takenUi
   const [track, setTrack] = useState<AddUserTrack>("app");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<OnbookStaffRole>("staff");
+  const [preset, setPreset] = useState<AddUserPreset>("staff");
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
@@ -41,12 +44,11 @@ export default function AddUserModal({ visible, language, isRTL, colors, takenUi
     setTrack("app");
     setName("");
     setPhone("");
-    setEmail("");
-    setRole("staff");
+    setPreset("staff");
     setPending(false);
   }, [visible]);
 
-  const previewUid = track === "onbook" ? suggestOnbookUid(role, takenUidCodes) : "";
+  const previewUid = track === "onbook" ? suggestOnbookUid("staff", takenUidCodes) : "";
 
   const submitApp = async () => {
     if (name.trim().length < 2 || phone.trim().length < 6) {
@@ -55,7 +57,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, takenUi
     }
     setPending(true);
     try {
-      const ok = await onInviteAppUser(name, phone);
+      const ok = await onInviteAppUser(name, phone, preset);
       if (ok) onClose();
     } finally {
       setPending(false);
@@ -69,7 +71,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, takenUi
     }
     setPending(true);
     try {
-      const error = await onAddOnbookStaff({ name, phone, role, email });
+      const error = await onAddOnbookStaff({ name, phone });
       if (error) {
         Alert.alert(language === "ar" ? "تعذر الإضافة" : "Could not add", error);
         return;
@@ -91,18 +93,17 @@ export default function AddUserModal({ visible, language, isRTL, colors, takenUi
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       {track === "app" ? <View>
         <Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "عبر دعوة تطبيق" : "Via app invitation"}</Text>
-        <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 18, marginTop: 2, textAlign: align }}>{language === "ar" ? "يستلم الموظف رمز دعوة من 6 أرقام ويُفعّل حسابه في التطبيق، ثم تحدد صلاحياته من قائمة الفريق." : "The employee receives a 6-digit invite (PIN) to activate their account in the app; you then set their permissions from the team list."}</Text>
+        <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 18, marginTop: 2, textAlign: align }}>{language === "ar" ? "يستلم الموظف رمز دعوة من 6 أرقام ويُفعّل حسابه في التطبيق. اختر الصلاحية المسبقة للدعوة." : "The employee receives a 6-digit invite (PIN) to activate their account in the app. Pick the preset permissions for the invite."}</Text>
+        <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "الصلاحية المسبقة" : "Permission preset"}</Text>
+        <View style={[styles.roleRow, { flexDirection: row }]}>{INVITE_PRESETS.map((choice) => <Pressable key={choice.id} accessibilityRole="button" accessibilityState={{ selected: preset === choice.id }} onPress={() => setPreset(choice.id)} style={({ pressed }) => [styles.roleChip, { backgroundColor: preset === choice.id ? colors.primary + "1A" : colors.surfaceMuted + "3A", borderColor: preset === choice.id ? colors.primary : colors.border, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={choice.icon} size={16} color={preset === choice.id ? colors.primary : colors.muted} /><Text style={{ color: preset === choice.id ? colors.primary : colors.muted, fontSize: 11, fontWeight: "800", textAlign: "center" }}>{language === "ar" ? choice.ar : choice.en}</Text></Pressable>)}</View>
         <TextInput value={name} onChangeText={setName} placeholder={language === "ar" ? "اسم الموظف" : "Employee name"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
         <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder={language === "ar" ? "رقم الهاتف" : "Phone number"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
       </View> : <View>
         <Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "بدون حساب تطبيق (على الكتاب)" : "Without an app account (on the book)"}</Text>
-        <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 18, marginTop: 2, textAlign: align }}>{language === "ar" ? "يُسجَّل على الجهاز محليًا بمباشرة لربط العُهد والتحصيلات، ويحصل على معرّف تلقائي. يمكنه لاحقًا تفعيل تطبيق عبر /auth/claim-staff-account." : "Registered locally on this device to bind custody floats instantly, and given an automatic ID. They can later claim an app account via /auth/claim-staff-account."}</Text>
-        <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "الدور الميداني" : "Field role"}</Text>
-        <View style={[styles.roleRow, { flexDirection: row }]}>{ONBOOK_ROLES.map((choice) => <Pressable key={choice.id} accessibilityRole="button" accessibilityState={{ selected: role === choice.id }} onPress={() => setRole(choice.id)} style={({ pressed }) => [styles.roleChip, { backgroundColor: role === choice.id ? colors.primary + "1A" : colors.surfaceMuted + "3A", borderColor: role === choice.id ? colors.primary : colors.border, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={choice.icon} size={16} color={role === choice.id ? colors.primary : colors.muted} /><Text style={{ color: role === choice.id ? colors.primary : colors.muted, fontSize: 11, fontWeight: "800", textAlign: "center" }}>{language === "ar" ? choice.ar : choice.en}</Text></Pressable>)}</View>
+        <Text style={{ color: colors.muted, fontSize: 11.5, lineHeight: 18, marginTop: 2, textAlign: align }}>{language === "ar" ? "يُسجَّل على الجهاز محليًا برتبة موظف لربط العُهد والتحصيلات، ويحصل على معرّف ميداني تلقائي. يمكنه لاحقًا تفعيل تطبيق عبر /auth/claim-staff-account." : "Registered locally on this device as field staff to bind custody floats instantly, and given an automatic field ID. They can later claim an app account via /auth/claim-staff-account."}</Text>
+        <View style={[styles.uidPreview, { backgroundColor: "#0EA5E9" + "0D", borderColor: "#0EA5E9" + "45", flexDirection: row }]}><MaterialIcons name="badge" size={16} color="#0EA5E9" /><Text style={[styles.flex, { color: colors.muted, fontSize: 11, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "المعرّف الميداني (غير قابل للتعديل):" : "Field ID (read-only):"}</Text><Text style={{ color: "#0EA5E9", fontSize: 13, fontWeight: "900", writingDirection: "ltr" }}>#{previewUid}</Text></View>
         <TextInput value={name} onChangeText={setName} placeholder={language === "ar" ? "اسم المنتسب / النقطة" : "Staff / point name"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
         <TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder={language === "ar" ? "رقم الهاتف للتواصل" : "Contact phone number"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-        <TextInput value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" placeholder={language === "ar" ? "البريد الإلكتروني (اختياري)" : "Email (optional)"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} />
-        <View style={[styles.uidPreview, { backgroundColor: "#0EA5E9" + "0D", borderColor: "#0EA5E9" + "45", flexDirection: row }]}><MaterialIcons name="badge" size={16} color="#0EA5E9" /><Text style={[styles.flex, { color: colors.muted, fontSize: 11, fontWeight: "700", textAlign: align }]}>{language === "ar" ? "المعرّف التلقائي عند الحفظ:" : "Auto ID on save:"}</Text><Text style={{ color: "#0EA5E9", fontSize: 13, fontWeight: "900", writingDirection: "ltr" }}>{previewUid}</Text></View>
       </View>}
     </ScrollView>
 

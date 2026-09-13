@@ -1539,42 +1539,57 @@ export function staffFloatCommissionBreakdown(data: Pick<AppData, "bookings"> & 
   if (!account) return [];
   return staffFloatCommissionRows(data, floatId, account).map((row) => ({ bookingId: row.bookingId, reference: row.reference, customerName: row.customerName, amount: row.amount }));
 }
-function staffFloatCommissionRows(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string, account: StaffFloatAccount): { bookingId: string; reference: string; customerName: string; amount: number }[] {
+export type StaffFloatCommissionRow = { bookingId: string; reference: string; customerName: string; chaletName: string; /** إجمالي المبالغ المحصّلة عبر العهدة لهذا الحجز (إيجار + تأمين). */ collected: number; /** طابع زمني لأحدث تحصيل مرتبط بالحجز (ساعة دقيقة ثانية أو التاريخ). */ paidAt: string; /** وصف آلية احتساب العمولة (ثابت لكل حجز / نسبة من التحصيل). */ mechanism: string; /** معرّفات التوريدات التي غطّت تحصيلات الحجز؛ تُستخدم لتمييز العمولة المسوّاة عن المعلّقة. */ settlementIds: string[]; amount: number };
+export function staffFloatCommissionRows(data: Pick<AppData, "bookings"> & Partial<Pick<AppData, "settings">>, floatId: string, account: StaffFloatAccount): StaffFloatCommissionRow[] {
   const target = `float-${floatId}`;
-  const rows: { bookingId: string; reference: string; customerName: string; amount: number }[] = [];
+  const rows: StaffFloatCommissionRow[] = [];
   for (const booking of data.bookings) {
     if (!booking || booking.status === "cancelled" || booking.status === "waitlisted") continue;
     let collected = 0;
     let memberCommission = 0;
     let hasMemberCommission = false;
+    let memberUsesFixed = true;
+    let paidAt = "";
+    const settlementIds: string[] = [];
+    const noteTimestamp = (value: string | undefined, day: string | undefined) => {
+      const at = value && value.trim() ? value.trim() : (day ? `${day}T00:00:00` : "");
+      if (at && at > paidAt) paidAt = at;
+    };
     for (const payment of booking.payments ?? []) {
       if (payment.voidedAt || payment.recipientTargetId !== target) continue;
       collected += Math.max(0, Number(payment.amount || 0));
+      noteTimestamp(payment.recordedAt, payment.date);
+      if (payment.settlementId) settlementIds.push(payment.settlementId);
       const perPayment = Math.max(0, Number(payment.calculatedCommission || 0));
       if (perPayment > 0.005) {
         hasMemberCommission = true;
         memberCommission += perPayment;
+        if (payment.commissionType !== "fixed") memberUsesFixed = false;
       }
     }
     const deposit = booking.depositCollection;
     if (deposit && !deposit.voidedAt && deposit.recipientTargetId === target) {
       collected += Math.max(0, Number(deposit.amount || 0));
+      noteTimestamp(deposit.recordedAt, deposit.date);
+      if (deposit.settlementId) settlementIds.push(deposit.settlementId);
       const perDeposit = Math.max(0, Number(deposit.calculatedCommission || 0));
       if (perDeposit > 0.005) {
         hasMemberCommission = true;
         memberCommission += perDeposit;
+        if (deposit.commissionType !== "fixed") memberUsesFixed = false;
       }
     }
     if (collected <= 0.005) continue;
     // عمولات ملف الموظف (المحتسبة لحظة التحصيل) تُفعّل عند تسجيل الوصول/إتمام الحجز؛
     // عمولات العهدة القديمة (إعدادات النقطة) تبقى كما كانت لكل الحجوزات المفعّلة.
     const accrued = booking.status === "completed" || Boolean(booking.checkedInAt);
+    const base = { bookingId: booking.id, reference: booking.bookingReference?.trim() || booking.id, customerName: booking.customerName ?? "", chaletName: booking.chaletName ?? "", collected: Math.round(collected * 100) / 100, paidAt, settlementIds };
     if (accrued && hasMemberCommission) {
-      if (memberCommission > 0.005) rows.push({ bookingId: booking.id, reference: booking.bookingReference?.trim() || booking.id, customerName: booking.customerName ?? "", amount: Math.round(memberCommission * 100) / 100 });
+      if (memberCommission > 0.005) rows.push({ ...base, mechanism: memberUsesFixed ? "مبلغ ثابت لكل تحصيل" : `${Math.max(0, Math.round(((memberCommission / collected) * 100) * 10) / 10)}% من قيمة التحصيل`, amount: Math.round(memberCommission * 100) / 100 });
       continue;
     }
     const legacyEarned = staffCommissionForBooking(account, collected);
-    if (legacyEarned > 0.005) rows.push({ bookingId: booking.id, reference: booking.bookingReference?.trim() || booking.id, customerName: booking.customerName ?? "", amount: Math.round(legacyEarned * 100) / 100 });
+    if (legacyEarned > 0.005) rows.push({ ...base, mechanism: account.commissionType === "FIXED_PER_BOOKING" ? "مبلغ ثابت لكل حجز" : `${Number(account.commissionValue) || 0}% من إجمالي التحصيل`, amount: Math.round(legacyEarned * 100) / 100 });
   }
   return rows;
 }

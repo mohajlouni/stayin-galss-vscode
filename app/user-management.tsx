@@ -10,8 +10,9 @@ import AddUserModal, { type AddUserRole } from "@/components/users/AddUserModal"
 import { startOAuthLogin } from "@/constants/oauth";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
-import { findOnbookByPhone, normalizeUid, phoneKey, suggestOnbookUid, validateOnbookEntry, type OnbookStaff } from "@/lib/staff-directory";
+import { findOnbookByPhone, hasDuplicatePhone, normalizeUid, phoneKey, suggestOnbookUid, validateOnbookEntry, type OnbookStaff, type OnbookStaffRole } from "@/lib/staff-directory";
 import { useOnbookStaff } from "@/lib/staff-directory-store";
+import { capabilitiesForRole, type GranularCapability } from "@/lib/permissions";
 import { buildInviteCode } from "@/lib/invite-code";
 import { trpc } from "@/lib/trpc";
 import { useWorkspaceAccess } from "@/lib/workspace-access";
@@ -25,11 +26,14 @@ type UnifiedEntry = {
   kind: "member" | "onbook" | "invitation";
   name: string;
   roleLabel: string;
+  roleBadge: string;
+  role?: OnbookStaffRole;
   phone: string;
   appActive: boolean;
   inviteCode?: string;
   onPress?: () => void;
   onActivate?: () => void;
+  onEdit?: () => void;
   onDelete?: () => void;
   onbookUid?: string;
   invitationId?: number;
@@ -79,6 +83,7 @@ export default function UserManagementScreen() {
    const row = isRTL ? "row-reverse" : "row";
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+  const [editingOnbook, setEditingOnbook] = useState<{ uid: string; name: string; phone: string; role: AddUserRole; caps: readonly GranularCapability[] } | null>(null);
   const { staff: onbookStaff, ready: onbookReady, commit } = useOnbookStaff();
 
   useEffect(() => {
@@ -236,20 +241,48 @@ export default function UserManagementScreen() {
       Alert.alert(language === "ar" ? "تعذرت الإزالة" : "Could not remove", language === "ar" ? "حاول مرة أخرى." : "Please try again.");
     }
   };
-  const confirmRemoveOnbook = (entry: { name: string; onbookUid?: string }) => {
-    Alert.alert(language === "ar" ? "إزالة من فريق العمل" : "Remove from team", language === "ar" ? `هل أنت متأكد من إزالة «${entry.name}» من فريق العمل؟ لن يتمكن من الوصول للعهد أو الحجوزات.` : `Are you sure you want to remove "${entry.name}" from the team? They will no longer be able to access floats or bookings.`, [
+  const confirmRemoveOnbook = (entry: { name: string; onbookUid?: string; phone?: string }) => {
+    Alert.alert(language === "ar" ? "حذف عضو من فريق العمل" : "Delete team member", language === "ar" ? `هل أنت متأكد من حذف هذا العضو؟ («${entry.name}») سيُحذف سجلُه المحلي وتُلغى الدعوة المعلقة على رقمه.` : `Are you sure you want to delete this member? ("${entry.name}") The local record will be purged and any pending invite on the number will be revoked.`, [
       { text: language === "ar" ? "إلغاء" : "Cancel", style: "cancel" as const },
-      { text: language === "ar" ? "إزالة" : "Remove", style: "destructive" as const, onPress: () => void runRemoveOnbook(entry) },
+      { text: language === "ar" ? "حذف" : "Delete", style: "destructive" as const, onPress: () => void runRemoveOnbook(entry) },
     ]);
   };
-  const runRemoveOnbook = async (entry: { name: string; onbookUid?: string }) => {
+  const runRemoveOnbook = async (entry: { name: string; onbookUid?: string; phone?: string }) => {
     try {
+      for (const invitation of (overview.data?.invitations ?? []).filter((invitation) => !invitation.usedAt && !invitation.revokedAt && phoneKey(invitation.phone) === phoneKey(entry.phone ?? ""))) {
+        await revoke.mutateAsync({ invitationId: invitation.id });
+      }
       if (entry.onbookUid) {
         await commit(onbookStaff.filter((item) => item.uid !== entry.onbookUid));
       }
-      Alert.alert(language === "ar" ? "تمت الإزالة" : "Removed", language === "ar" ? `أُزيل «${entry.name}» من قائمة فريق العمل المحلية.` : `"${entry.name}" was removed from the local team list.`);
+      await overview.refetch();
+      Alert.alert(language === "ar" ? "تم الحذف" : "Deleted", language === "ar" ? `حُذف «${entry.name}» من قائمة فريق العمل المحلية.` : `"${entry.name}" was removed from the local team list.`);
     } catch {
-      Alert.alert(language === "ar" ? "تعذرت الإزالة" : "Could not remove", language === "ar" ? "حاول مرة أخرى." : "Please try again.");
+      Alert.alert(language === "ar" ? "تعذر الحذف" : "Could not delete", language === "ar" ? "حاول مرة أخرى." : "Please try again.");
+    }
+  };
+  const openEditOnbook = (entry: UnifiedEntry) => {
+    const role: AddUserRole = entry.role === "guard" ? "guard" : "staff";
+    setEditingOnbook({ uid: entry.onbookUid ?? "", name: entry.name, phone: entry.phone, role, caps: capabilitiesForRole(role) });
+  };
+  const saveEditedOnbook = async (entry: { uid: string; name: string; phone: string; role: AddUserRole; permissions: WorkspacePermissions }): Promise<string | null> => {
+    const membersData = overview.data?.members ?? [];
+    if (entry.name.trim().length < 2 || phoneKey(entry.phone).length < 6) return language === "ar" ? "أدخل اسم العضو ورقم هاتفه بشكل صحيح." : "Enter the member's name and phone number.";
+    if (hasDuplicatePhone(membersData.map((item) => item.phone), onbookStaff, entry.phone, entry.uid)) return language === "ar" ? "رقم الهاتف مستخدم مسبقًا في التطبيق أو سجل الفريق." : "This phone is already used by an app member or another team record.";
+    try {
+      const existing = onbookStaff.find((item) => item.uid === entry.uid);
+      const changedPhone = !existing || phoneKey(existing.phone) !== phoneKey(entry.phone);
+      const inviteRole: "admin" | "staff" | "guest" = entry.role === "mini-admin" ? "admin" : entry.role === "guard" ? "guest" : "staff";
+      if (changedPhone) {
+        const oldInvitations = (overview.data?.invitations ?? []).filter((invitation) => !invitation.usedAt && !invitation.revokedAt && phoneKey(invitation.phone) === phoneKey(existing ? existing.phone : ""));
+        await invite.mutateAsync({ employeeName: entry.name.trim(), phone: entry.phone.trim(), role: inviteRole, permissions: entry.permissions });
+        for (const invitation of oldInvitations) await revoke.mutateAsync({ invitationId: invitation.id });
+      }
+      await commit(onbookStaff.map((item) => item.uid === entry.uid ? { ...item, name: entry.name.trim(), phone: entry.phone.trim(), role: entry.role === "guard" ? "guard" : "staff" } : item));
+      await overview.refetch();
+      return null;
+    } catch {
+      return language === "ar" ? "تعذر حفظ التعديلات. حاول مرة أخرى." : "Could not save the changes. Please try again.";
     }
   };
   const parseInvitePermissions = (raw: unknown): unknown => {
@@ -259,7 +292,13 @@ export default function UserManagementScreen() {
   };
   const unifiedTeam: UnifiedEntry[] = (() => {
     const rows: UnifiedEntry[] = [];
+    const memberPhoneKeys = new Set<string>((overview.data?.members ?? []).filter((item) => item.status !== "disabled").map((item) => phoneKey(item.phone ?? "")));
+    const memberRowKeys = new Set<string>();
+    const memberBadge = (role: TeamMember["role"]): string => role === "owner" ? (language === "ar" ? "المالك" : "Owner") : role === "admin" ? (language === "ar" ? "مدير تشغيلي" : "Manager") : role === "guest" ? (language === "ar" ? "ضيف" : "Guest") : (language === "ar" ? "موظف" : "Staff");
     (overview.data?.members ?? []).filter((item) => item.status !== "disabled").forEach((rawMember) => {
+      const memberKey = phoneKey(rawMember.phone ?? "");
+      if (memberKey && memberRowKeys.has(memberKey)) return;
+      if (memberKey) memberRowKeys.add(memberKey);
       const member = { ...rawMember, permissions: normalizeWorkspacePermissions(rawMember.permissions, rawMember.role === "owner" || rawMember.role === "admin" ? "manager" : rawMember.role === "guest" ? "guest" : "employee") } as TeamMember;
       const owner = member.role === "owner";
       const fullAccess = owner || member.role === "admin" || hasAllWorkspacePermissions(member.permissions);
@@ -268,32 +307,45 @@ export default function UserManagementScreen() {
         kind: "member",
         name: member.displayName,
         roleLabel: owner ? (language === "ar" ? "المالك الأساسي — محمي وغير قابل للتعديل" : "Primary owner — protected") : `${WORKSPACE_ROLE_LABELS[member.role].ar}${fullAccess ? (language === "ar" ? " · صلاحية كاملة" : " · Full access") : ""}`,
+        roleBadge: memberBadge(member.role),
         phone: member.phone ?? "",
         appActive: true,
         onPress: owner ? () => Alert.alert(language === "ar" ? "المالك الأساسي محمي" : "Primary owner protected", language === "ar" ? "لا يمكن حذف المالك الأساسي أو خفض دوره أو تعديل صلاحياته." : "The primary owner cannot be deleted, demoted, or edited.") : () => setEditingMember(member),
+        onEdit: owner ? undefined : () => setEditingMember(member),
         onDelete: owner ? undefined : () => confirmRemoveMember(member),
       });
     });
+    const onbookPhoneKeys = new Set<string>();
     onbookStaff.forEach((entry) => {
-      rows.push({
+      const onbookKey = phoneKey(entry.phone);
+      if (!onbookKey || onbookPhoneKeys.has(onbookKey)) return;
+      if (memberPhoneKeys.has(onbookKey)) return;
+      onbookPhoneKeys.add(onbookKey);
+      const card: UnifiedEntry = {
         key: `onbook:${entry.uid}`,
         kind: entry.isAppUser ? "member" : "onbook",
         name: entry.name,
         roleLabel: entry.role === "guard" ? (language === "ar" ? "حارس ميداني" : "Field guard") : (language === "ar" ? "موظف / محاسب" : "Staff / accountant"),
+        roleBadge: entry.role === "guard" ? (language === "ar" ? "حارس" : "Guard") : (language === "ar" ? "موظف" : "Staff"),
+        role: entry.role,
         phone: entry.phone,
         appActive: entry.isAppUser,
         inviteCode: buildInviteCode(entry.phone) ?? undefined,
         onActivate: entry.isAppUser ? undefined : () => router.push(`/auth/claim-staff-account?phone=${encodeURIComponent(entry.phone)}&uid=${encodeURIComponent(entry.uid)}` as never),
+        onEdit: () => openEditOnbook(card),
         onDelete: entry.isAppUser ? undefined : () => confirmRemoveOnbook(entry),
         onbookUid: entry.uid,
-      });
+      };
+      rows.push(card);
     });
     (overview.data?.invitations ?? []).filter((entry) => !entry.usedAt && !entry.revokedAt).forEach((entry) => {
+      if (onbookPhoneKeys.has(phoneKey(entry.phone)) || memberPhoneKeys.has(phoneKey(entry.phone))) return;
       rows.push({
         key: `inv:${entry.id}`,
         kind: "invitation",
         name: entry.employeeName,
         roleLabel: language === "ar" ? "بانتظار التفعيل" : "Awaiting activation",
+        roleBadge: language === "ar" ? "دعوة" : "Invite",
         phone: entry.phone,
         appActive: false,
         inviteCode: buildInviteCode(entry.phone) ?? undefined,
@@ -310,11 +362,11 @@ export default function UserManagementScreen() {
     <SubScreenHeader title={language === "ar" ? "إدارة المستخدمين" : "User management"} />
     {!isAuthenticated ? <AccessCard colors={colors} align={align} title={language === "ar" ? "تسجيل الدخول مطلوب" : "Sign-in required"} detail={language === "ar" ? "سجّل الدخول أولًا لتنشئ مساحة المنشأة أو تنضم إليها كموظف." : "Sign in to create your business workspace or join it as an employee."} actionLabel={language === "ar" ? "تسجيل الدخول" : "Sign in"} onPress={() => void startOAuthLogin()} /> : loading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 36 }} /> : isManager ? <>
       <View style={[styles.addEmployeeRow, { flexDirection: row }]}><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align, marginTop: 0, marginBottom: 0 }]}>{language === "ar" ? "فريق العمل" : "Team"}</Text><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إضافة عضو للفريق" : "Add team member"} onPress={() => setAddUserOpen(true)} style={({ pressed }) => [styles.addEmployee, { backgroundColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="person-add" size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900", fontSize: 12 }}>{language === "ar" ? "إضافة عضو للفريق" : "Add team member"}</Text></Pressable></View>
-      {overview.isLoading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} /> : unifiedTeam.length === 0 ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 12 }]}><Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: align }}>{language === "ar" ? "لا أعضاء بعد — أضف أول عضو من زر الإضافة أعلاه." : "No team members yet — add the first member above."}</Text></View> : unifiedTeam.map((entry) => <MemberRow key={entry.key} entry={entry} copied={copiedPhone === entry.phone} onCopyLink={entry.inviteCode ? () => copyInviteLink(entry.inviteCode!, entry.phone) : undefined} onResend={entry.kind === "invitation" ? () => void resendInvitation(entry) : undefined} onRevoke={entry.kind === "invitation" ? () => void revokeInvitation(entry) : undefined} onDelete={entry.onDelete} language={language} isRTL={isRTL} colors={colors} />)}
+      {overview.isLoading ? <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} /> : unifiedTeam.length === 0 ? <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 12 }]}><Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: align }}>{language === "ar" ? "لا أعضاء بعد — أضف أول عضو من زر الإضافة أعلاه." : "No team members yet — add the first member above."}</Text></View> : unifiedTeam.map((entry) => <MemberRow key={entry.key} entry={entry} copied={copiedPhone === entry.phone} onCopyLink={entry.inviteCode ? () => copyInviteLink(entry.inviteCode!, entry.phone) : undefined} onResend={entry.kind === "invitation" ? () => void resendInvitation(entry) : undefined} onRevoke={entry.kind === "invitation" ? () => void revokeInvitation(entry) : undefined} onEdit={entry.onEdit} onDelete={entry.onDelete} language={language} isRTL={isRTL} colors={colors} />)}
       {isOwner ? <View style={[styles.transferCard, { backgroundColor: colors.primary + "0D", borderColor: colors.primary + "66" }]}><Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "خيارات الملكية المتقدمة (نقل ملكية المنشأة)" : "Advanced ownership options (transfer facility ownership)"} onPress={() => setTransferOpen((value) => !value)} style={({ pressed }) => [styles.transferHeader, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name="verified-user" size={17} color={colors.primary} /><Text style={[styles.flex, { color: colors.foreground, fontSize: 12.5, fontWeight: "900", textAlign: align }]}>{language === "ar" ? "🛡️ خيارات الملكية المتقدمة (نقل ملكية المنشأة)" : "🛡️ Advanced ownership options (transfer facility ownership)"}</Text><MaterialIcons name={transferOpen ? "keyboard-arrow-up" : "keyboard-arrow-down"} size={20} color={colors.muted} /></Pressable>{transferOpen ? <><Text style={{ color: colors.muted, fontSize: 11, lineHeight: 18, marginTop: 5, textAlign: align }}>{language === "ar" ? "لا ينقل هذا الإجراء الملكية مباشرة. اختر عضوًا ثم اضغط باستمرار 3 ثوانٍ لتسجيل طلب يرسل إلى القناة الموثقة لإتمام OTP الخارجي." : "This does not transfer ownership directly. Select a member and hold for 3 seconds to request verified external OTP."}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.transferTargets, { flexDirection: row }]}>{overview.data?.members.filter((item) => item.role !== "owner" && item.status === "active").map((item) => <Pressable key={item.id} onPress={() => setTransferTarget({ ...item, permissions: normalizeWorkspacePermissions(item.permissions, item.role === "admin" ? "manager" : item.role === "guest" ? "guest" : "employee") } as TeamMember)} style={[styles.transferTarget, { borderColor: transferTarget?.id === item.id ? colors.primary : colors.border, backgroundColor: transferTarget?.id === item.id ? colors.primary + "18" : colors.surface }]}><Text style={{ color: colors.foreground, fontWeight: "900", fontSize: 11 }}>{item.displayName}</Text><Text style={{ color: colors.muted, fontSize: 9, marginTop: 2 }}>{WORKSPACE_ROLE_LABELS[item.role].ar}</Text></Pressable>)}</ScrollView><Pressable disabled={!transferTarget || requestOwnershipTransfer.isPending} onPressIn={beginOwnershipHold} onPressOut={cancelOwnershipHold} style={[styles.holdButton, { backgroundColor: colors.primary, opacity: !transferTarget || requestOwnershipTransfer.isPending ? 0.45 : 1 }]}><MaterialIcons name="verified-user" size={19} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900" }}>{transferProgress ? (language === "ar" ? `استمر بالضغط… ${transferProgress}/3` : `Keep holding… ${transferProgress}/3`) : (language === "ar" ? "اضغط 3 ثوانٍ لطلب نقل الملكية" : "Hold 3 seconds to request transfer")}</Text></Pressable></> : null}</View> : null}    </> : role === "staff" || role === "guest" ? <AccessCard colors={colors} align={align} title={language === "ar" ? (role === "guest" ? "حساب ضيف مفعّل" : "حساب موظف مفعّل") : (role === "guest" ? "Guest account active" : "Staff account active")} detail={language === "ar" ? (role === "guest" ? "تم تفعيل وصولك المحدود إلى المنشأة." : "تُطبّق صلاحياتك التي حددها المدير على المهام اليومية والتقارير والسجل.") : (role === "guest" ? "Your limited property access is active." : "Your manager-defined permissions apply to daily tasks, reports, and activity log.")} /> : <><AccessCard colors={colors} align={align} title={language === "ar" ? "بدء إعداد المنشأة" : "Set up your business workspace"} detail={language === "ar" ? "إذا كنت المالك، أنشئ مساحة المنشأة مرة واحدة. إذا كنت موظفًا، استخدم بيانات دعوتك أدناه." : "If you are the owner, create the workspace once. If you are an employee, activate your invitation below."} actionLabel={language === "ar" ? "أنا المالك — إنشاء المساحة" : "I am the owner — create workspace"} onPress={() => void activateOwnerWorkspace()} /><Text style={[styles.sectionTitle, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "تفعيل دعوة الموظف" : "Activate employee invitation"}</Text><View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><TextInput value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder={language === "ar" ? "رقم الهاتف المدعو" : "Invited phone number"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} /><TextInput value={pin} onChangeText={setPin} keyboardType="number-pad" maxLength={6} placeholder={language === "ar" ? "رمز الدعوة من 6 أرقام" : "Six-digit invitation code"} placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surfaceMuted, borderColor: colors.border, color: colors.foreground, textAlign: align }]} /><Pressable onPress={() => void acceptInvite()} style={({ pressed }) => [styles.primary, { backgroundColor: colors.success, opacity: pressed || accept.isPending ? 0.66 : 1 }]}><MaterialIcons name="verified-user" size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900" }}>{language === "ar" ? "تفعيل الحساب" : "Activate account"}</Text></Pressable></View></>}
   </ScrollView>
   <EmployeePermissionsModal visible={Boolean(editingMember)} title={editingMember ? (language === "ar" ? `صلاحيات وتحصل ${editingMember.displayName}` : `${editingMember.displayName}'s permissions`) : ""} language={language} isRTL={isRTL} colors={colors} permissions={memberPermissions} onPermissionsChange={setMemberPermissions} permissionsOpen={memberPermissionsOpen} onPermissionsOpenChange={setMemberPermissionsOpen} primaryLabel={language === "ar" ? "حفظ الإعدادات" : "Save settings"} primaryIcon="save" isPending={updateMemberPermissions.isPending || updateMemberCollectionProfile.isPending} onClose={() => setEditingMember(null)} onSubmit={() => void saveMemberPermissions()} lockPermissions={editingMember?.role === "owner"} cliqAlias={memberCliqAlias} onCliqAliasChange={setMemberCliqAlias} bankDetails={memberBankDetails} onBankDetailsChange={setMemberBankDetails} commissionRate={memberCommissionRate} onCommissionRateChange={setMemberCommissionRate} commissionType={memberCommissionType} onCommissionTypeChange={setMemberCommissionType} allowDirectCollection={memberAllowDirectCollection} onAllowDirectCollectionChange={setMemberAllowDirectCollection} />
-  <AddUserModal visible={addUserOpen} language={language} isRTL={isRTL} colors={colors} onClose={() => setAddUserOpen(false)} onSubmit={submitUnifiedTeamMember} lookupUserCode={lookupUserCode} />
+  <AddUserModal visible={addUserOpen || Boolean(editingOnbook)} language={language} isRTL={isRTL} colors={colors} editInitial={editingOnbook} onUpdate={editingOnbook ? saveEditedOnbook : undefined} onClose={() => { setAddUserOpen(false); setEditingOnbook(null); }} onSubmit={submitUnifiedTeamMember} lookupUserCode={lookupUserCode} />
   </ScreenContainer>;
 }
 
@@ -335,7 +387,7 @@ function CollectionProfileFields({ colors, language, row, align, cliqAlias, onCl
 
 function AccessCard({ colors, align, title, detail, actionLabel, onPress }: { colors: ReturnType<typeof useColors>; align: "left" | "right"; title: string; detail: string; actionLabel?: string; onPress?: () => void }) { return <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, marginTop: 20 }]}><MaterialIcons name="lock" size={27} color={colors.primary} /><Text style={{ color: colors.foreground, fontSize: 18, fontWeight: "900", marginTop: 12, textAlign: align }}>{title}</Text><Text style={{ color: colors.muted, lineHeight: 20, marginTop: 7, textAlign: align }}>{detail}</Text>{actionLabel && onPress ? <Pressable onPress={onPress} style={[styles.primary, { backgroundColor: colors.primary }]}><Text style={{ color: colors.background, fontWeight: "900" }}>{actionLabel}</Text></Pressable> : null}</View>; }
 
-function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onDelete, language, isRTL, colors }: { entry: UnifiedEntry; copied: boolean; onCopyLink?: () => void; onResend?: () => void; onRevoke?: () => void; onDelete?: () => void; language: "ar" | "en"; isRTL: boolean; colors: ReturnType<typeof useColors> }) {
+function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onEdit, onDelete, language, isRTL, colors }: { entry: UnifiedEntry; copied: boolean; onCopyLink?: () => void; onResend?: () => void; onRevoke?: () => void; onEdit?: () => void; onDelete?: () => void; language: "ar" | "en"; isRTL: boolean; colors: ReturnType<typeof useColors> }) {
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
   const pending = !entry.appActive;
@@ -343,14 +395,15 @@ function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onDelete, la
   const iconBg = entry.kind === "invitation" ? colors.warning + "18" : entry.appActive ? colors.success + "18" : "#0EA5E9" + "18";
   const iconColor = entry.kind === "invitation" ? colors.warning : entry.appActive ? colors.success : "#0EA5E9";
   const displayPhone = phoneKey(entry.phone);
-  const hasActions = Boolean(onCopyLink || onResend || onRevoke || entry.onActivate || onDelete);
+  const hasActions = Boolean(onCopyLink || onResend || onRevoke || entry.onActivate || onDelete || onEdit);
   return (
-    <Pressable accessibilityRole="button" disabled={!entry.onPress} onPress={entry.onPress} accessibilityLabel={entry.onPress ? `${language === "ar" ? "تعديل" : "Edit"} ${entry.name}` : entry.name} style={({ pressed }) => [styles.member, { backgroundColor: colors.surface, borderColor: entry.kind === "invitation" ? colors.warning + "66" : entry.appActive ? colors.border : "#94A3B8" + "55", flexDirection: row, marginTop: 8, opacity: !entry.onPress ? 1 : pressed ? 0.72 : 1 }]}>
+    <Pressable accessibilityRole="button" disabled={!entry.onPress} onPress={entry.onPress} accessibilityLabel={entry.onPress ? `${language === "ar" ? "تعديل بيانات" : "Edit details"} ${entry.name}` : entry.name} style={({ pressed }) => [styles.member, { backgroundColor: colors.surface, borderColor: entry.kind === "invitation" ? colors.warning + "66" : entry.appActive ? colors.border : "#94A3B8" + "55", flexDirection: row, marginTop: 8, opacity: !entry.onPress ? 1 : pressed ? 0.72 : 1 }]}>
       <View style={[styles.memberMain, { flexDirection: row }]}>
         <View style={[styles.memberIcon, { backgroundColor: iconBg }]}><MaterialIcons name={icon} size={20} color={iconColor} /></View>
-        <View style={[styles.flex, { gap: 5 }]}>
-          <View style={{ flexDirection: row, alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-            <Text numberOfLines={1} style={{ color: colors.foreground, fontWeight: "900", fontSize: 12.5, textAlign: align, flexShrink: 1 }}>{entry.name}</Text>
+        <View style={[styles.flex, { gap: 6 }]}>
+          <View style={{ flexDirection: row, alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <Text numberOfLines={1} style={{ color: colors.foreground, fontWeight: "900", fontSize: 13, textAlign: align, flexShrink: 1 }}>{entry.name}</Text>
+            <View style={[styles.rolePill, { backgroundColor: colors.primary + "14", borderColor: colors.primary + "50", flexDirection: row }]}><MaterialIcons name="badge" size={10} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9, fontWeight: "900" }}>{entry.roleBadge}</Text></View>
             <View style={[styles.statusPill, { backgroundColor: entry.appActive ? colors.success + "14" : colors.warning + "14", borderColor: entry.appActive ? colors.success + "55" : colors.warning + "55", flexDirection: row }]}><MaterialIcons name={entry.appActive ? "check-circle" : "schedule"} size={11} color={entry.appActive ? colors.success : colors.warning} /><Text style={{ color: entry.appActive ? colors.success : colors.warning, fontSize: 9, fontWeight: "900" }}>{entry.appActive ? (language === "ar" ? "نشط على التطبيق" : "Active on app") : (language === "ar" ? "بانتظار تفعيل التطبيق" : "Awaiting app activation")}</Text></View>
           </View>
           <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10.5, textAlign: align }}>{entry.roleLabel}</Text>
@@ -359,11 +412,12 @@ function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onDelete, la
       <View style={[styles.memberTrailing, { alignItems: isRTL ? "flex-start" : "flex-end" }]}>
         {displayPhone ? <Text style={{ color: colors.muted, fontSize: 10.5, fontFamily: "monospace", writingDirection: "ltr", textAlign: "left" }}>{displayPhone}</Text> : null}
         {hasActions ? <View style={[styles.memberActions, { flexDirection: "row", flexWrap: "wrap", columnGap: 6, rowGap: 6 }]}>
-          {onCopyLink ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "نسخ رابط الدعوة" : "Copy invite link"} onPress={onCopyLink} style={({ pressed }) => [styles.memberAction, { borderColor: colors.primary + "55", backgroundColor: colors.primary + "12", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="content-copy" size={12} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9.5, fontWeight: "900" }}>{copied ? (language === "ar" ? "✓ تم النسخ" : "✓ Copied") : (language === "ar" ? "📋 نسخ رابط الدعوة" : "📋 Copy invite link")}</Text></Pressable> : null}
+          {onEdit ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تعديل بيانات العضو" : "Edit member details"} onPress={onEdit} style={({ pressed }) => [styles.memberAction, { borderColor: colors.sky + "66", backgroundColor: colors.sky + "12", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="edit" size={12} color="#0284C7" /><Text style={{ color: "#0284C7", fontSize: 9.5, fontWeight: "900" }}>{language === "ar" ? "✏️ تعديل" : "✏️ Edit"}</Text></Pressable> : null}
+          {onCopyLink ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "نسخ رابط الدعوة" : "Copy invite link"} onPress={onCopyLink} style={({ pressed }) => [styles.memberAction, { borderColor: colors.primary + "55", backgroundColor: colors.primary + "12", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="content-copy" size={12} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9.5, fontWeight: "900" }}>{copied ? (language === "ar" ? "✓ تم النسخ" : "✓ Copied") : (language === "ar" ? "📋 نسخ الرابط" : "📋 Copy link")}</Text></Pressable> : null}
           {onResend ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إعادة إرسال الدعوة" : "Re-send invitation"} onPress={onResend} style={({ pressed }) => [styles.memberAction, { borderColor: colors.primary + "55", backgroundColor: colors.surfaceMuted + "3A", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="refresh" size={12} color={colors.primary} /><Text style={{ color: colors.primary, fontSize: 9.5, fontWeight: "900" }}>{language === "ar" ? "🔄 إعادة إرسال" : "🔄 Re-send"}</Text></Pressable> : null}
           {onRevoke ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إلغاء الدعوة" : "Revoke invitation"} onPress={onRevoke} style={({ pressed }) => [styles.memberAction, { borderColor: colors.error + "45", backgroundColor: colors.error + "10", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="close" size={12} color={colors.error} /><Text style={{ color: colors.error, fontSize: 9.5, fontWeight: "900" }}>{language === "ar" ? "إلغاء" : "Revoke"}</Text></Pressable> : null}
           {entry.onActivate ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "تفعيل حساب التطبيق" : "Activate app account"} onPress={entry.onActivate} style={({ pressed }) => [styles.memberAction, { borderColor: "#0EA5E9" + "66", backgroundColor: "#0EA5E9" + "12", flexDirection: row, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="smartphone" size={12} color="#0EA5E9" /><Text style={{ color: "#0EA5E9", fontSize: 9.5, fontWeight: "900" }}>{language === "ar" ? "📱 تفعيل حساب التطبيق" : "📱 Activate app account"}</Text></Pressable> : null}
-          {onDelete ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف العضو" : "Delete member"} onPress={onDelete} style={({ pressed }) => [styles.memberAction, styles.dangerAction, { borderColor: colors.error + "55", backgroundColor: colors.error + "12", flexDirection: row, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={14} color={colors.error} /></Pressable> : null}
+          {onDelete ? <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "حذف العضو" : "Delete member"} onPress={onDelete} style={({ pressed }) => [styles.memberAction, styles.dangerAction, { borderColor: colors.error + "55", backgroundColor: colors.error + "12", flexDirection: row, opacity: pressed ? 0.6 : 1 }]}><MaterialIcons name="delete-outline" size={13} color={colors.error} /><Text style={{ color: colors.error, fontSize: 9.5, fontWeight: "900" }}>{language === "ar" ? "حذف" : "Delete"}</Text></Pressable> : null}
         </View> : null}
       </View>
     </Pressable>
@@ -372,6 +426,6 @@ function MemberRow({ entry, copied, onCopyLink, onResend, onRevoke, onDelete, la
   content: { padding: 16, paddingBottom: 44 }, backButton: { minHeight: 40, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }, sectionTitle: { fontSize: 15, fontWeight: "900", marginTop: 20, marginBottom: 8 }, addEmployeeRow: { alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 19 }, addEmployee: { minHeight: 39, borderRadius: 11, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5 }, card: { borderWidth: 1, borderRadius: 18, padding: 14 }, input: { minHeight: 48, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, marginBottom: 10 }, primary: { minHeight: 48, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 4 }, transferCard: { borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 14 },
     transferHeader: { alignItems: "center", gap: 8, minHeight: 40 }, transferTargets: { gap: 8, paddingVertical: 11 }, transferTarget: { minWidth: 108, borderWidth: 1, borderRadius: 12, padding: 9, alignItems: "center" }, holdButton: { minHeight: 47, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 }, member: { borderWidth: 1, borderRadius: 16, padding: 12, alignItems: "center", gap: 10, marginTop: 8 },
     memberMain: { flex: 1, minWidth: 0, alignItems: "center", gap: 10 },
-    memberTrailing: { flexShrink: 0, gap: 6 }, memberIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" }, statusPill: { borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, alignItems: "center", gap: 4 }, memberActions: { gap: 7, marginTop: 9 }, memberActionRow: { flexWrap: "wrap", gap: 7 }, memberAction: { minHeight: 32, borderRadius: 9, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", gap: 5 },
-    dangerAction: { width: 34, height: 32, paddingHorizontal: 0 }, inviteRevoke: { width: 35, height: 35, borderRadius: 11, alignItems: "center", justifyContent: "center" }, flex: { flex: 1, minWidth: 0 }, modalBackdrop: { flex: 1, backgroundColor: "rgba(2, 12, 10, 0.72)", justifyContent: "flex-end", padding: 12 }, modalCard: { maxHeight: "92%", borderWidth: 1, borderRadius: 24, padding: 15 }, modalHeader: { alignItems: "center", justifyContent: "space-between", gap: 10, paddingBottom: 12 }, modalTitle: { flex: 1, minWidth: 0, fontSize: 18, fontWeight: "900" }, modalClose: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" }, modalContent: { paddingBottom: 10 }, presetSection: { marginTop: 3, marginBottom: 13 }, presetRow: { gap: 8, marginTop: 8 }, presetButton: { flex: 1, minHeight: 43, borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, paddingHorizontal: 7 }, permissionsToggle: { minHeight: 58, borderWidth: 1, borderRadius: 14, alignItems: "center", gap: 9, paddingHorizontal: 11 }, permissionsToggleIcon: { width: 33, height: 33, borderRadius: 10, alignItems: "center", justifyContent: "center" }, permissionsList: { borderWidth: 1, borderRadius: 14, marginTop: 8, overflow: "hidden" }, permissionRow: { minHeight: 54, alignItems: "center", gap: 9, paddingHorizontal: 11, borderBottomWidth: StyleSheet.hairlineWidth }, permissionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 }, permissionLabel: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17 }, collectionSection: { borderWidth: 1, borderRadius: 15, padding: 11, marginTop: 12 }, collectionTitleRow: { alignItems: "center", gap: 8 }, collectionToggle: { borderWidth: 1, borderRadius: 13, padding: 10, alignItems: "center", gap: 9, marginTop: 10 }, commissionTypeRow: { gap: 8, marginTop: 9 }, commissionTypeChip: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 9, minHeight: 62, alignItems: "center", gap: 8, paddingHorizontal: 8 }, commissionAmountRow: { alignItems: "center", gap: 8 }, commissionUnitBadge: { minWidth: 46, height: 40, borderWidth: 1, borderRadius: 11, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }, collectionTextarea: { minHeight: 68, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, paddingTop: 9, marginBottom: 10, textAlignVertical: "top" }, commissionRow: { gap: 8, alignItems: "center" }, commissionKind: { minHeight: 48, minWidth: 92, borderWidth: 1, borderRadius: 13, alignItems: "center", justifyContent: "center", paddingHorizontal: 9 }, modalPrimary: { minHeight: 49, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, marginTop: 10 },
+    memberTrailing: { flexShrink: 0, gap: 6 }, memberIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" }, statusPill: { borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, alignItems: "center", gap: 4 }, rolePill: { borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3, alignItems: "center", gap: 4 }, memberActions: { gap: 7, marginTop: 9 }, memberActionRow: { flexWrap: "wrap", gap: 7 }, memberAction: { minHeight: 32, borderRadius: 9, borderWidth: 1, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", gap: 5 },
+    dangerAction: { minHeight: 32 }, inviteRevoke: { width: 35, height: 35, borderRadius: 11, alignItems: "center", justifyContent: "center" }, flex: { flex: 1, minWidth: 0 }, modalBackdrop: { flex: 1, backgroundColor: "rgba(2, 12, 10, 0.72)", justifyContent: "flex-end", padding: 12 }, modalCard: { maxHeight: "92%", borderWidth: 1, borderRadius: 24, padding: 15 }, modalHeader: { alignItems: "center", justifyContent: "space-between", gap: 10, paddingBottom: 12 }, modalTitle: { flex: 1, minWidth: 0, fontSize: 18, fontWeight: "900" }, modalClose: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" }, modalContent: { paddingBottom: 10 }, presetSection: { marginTop: 3, marginBottom: 13 }, presetRow: { gap: 8, marginTop: 8 }, presetButton: { flex: 1, minHeight: 43, borderWidth: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, paddingHorizontal: 7 }, permissionsToggle: { minHeight: 58, borderWidth: 1, borderRadius: 14, alignItems: "center", gap: 9, paddingHorizontal: 11 }, permissionsToggleIcon: { width: 33, height: 33, borderRadius: 10, alignItems: "center", justifyContent: "center" }, permissionsList: { borderWidth: 1, borderRadius: 14, marginTop: 8, overflow: "hidden" }, permissionRow: { minHeight: 54, alignItems: "center", gap: 9, paddingHorizontal: 11, borderBottomWidth: StyleSheet.hairlineWidth }, permissionIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", flexShrink: 0 }, permissionLabel: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17 }, collectionSection: { borderWidth: 1, borderRadius: 15, padding: 11, marginTop: 12 }, collectionTitleRow: { alignItems: "center", gap: 8 }, collectionToggle: { borderWidth: 1, borderRadius: 13, padding: 10, alignItems: "center", gap: 9, marginTop: 10 }, commissionTypeRow: { gap: 8, marginTop: 9 }, commissionTypeChip: { flex: 1, borderWidth: 1, borderRadius: 12, padding: 9, minHeight: 62, alignItems: "center", gap: 8, paddingHorizontal: 8 }, commissionAmountRow: { alignItems: "center", gap: 8 }, commissionUnitBadge: { minWidth: 46, height: 40, borderWidth: 1, borderRadius: 11, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 }, collectionTextarea: { minHeight: 68, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, paddingTop: 9, marginBottom: 10, textAlignVertical: "top" }, commissionRow: { gap: 8, alignItems: "center" }, commissionKind: { minHeight: 48, minWidth: 92, borderWidth: 1, borderRadius: 13, alignItems: "center", justifyContent: "center", paddingHorizontal: 9 }, modalPrimary: { minHeight: 49, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, marginTop: 10 },
 });

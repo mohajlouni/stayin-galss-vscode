@@ -63,7 +63,7 @@ describe("granular permissions UI (واجهة الصلاحيات التفصيل�
     expect(addUserModal).not.toContain("prefixPill");
     expect(addUserModal).toContain("مثال: 079xxxxxxx أو مع رمز البلد (+962 / 00962)");
     expect(addUserModal).toContain("تم التحقق");
-    expect(addUserModal).toContain("حارس / شفت");
+    expect(addUserModal).toContain('ar: "حارس"');
   });
 
   it("AddUserModal يجعل الهاتف والمعرّف جنبًا إلى جنب مع تحويل تلقائي للرقم", () => {

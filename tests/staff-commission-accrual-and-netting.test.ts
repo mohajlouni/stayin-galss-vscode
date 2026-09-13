@@ -73,7 +73,7 @@ describe("شركة الحجوزات: تراكم عمولات الموظف وال
     });
     expect(data.staffFloatSettlements?.[0].staffBonus).toBe(3.5);
     expect(data.staffFloatSettlements?.find((entry) => entry.id === "s8")?.staffBonus).toBe(-2);
-    const text = normalizeAppData({ bookings: [], waitlist: [], chalets: [], turnoverTasks: [], specialPriceRules: [], auditLog: [], staffFloatSettlements: [{ id: "s-bad", floatId: memberFloatId, amount: 40, settledAt: "2026-08-28T10:00:00.000Z", status: "CONFIRMED", staffBonus: "abc" }], settings: memberSettings });
+    const text = normalizeAppData({ bookings: [], waitlist: [], chalets: [], turnoverTasks: [], specialPriceRules: [], auditLog: [], staffFloatSettlements: [{ id: "s-bad", floatId: memberFloatId, amount: 40, settledAt: "2026-08-28T10:00:00.000Z", status: "CONFIRMED", staffBonus: "abc" as unknown as number }], settings: memberSettings });
     expect(text.staffFloatSettlements?.[0].staffBonus).toBeUndefined();
   });
 

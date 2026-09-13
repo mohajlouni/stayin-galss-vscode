@@ -2,7 +2,7 @@ import { type Booking, type Chalet, type Expense, refundableDepositAmount, remai
 
 import { expenseAmountForChalet, ledgerPaymentMethod, type Payment, type PaymentMethod, type PaymentRecipientType } from "./booking-model";
 
-import { type AppData, type FloatSettlementStatus, type StaffFloatAccount, type StaffFloatSettlement, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal, staffFloatReimbursementTotal, staffFloatReimbursementPaidTotal, staffFloatCommissionEarned } from "./booking-model";
+import { type AppData, type FloatSettlementStatus, type StaffFloatAccount, type StaffFloatSettlement, DEFAULT_SETTINGS, staffFloatAccounts, staffFloatOutstanding, staffFloatPaidOutTotal, staffFloatSettledTotal, staffFloatCollectedTotal, staffFloatReimbursementTotal, staffFloatReimbursementPaidTotal, staffFloatCommissionEarned, staffFloatCommissionRows } from "./booking-model";
 
 export type ReportRange = "today" | "month" | "all";
 export const REPORT_PAYMENT_METHODS = ["cash-guardian", "cash-owner", "click"] as const;
@@ -374,4 +374,53 @@ export function summarizeFinancialReport(bookings: Booking[], chalets: Chalet[],
     collectionSettlements: summarizeCollectionSettlements(bookings),
     chaletPerformance,
   };
+}
+
+export type StaffFloatCommissionAuditRow = {
+  bookingId: string;
+  reference: string;
+  customerName: string;
+  chaletName: string;
+  /** تاريخ أول تحصيل على الحجز (YYYY-MM-DD). */
+  date: string;
+  /** طابع زمني مرقّم للتحصيل (YYYY-MM-DD hh:mm) إن وُجد. */
+  at: string;
+  collected: number;
+  mechanism: string;
+  commission: number;
+  /** هل غُطّي تحصيل الحجز بتوريد عهدة (تم تسوية العمولة)؟ */
+  settled: boolean;
+  /** تاريخ التوريد الذي غطّى العمولة إن كانت مسوّاة. */
+  settlementDate?: string;
+};
+
+/** كشف العمولات التفصيلي لعهدة موظف/حارس: يفصّل كل حجز محقّق للعمولة مع آليته وحالة تسويته. */
+export function staffFloatCommissionAudit(data: Pick<AppData, "bookings" | "staffFloatSettlements"> & Partial<Pick<AppData, "settings">>, floatId: string) {
+  const account = staffFloatAccounts(data.settings ?? DEFAULT_SETTINGS).find((candidate) => candidate.id === floatId);
+  if (!account) return { rows: [] as StaffFloatCommissionAuditRow[], totalEarned: 0, settledEarned: 0, pendingEarned: 0 };
+  const settlementDates = new Map<string, string>();
+  for (const entry of data.staffFloatSettlements ?? []) {
+    if (entry.floatId === floatId && entry.status !== "PENDING_APPROVAL" && entry.status !== "REJECTED") settlementDates.set(entry.id, entry.settlementDate ?? entry.settledAt.slice(0, 10));
+  }
+  let settledEarned = 0;
+  const rows: StaffFloatCommissionAuditRow[] = staffFloatCommissionRows(data, floatId, account).map((row) => {
+    const matched = row.settlementIds.map((id) => settlementDates.get(id)).filter((value): value is string => Boolean(value)).sort().slice(-1)[0];
+    const settled = Boolean(matched);
+    if (settled) settledEarned += row.amount;
+    return {
+      bookingId: row.bookingId,
+      reference: row.reference,
+      customerName: row.customerName,
+      chaletName: row.chaletName,
+      date: row.paidAt && row.paidAt.length >= 10 ? row.paidAt.slice(0, 10) : "",
+      at: row.paidAt && row.paidAt.length >= 16 ? row.paidAt.slice(0, 16).replace("T", " ") : row.paidAt,
+      collected: row.collected,
+      mechanism: row.mechanism,
+      commission: row.amount,
+      settled,
+      settlementDate: matched,
+    };
+  }).sort((left, right) => (right.at || right.date).localeCompare(left.at || left.date));
+  const totalEarned = rows.reduce((sum, row) => sum + row.commission, 0);
+  return { rows, totalEarned: Math.round(totalEarned * 100) / 100, settledEarned: Math.round(settledEarned * 100) / 100, pendingEarned: Math.round((totalEarned - settledEarned) * 100) / 100 };
 }

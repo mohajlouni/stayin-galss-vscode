@@ -21,7 +21,7 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(addUserModal).toContain("رقم الهاتف للتواصل");
     expect(addUserModal).toContain("الدور / الصلاحية");
     expect(addUserModal).toContain("حارس");
-    expect(addUserModal).toContain("موظف حجوزات");
+    expect(addUserModal).toContain('ar: "موظف"');
     expect(addUserModal).toContain("مدير تشغيلي");
     expect(addUserModal).toContain("حفظ وإرسال الدعوة");
     expect(addUserModal).not.toContain("AddUserTrack");
@@ -38,7 +38,7 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(userMgmt).toContain("updateMemberPermissions.mutateAsync({ memberId: byPhone.id");
     expect(userMgmt).toContain("findOnbookByPhone(onbookStaff, phone)");
     expect(userMgmt).toContain("inviteFromAddModal(name, phone, role, permissions)");
-    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen}");
+    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen || Boolean(editingOnbook)}");
   });
 
   it("مطالبة الهاتف أولًا مع ربط العهود وحساب التطبيق", () => {

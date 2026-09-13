@@ -56,7 +56,7 @@ describe("optional user ID verification (التحقق الاختياري من ا
     expect(addUserModal).toContain("lookupUserCode");
     expect(addUserModal).toContain('{ name: string; phone: string } | null');
     expect(addUserModal).toContain("المعرّف الشخصي (اختياري للتأكيد)");
-    expect(addUserModal).toContain("مثال: U1024#");
+    expect(addUserModal).toContain("#U1024");
   });
 
   it("يعرض حالات التحقق الثلاث ويحجب الإرسال عند عدم التطابق", () => {

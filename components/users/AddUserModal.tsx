@@ -9,7 +9,7 @@ import { normalizePhoneInput } from "@/lib/phone-number";
 import { normalizeUid, phoneKey } from "@/lib/staff-directory";
 import type { WorkspacePermissions } from "@/shared/workspace-permissions";
 
-/** دور العضو في المنشأة: موظف حجوزات / مدير تشغيلي / حارس (يُترجم إلى صلاحيات عبر رقم هاتفه). */
+/** دور العضو في المنشأة: موظف / مدير تشغيلي / حارس (يُترجم إلى صلاحيات عبر رقم هاتفه). */
 export type AddUserRole = "staff" | "mini-admin" | "guard";
 
 type AddUserModalProps = {
@@ -22,6 +22,10 @@ type AddUserModalProps = {
   onSubmit: (entry: { name: string; phone: string; role: AddUserRole; permissions: WorkspacePermissions }) => Promise<string | null>;
   /** يبحث عن حساب تطبيق مسجّل مسبقًا بالمعرّف الشخصي (userCode) ويعيد اسمه وهاتفه للتحقق المزدوج، أو null إذا لم يُعثر عليه. */
   lookupUserCode?: (code: string) => { name: string; phone: string } | null;
+  /** عند تمرير عضو موجود: يتحول النموذج إلى وضع التعديل مع تعبئة مسبقة للاسم والهاتف والدور والصلاحيات. */
+  editInitial?: { uid: string; name: string; phone: string; role: AddUserRole; caps: readonly GranularCapability[] } | null;
+  /** حفظ تحديثات عضو قائم (وضع التعديل) — يعيد رسالة خطأ مترجمة أو null عند النجاح. */
+  onUpdate?: (entry: { uid: string; name: string; phone: string; role: AddUserRole; permissions: WorkspacePermissions }) => Promise<string | null>;
 };
 
 const ORANGE = "#F97316";
@@ -29,38 +33,52 @@ const FIELD_BORDER = "#334155";
 const FIELD_BG = "rgba(15, 23, 42, 0.62)";
 
 const ROLES: { id: AddUserRole; emoji: string; ar: string; en: string }[] = [
-  { id: "guard", emoji: "🛡️", ar: "حارس / شفت", en: "Guard / shift" },
-  { id: "staff", emoji: "💼", ar: "موظف حجوزات", en: "Booking staff" },
+  { id: "guard", emoji: "🛡️", ar: "حارس", en: "Guard" },
+  { id: "staff", emoji: "💼", ar: "موظف", en: "Staff" },
   { id: "mini-admin", emoji: "⚙️", ar: "مدير تشغيلي", en: "Operational manager" },
 ];
 
-export default function AddUserModal({ visible, language, isRTL, colors, onClose, onSubmit, lookupUserCode }: AddUserModalProps) {
+export default function AddUserModal({ visible, language, isRTL, colors, onClose, onSubmit, lookupUserCode, editInitial, onUpdate }: AddUserModalProps) {
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
+  const editing = Boolean(editInitial);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [userCode, setUserCode] = useState("");
-  const [role, setRole] = useState<AddUserRole>("staff");
-  const [caps, setCaps] = useState<readonly GranularCapability[]>(() => capabilitiesForRole("staff"));
+  const [role, setRole] = useState<AddUserRole | null>(null);
+  const [caps, setCaps] = useState<readonly GranularCapability[]>([]);
   const [permsOpen, setPermsOpen] = useState(false);
   const [focused, setFocused] = useState<"name" | "phone" | "userCode" | null>(null);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
+    if (editInitial) {
+      const init = editInitial;
+      setName(init.name);
+      setPhone(init.phone);
+      setUserCode("");
+      setRole(init.role);
+      setCaps(init.caps);
+      setPermsOpen(true);
+      setFocused(null);
+      setPending(false);
+      return;
+    }
     setName("");
     setPhone("");
     setUserCode("");
-    setRole("staff");
-    setCaps(capabilitiesForRole("staff"));
+    setRole(null);
+    setCaps([]);
     setPermsOpen(false);
     setFocused(null);
     setPending(false);
-  }, [visible]);
+  }, [visible, editInitial]);
 
   const selectRole = (next: AddUserRole) => {
     setRole(next);
     setCaps(capabilitiesForRole(next));
+    setPermsOpen(true);
   };
 
   const toggleCap = (key: GranularCapability) => setCaps((current) => (current.includes(key) ? current.filter((cap) => cap !== key) : [...current, key]));
@@ -81,15 +99,22 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
       Alert.alert(language === "ar" ? "بيانات ناقصة" : "Missing details", language === "ar" ? "أدخل اسم العضو ورقم هاتفه بشكل صحيح." : "Enter the member's name and phone number.");
       return;
     }
+    if (!role) {
+      Alert.alert(language === "ar" ? "اختر الدور" : "Choose a role", language === "ar" ? "يرجى اختيار دور العضو أولاً." : "Please choose the member's role first.");
+      return;
+    }
     if (verification && verification.state !== "matched") {
       Alert.alert(language === "ar" ? "التحقق من الهوية فشل" : "Identity check failed", verification.state === "unknown" ? (language === "ar" ? "لا يوجد حساب مسجل بهذا المعرّف — اتركه فارغًا إذا كان العضو جديدًا ولم يسجل بعد." : "No registered account matches this user ID — leave it empty if the member hasn't registered yet.") : (language === "ar" ? `رقم الهاتف لا يتطابق مع هذا المعرّف — «${verification.name}» مسجل برقم آخر. راجع الرقم أو المعرّف.` : `The phone number doesn't match this user ID — "${verification.name}" is registered with another number. Review the phone or the ID.`));
       return;
     }
     setPending(true);
     try {
-      const error = await onSubmit({ name, phone: normalizePhoneInput(phone), role, permissions: capabilitiesToPermissions(caps) });
+      const payload = { name, phone: normalizePhoneInput(phone), role, permissions: capabilitiesToPermissions(caps) };
+      const error = editing
+        ? (onUpdate ? await onUpdate({ uid: editInitial!.uid, ...payload }) : null)
+        : await onSubmit(payload);
       if (error) {
-        Alert.alert(language === "ar" ? "تعذر الحفظ والدعوة" : "Could not save & invite", error);
+        Alert.alert(language === "ar" ? "تعذر الحفظ" : "Could not save", error);
         return;
       }
       onClose();
@@ -104,8 +129,8 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.header, { flexDirection: row }]}>
             <View style={styles.flex}>
-              <Text style={[styles.title, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "إضافة عضو للفريق" : "Add team member"}</Text>
-              <Text style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{language === "ar" ? "أدخل اسم العضو ورقم هاتفه ورتبته — وسيُربط تلقائيًا بالمنشأة وعهدها عبر رقم الهاتف." : "Enter the member's name, phone, and role — they will be linked to your property automatically by phone."}</Text>
+              <Text style={[styles.title, { color: colors.foreground, textAlign: align }]}>{editing ? (language === "ar" ? "تعديل عضو الفريق" : "Edit team member") : (language === "ar" ? "إضافة عضو للفريق" : "Add team member")}</Text>
+              <Text style={{ color: colors.muted, fontSize: 11, marginTop: 3, textAlign: align }}>{editing ? (language === "ar" ? "صحّح اسم العضو ورقم هاتفه ودوره وصلاحياته — تُحدَّث البطاقة فورًا." : "Correct the member's name, phone, role, and permissions — the card updates instantly.") : (language === "ar" ? "أدخل اسم العضو ورقم هاتفه ورتبته — وسيُربط تلقائيًا بالمنشأة وعهدها عبر رقم الهاتف." : "Enter the member's name, phone, and role — they will be linked to your property automatically by phone.")}</Text>
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={language === "ar" ? "إغلاق" : "Close"} onPress={onClose} style={[styles.close, { backgroundColor: colors.surfaceMuted }]}><MaterialIcons name="close" size={20} color={colors.muted} /></Pressable>
           </View>
@@ -126,7 +151,6 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
             <View style={[styles.fieldsRow, { flexDirection: row }]}>
               <View style={styles.fieldCol}>
                 <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "رقم الهاتف للتواصل" : "Contact phone number"}</Text>
-                <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "المفتاح الأساسي لربط العهود، ويُحوَّل تلقائيًا للصيغة الدولية." : "Primary key for linking floats; auto-converts to the international format."}</Text>
                 <TextInput
                   value={phone}
                   onChangeText={(text) => setPhone(normalizePhoneInput(text))}
@@ -142,7 +166,6 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
               </View>
               <View style={styles.fieldCol}>
                 <Text style={[styles.label, { color: colors.foreground, textAlign: align }]}>{language === "ar" ? "المعرّف الشخصي (اختياري للتأكيد)" : "User ID (optional, for confirmation)"}</Text>
-                <Text style={{ color: colors.muted, fontSize: 10.5, marginTop: 3, textAlign: align }}>{language === "ar" ? "للتحقق المزدوج إذا كان الموظف مسجلاً مسبقاً بالتطبيق." : "Double-checks if the employee is already registered on the app."}</Text>
                 <TextInput
                   value={userCode}
                   onChangeText={(text) => setUserCode(text.toUpperCase().slice(0, 24))}
@@ -150,7 +173,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
                   onBlur={() => setFocused(null)}
                   autoCapitalize="characters"
                   autoCorrect={false}
-                  placeholder={language === "ar" ? "مثال: U1024#" : "e.g. U1024#"}
+                  placeholder="#U1024"
                   placeholderTextColor={colors.muted}
                   style={[styles.input, styles.inputMono, { backgroundColor: FIELD_BG, borderColor: focused === "userCode" ? ORANGE : FIELD_BORDER, borderWidth: focused === "userCode" ? 2 : 1, color: colors.foreground, writingDirection: "ltr", textAlign: "left" }]}
                 />
@@ -196,7 +219,7 @@ export default function AddUserModal({ visible, language, isRTL, colors, onClose
             ) : null}
           </ScrollView>
 
-          <Pressable accessibilityRole="button" disabled={pending} onPress={() => void submit()} style={({ pressed }) => [styles.submit, { backgroundColor: colors.primary, opacity: pending ? 0.5 : pressed ? 0.7 : 1, flexDirection: row }]}><MaterialIcons name="send" size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900", fontSize: 13 }}>{pending ? (language === "ar" ? "جارٍ الحفظ والدعوة..." : "Saving & inviting...") : (language === "ar" ? "حفظ وإرسال الدعوة" : "Save & send invitation")}</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: pending || role === null }} disabled={pending || role === null} onPress={() => void submit()} style={({ pressed }) => [styles.submit, { backgroundColor: colors.primary, opacity: pending ? 0.5 : role === null ? 0.45 : pressed ? 0.7 : 1, flexDirection: row }]}><MaterialIcons name={editing ? "save" : "send"} size={18} color={colors.background} /><Text style={{ color: colors.background, fontWeight: "900", fontSize: 13 }}>{pending ? (language === "ar" ? "جارٍ الحفظ..." : "Saving...") : (editing ? (language === "ar" ? "حفظ التعديلات" : "Save changes") : (language === "ar" ? "حفظ وإرسال الدعوة" : "Save & send invitation"))}</Text></Pressable>
         </View>
       </View>
     </Modal>

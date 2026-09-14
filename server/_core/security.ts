@@ -1,4 +1,4 @@
-const TRUSTED_WEB_HOST_SUFFIXES = ["manuspre.computer"];
+export const TRUSTED_WEB_HOST_SUFFIXES = ["manuspre.computer"];
 const APP_DEEP_LINK_SCHEME_PREFIX = "manus";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -24,6 +24,17 @@ export function isTrustedHostname(hostname: string): boolean {
   return TRUSTED_WEB_HOST_SUFFIXES.some(
     (suffix) => host === suffix || host.endsWith(`.${suffix}`),
   );
+}
+
+/**
+ * Whether the registrable domain (last two labels, e.g. "manuspre.computer")
+ * is on the explicit trusted-suffix whitelist. Cookie sharing across sandbox
+ * subdomains may only target a trusted registrable domain — never an arbitrary
+ * parent parsed from a Host header.
+ */
+export function isTrustedCookieParentDomain(parentDomain: string): boolean {
+  const normalized = parentDomain.toLowerCase().replace(/^\.+/, "");
+  return TRUSTED_WEB_HOST_SUFFIXES.includes(normalized);
 }
 
 /**

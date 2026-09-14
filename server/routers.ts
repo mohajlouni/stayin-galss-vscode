@@ -36,8 +36,7 @@ const expenseCategorySchema = z.enum(["guards-salaries", "maintenance", "cleanin
 const expensePaymentSchema = z.enum(["cash", "click"]);
 const ownerPinSchema = z.string().regex(/^\d{4}$/, "Owner PIN must be four digits");
 
-/** رمز استرجاع سيد ثابت يمنح السوبر أدمن الدخول لأدوات الطوارئ مهما كان PIN المالك. */
-const SUPER_ADMIN_MASTER_PIN = "246810";
+/** رمز استرجاع سيد يُمنح للسوبر أدمن في بيئة التشغيل عبر SUPER_ADMIN_MASTER_PIN (لا يُكتب أبدًا في الكود). */
 type EmergencyActor = { id: number; openId?: string | null; email?: string | null; phone?: string | null; role?: string | null; isSuperAdmin?: boolean };
 function isSuperAdminActor(actor: EmergencyActor, ownerOpenId: string): boolean {
   if (actor.isSuperAdmin) return true;
@@ -66,7 +65,7 @@ async function requireEmergencyOwner(userId: number, workspaceId: number, actor:
     try { await db.requireWorkspaceOwner(workspaceId, userId); } catch { throw new TRPCError({ code: "FORBIDDEN", message: "Owner access required" }); }
   }
   if (pin) {
-    if (isSuperAdmin && pin === SUPER_ADMIN_MASTER_PIN) return;
+    if (isSuperAdmin && ENV.superAdminMasterPin && pin === ENV.superAdminMasterPin) return;
     const verification = await db.verifyWorkspaceOwnerPin({ workspaceId, pin });
     if (!verification.configured) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Owner PIN must be configured" });
     if (!verification.verified) throw new TRPCError({ code: "FORBIDDEN", message: "Invalid owner PIN" });
@@ -606,7 +605,7 @@ export const appRouter = router({
     }),
     verifyPin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
       await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
-      if (isSuperAdminActor(ctx.user, ENV.ownerOpenId) && input.pin === SUPER_ADMIN_MASTER_PIN) {
+      if (isSuperAdminActor(ctx.user, ENV.ownerOpenId) && ENV.superAdminMasterPin && input.pin === ENV.superAdminMasterPin) {
         return { verified: true, locked: false, lockedUntil: null, failedAttempts: 0 };
       }
       const result = await db.verifyWorkspaceOwnerPin(input);

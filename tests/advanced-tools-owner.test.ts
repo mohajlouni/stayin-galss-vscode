@@ -51,13 +51,18 @@ describe("advanced owner tools security", () => {
     expect(screen).toContain("يوجد حجز بالفعل");
   });
 
-  it("grants the super admin full emergency access with a fixed master recovery PIN regardless of the stored owner PIN", () => {
+  it("grants the super admin full emergency access via the env-configured master recovery PIN regardless of the stored owner PIN", () => {
     const router = source("server/routers.ts");
+    const env = source("server/_core/env.ts");
     const screen = source("app/settings/advanced-tools.tsx");
     expect(router).toContain("isSuperAdminActor");
-    expect(router).toContain("SUPER_ADMIN_MASTER_PIN");
-    expect(router).toContain("if (isSuperAdmin && pin === SUPER_ADMIN_MASTER_PIN) return;");
+    expect(router).toContain("ENV.superAdminMasterPin");
+    expect(router).toContain("if (isSuperAdmin && ENV.superAdminMasterPin && pin === ENV.superAdminMasterPin) return;");
     expect(router).toContain("matchesSuperAdminIdentity");
+    expect(env).toContain("superAdminMasterPin: requireMasterSecret(process.env.SUPER_ADMIN_MASTER_PIN");
     expect(screen).toContain("isSuperAdmin");
+    // The master PIN must never be hardcoded in (or leaked through) client code;
+    // verification is delegated to the server verifyPin endpoint.
+    expect(screen).not.toContain("246" + "810");
   });
 });

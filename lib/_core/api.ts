@@ -208,19 +208,16 @@ export async function checkIdentityStatus(email: string): Promise<{ registered: 
 
 /**
  * Direct Super Admin login that bypasses Supabase Auth entirely. The server
- * validates the master credential against the canonical owner identity and
- * issues the owner session, so it works even if the Supabase Auth user has not
- * been seeded or email-confirmed.
+ * validates the master credential (resolved from the environment) against the
+ * canonical owner identity and issues the owner session, so it works even if
+ * the Supabase Auth user has not been seeded or email-confirmed.
  *
  * The request uses an absolute API URL (never a relative `fetch` path, which
- * fails on Expo native) with an explicit `Content-Type: application/json`. If
- * the network call throws or is blocked, we fall back to a local in-memory
- * bridge so the Super Admin can still reach the workspace gate: a session token
- * and the canonical owner profile (`stay-in-preview-owner-v1`, role
- * `super_admin`) are persisted to secure storage, and native session restore
- * accepts it without a server round-trip.
+ * fails on Expo native) with an explicit `Content-Type: application/json`.
+ * Password verification happens server-side only; the client never holds the
+ * master secret and has no local fallback that fabricates an owner session.
  */
-export async function exchangeSuperAdminLogin(input: { identifier: string; password: string }): Promise<{ ok: boolean; error?: string; local?: boolean; destination?: LoginDestination }> {
+export async function exchangeSuperAdminLogin(input: { identifier: string; password: string }): Promise<{ ok: boolean; error?: string; destination?: LoginDestination }> {
   const baseUrl = getApiBaseUrl();
   const url = baseUrl ? `${baseUrl}/api/auth/super-admin-login` : "/api/auth/super-admin-login";
   try {
@@ -261,41 +258,12 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
     return { ok: true, destination: result.destination };
   } catch (err) {
     console.error("[CRITICAL LOGIN ERROR] /api/auth/super-admin-login network failure", err);
-    // Local bypass: only for the canonical Super Admin master credential.
-    if (isSuperAdminCredentialLocal(input.identifier, input.password)) {
-      try {
-        await Auth.setSessionToken(`local-super-admin-${Date.now()}`);
-        await Auth.setUserInfo({
-          id: 1,
-          openId: "stay-in-preview-owner-v1",
-          name: "مالك StayIn (سوبر أدمن)",
-          email: "moh.ajlouni.90@gmail.com",
-          phone: "0797402940",
-          avatarUrl: null,
-          userCode: "U1000",
-          loginMethod: "super-admin-local",
-          role: "super_admin",
-          isSuperAdmin: true,
-          lastSignedIn: new Date(),
-        });
-        return { ok: true, local: true, destination: "admin" };
-      } catch (localErr) {
-        console.error("[CRITICAL LOGIN ERROR] local bypass persist failed", localErr);
-        return { ok: false, error: localErr instanceof Error ? localErr.message : String(localErr) };
-      }
-    }
+    // No local bypass: authentication is delegated strictly to the backend. A
+    // failure here must surface exactly what the server/network reported so the
+    // session is never fabricated from client-held secrets.
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, error: message };
   }
-}
-
-function isSuperAdminCredentialLocal(identifier: string, password: string): boolean {
-  const hasPassword = String(password ?? "") === "Ajlouni911";
-  if (!hasPassword) return false;
-  const normalized = String(identifier ?? "").trim().toLowerCase();
-  if (normalized === "moh.ajlouni.90@gmail.com") return true;
-  const phoneDigits = normalized.replace(/[^\d]/g, "").replace(/^0+/, "");
-  return phoneDigits === "797402940" || phoneDigits === "962797402940";
 }
 
 export async function establishSession(token: string): Promise<boolean> {

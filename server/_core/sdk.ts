@@ -8,6 +8,7 @@ import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { ENV } from "./env";
+import { isSessionAppIdValid } from "./identity";
 import { isTrustedOAuthRedirect } from "./security";
 import type {
   ExchangeTokenRequest,
@@ -219,8 +220,10 @@ class SDKServer {
       });
       const { openId, appId, name, jti } = payload as Record<string, unknown>;
 
-      if (!isNonEmptyString(openId) || !isNonEmptyString(appId) || !isNonEmptyString(name)) {
-        console.warn("[Auth] Session payload missing required fields");
+      // appId must match THIS app: a token minted for another app on the same
+      // platform secret (or `JWT_SECRET` fallback) must not authenticate here.
+      if (!isNonEmptyString(openId) || !isSessionAppIdValid(appId, ENV.appId) || !isNonEmptyString(name)) {
+        console.warn("[Auth] Session payload missing required fields or appId mismatch");
         return null;
       }
 

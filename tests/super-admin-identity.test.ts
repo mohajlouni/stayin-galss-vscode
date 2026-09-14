@@ -6,7 +6,12 @@ import { isSuperAdminEmail, isSuperAdminPhone, matchesSuperAdminIdentity } from 
 const identity = readFileSync(resolve(process.cwd(), "server/_core/identity.ts"), "utf8");
 const trpc = readFileSync(resolve(process.cwd(), "server/_core/trpc.ts"), "utf8");
 const oauth = readFileSync(resolve(process.cwd(), "server/_core/oauth.ts"), "utf8");
+const envSource = readFileSync(resolve(process.cwd(), "server/_core/env.ts"), "utf8");
 const dbSource = readFileSync(resolve(process.cwd(), "server/db.ts"), "utf8");
+
+// Regression guard for the retired hardcoded master password. The literal is
+// split so the raw secret value never appears (grep-able) anywhere in the repo.
+const RETIRED_MASTER_PASSWORD = "Ajlouni" + "911";
 
 const OWNER_OPEN_ID = "stay-in-preview-owner-v1";
 
@@ -59,13 +64,29 @@ describe("owner master identity (super admin)", () => {
     expect(oauth).toContain("SUPER_ADMIN_EMAIL");
   });
 
-  it("provides a direct Super Admin login bypass guarded by the master password", () => {
+  it("provides a direct Super Admin login bypass guarded by the env-configured master password", () => {
     expect(oauth).toContain('"/api/auth/super-admin-login"');
-    expect(oauth).toContain('SUPER_ADMIN_MASTER_PASSWORD = "Ajlouni911"');
+    expect(oauth).toContain("ENV.superAdminMasterPassword");
     expect(oauth).toContain("isSuperAdminEmail(identifier)");
     expect(oauth).toContain("isSuperAdminPhone(identifier)");
     expect(oauth).toContain("role: \"super_admin\"");
     expect(oauth).toContain("establishSuperAdminSession()");
+    // The master secret must never appear as a literal in server code.
+    expect(oauth).not.toContain(RETIRED_MASTER_PASSWORD);
+  });
+
+  it("resolves the super-admin master password and PIN strictly from the environment", () => {
+    expect(envSource).toContain("superAdminMasterPassword: requireMasterSecret(process.env.SUPER_ADMIN_MASTER_PASSWORD");
+    expect(envSource).toContain("superAdminMasterPin: requireMasterSecret(process.env.SUPER_ADMIN_MASTER_PIN");
+    expect(envSource).not.toContain("Ajlouni" + "911");
+    // Regression guard: the retired hardcoded master PIN must never return.
+    expect(envSource).not.toContain("246" + "810");
+  });
+
+  it("gates the emergency owner gate with the env-configured master PIN instead of a hardcoded literal", () => {
+    const routersSource = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
+    expect(routersSource).toContain("ENV.superAdminMasterPin");
+    expect(routersSource).not.toContain("246" + "810");
   });
 
   it("auto-seeds a confirmed Supabase user when a service-role key is configured", () => {

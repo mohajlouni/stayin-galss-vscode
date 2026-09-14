@@ -90,8 +90,6 @@ async function establishLocalDevSession(phoneValue: unknown) {
   return { sessionToken, saved };
 }
 
-const SUPER_ADMIN_MASTER_PASSWORD = "Ajlouni911";
-
 /** Creates/updates a Supabase Auth user (confirmed) via the Admin API, when a
  *  service-role key is configured. Failures are non-fatal: the direct login
  *  bypass below still issues the owner session regardless. */
@@ -107,14 +105,14 @@ async function seedSupabaseSuperAdmin(email: string): Promise<void> {
     const match = existing?.users?.find((u) => u.email?.toLowerCase() === email);
     if (match) {
       await admin.auth.admin.updateUserById(match.id, {
-        password: SUPER_ADMIN_MASTER_PASSWORD,
+        password: ENV.superAdminMasterPassword,
         email_confirm: true,
         user_metadata: { ...(match.user_metadata ?? {}), role: "super_admin" },
       });
     } else {
       await admin.auth.admin.createUser({
         email,
-        password: SUPER_ADMIN_MASTER_PASSWORD,
+        password: ENV.superAdminMasterPassword,
         email_confirm: true,
         user_metadata: { role: "super_admin", name: "مالك StayIn (سوبر أدمن)" },
       });
@@ -539,8 +537,9 @@ export function registerSupabaseAuthRoutes(app: Express) {
   });
 
   // Direct Super Admin login bypass. Accepts either the master email or the
-  // canonical Jordanian phone with the master password `Ajlouni911`, resolves to
-  // the single owner `openId`, and issues the owner session with
+  // canonical Jordanian phone with the master password resolved from the
+  // environment (`SUPER_ADMIN_MASTER_PASSWORD`, never a hardcoded literal),
+  // resolves to the single owner `openId`, and issues the owner session with
   // `role: "super_admin"`. Does not require a (possibly unseeded) Supabase Auth
   // record; if a service-role key is configured it also seeds/confirms the user.
   app.post("/api/auth/super-admin-login", async (req: Request, res: Response) => {
@@ -550,7 +549,7 @@ export function registerSupabaseAuthRoutes(app: Express) {
 
     const isEmail = isSuperAdminEmail(identifier);
     const isPhone = isSuperAdminPhone(identifier);
-    if (password !== SUPER_ADMIN_MASTER_PASSWORD || (!isEmail && !isPhone)) {
+    if (password !== ENV.superAdminMasterPassword || (!isEmail && !isPhone)) {
       res.status(403).json({ error: "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة." });
       return;
     }

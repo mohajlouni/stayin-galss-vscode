@@ -12,7 +12,7 @@ import {
   classifySignupProbeError,
   isOtpTokenPresent,
   isSignupProbePending,
-  isSuperAdminCredential,
+  isSuperAdminIdentifier,
   isSuperAdminEmail,
   isSuperAdminPassword,
   normalizeEmail,
@@ -30,7 +30,7 @@ import {
 } from "@/lib/supabase-otp-engine";
 
 export type { AuthError, IdentifierKind, SignupProbeResult, SupabaseOtpError } from "@/lib/supabase-otp-engine";
-export { AUTH_ERROR_MESSAGES, SUPABASE_OTP_ERROR_MESSAGES, classifyAuthError, classifyIdentifier, formatCountdown, isSuperAdminCredential, isSuperAdminEmail, isSuperAdminPassword, passwordsMatch, SUPER_ADMIN_EMAIL, validateIdentifier, validatePassword } from "@/lib/supabase-otp-engine";
+export { AUTH_ERROR_MESSAGES, SUPABASE_OTP_ERROR_MESSAGES, classifyAuthError, classifyIdentifier, formatCountdown, isSuperAdminCredential, isSuperAdminEmail, isSuperAdminIdentifier, isSuperAdminPassword, passwordsMatch, SUPER_ADMIN_EMAIL, validateIdentifier, validatePassword } from "@/lib/supabase-otp-engine";
 
 /**
  * Passwordless Email OTP authentication on top of Supabase Auth, bridged into
@@ -163,14 +163,15 @@ export type SignInWithPasswordResult =
 
 /**
  * Direct Super Admin login bypass. When the identifier is the Super Admin email
- * or phone and the password matches the master credential, we authenticate
- * straight through the server (which issues the owner session with
+ * or phone, we authenticate straight through the server (which validates the
+ * master password from the environment and issues the owner session with
  * `role: "super_admin"`) instead of relying on a Supabase Auth record that may
- * not be seeded or email-confirmed.
+ * not be seeded or email-confirmed. Password verification is delegated to the
+ * server endpoint; no master secret exists in client code.
  */
 export async function signInSuperAdmin(input: { identifier: string; password: string; refresh: ReturnType<typeof useAuthSession>["refresh"] }): Promise<SignInWithPasswordResult> {
-  if (!isSuperAdminCredential(input.identifier, input.password)) {
-    return { ok: false, error: "wrong-password" };
+  if (!isSuperAdminIdentifier(input.identifier)) {
+    return { ok: false, error: "unregistered" };
   }
 
   const { exchangeSuperAdminLogin } = await import("@/lib/_core/api");
@@ -201,7 +202,7 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
   // Defensive: if a Super Admin phone-shaped identifier (e.g. "0797402940") ever
   // reaches this path, route straight to the direct bypass — never forward a
   // phone number to Supabase password auth (SMS auth is disabled there).
-  if (isSuperAdminCredential(input.email, input.password)) {
+  if (isSuperAdminIdentifier(input.email)) {
     return signInSuperAdmin({ identifier: input.email, password: input.password, refresh: input.refresh });
   }
 

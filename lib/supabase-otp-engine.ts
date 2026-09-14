@@ -229,33 +229,42 @@ export function classifyAuthError(error: unknown): AuthError {
 }
 
 /**
- * Super Admin master credentials used for the direct login bypass. The server
- * merges this identity to the canonical owner `openId` and returns
- * `role: "super_admin"`, so no Supabase Auth record or email confirmation is
- * required to sign in — the bridge issues the owner session directly.
+ * Super Admin identity. The master password is NEVER baked into client code:
+ * it is resolved from the environment at call time (`SUPER_ADMIN_MASTER_PASSWORD`),
+ * so a production client build cannot verify — or leak — it. Password validation
+ * is delegated to the server endpoint, which reads the same variable server-side.
  */
 export const SUPER_ADMIN_EMAIL = "moh.ajlouni.90@gmail.com";
-export const SUPER_ADMIN_PASSWORD = "Ajlouni911";
 
 /** True when the identifier is the Super Admin email (case-insensitive). */
 export function isSuperAdminEmail(identifier: string): boolean {
   return normalizeEmail(identifier) === SUPER_ADMIN_EMAIL;
 }
 
-/** True when the supplied password matches the Super Admin master password. */
+/** True when the supplied password matches the env-configured Super Admin master password. */
 export function isSuperAdminPassword(password: string): boolean {
-  return String(password ?? "") === SUPER_ADMIN_PASSWORD;
+  const masterPassword = process.env.SUPER_ADMIN_MASTER_PASSWORD ?? "";
+  return masterPassword.length > 0 && String(password ?? "") === masterPassword;
 }
 
 /**
- * True when the identifier is the Super Admin identity (email OR the canonical
- * Jordanian phone shape) AND the password matches. Used by the client to route
- * straight to the server bridge instead of a (possibly unseeded) Supabase auth.
+ * True when the identifier belongs to the Super Admin identity (email OR the
+ * canonical Jordanian phone shape). The client routes such identifiers straight
+ * to the server bridge; the server alone verifies the password.
  */
-export function isSuperAdminCredential(identifier: string, password: string): boolean {
-  if (!isSuperAdminPassword(password)) return false;
+export function isSuperAdminIdentifier(identifier: string): boolean {
   const normalized = normalizeEmail(identifier);
   if (normalized === SUPER_ADMIN_EMAIL) return true;
   const classified = classifyIdentifier(identifier);
   return classified.kind === "phone" && classified.phone === "+962797402940";
+}
+
+/**
+ * True when the identifier is the Super Admin identity AND the password matches
+ * the env-configured master password. Kept for server-side checks and tests;
+ * production client bundles resolve an empty password (no env) and never match.
+ */
+export function isSuperAdminCredential(identifier: string, password: string): boolean {
+  if (!isSuperAdminPassword(password)) return false;
+  return isSuperAdminIdentifier(identifier);
 }

@@ -10,7 +10,7 @@ export default defineConfig({
     extensions: [".mjs", ".js", ".mts", ".ts", ".jsx", ".tsx", ".json"],
   },
   test: {
-    setupFiles: ["./scripts/load-env.js"],
+    setupFiles: ["./scripts/load-env.js", "./tests/setup-env.ts"],
     cache: {
       dir: resolve(__dirname, ".vitest-cache"),
     },

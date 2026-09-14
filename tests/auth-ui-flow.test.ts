@@ -114,14 +114,15 @@ describe("auth UI test flow", () => {
     expect(engine).toContain('type: "email"');
   });
 
-  it("routes Super Admin email/phone + master password to the direct login bypass", () => {
+  it("routes Super Admin email/phone identifiers to the direct login bypass (password verified server-side)", () => {
     const screen = source("components/unified-auth-screen.tsx");
     const engine = source("lib/supabase-otp.tsx");
     expect(screen).toContain("signInSuperAdmin");
-    expect(screen).toContain("isSuperAdminCredential");
+    expect(screen).toContain("isSuperAdminIdentifier");
     expect(screen).toContain("runSuperAdminLogin");
     expect(engine).toContain("signInSuperAdmin");
     expect(engine).toContain("exchangeSuperAdminLogin");
+    expect(engine).not.toContain("Ajlouni" + "911");
   });
 
   it("surfaces a friendly message when an OAuth provider is not enabled", () => {

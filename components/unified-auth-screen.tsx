@@ -11,7 +11,7 @@ import { ThemedText } from "@/components/themed-text";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useAuthSession } from "@/lib/auth-session";
 import { LEGAL_VERSIONS, savePendingRegistration } from "@/lib/legal-consent";
-import { AUTH_ERROR_MESSAGES, classifyAuthError, consumePendingDeletion, isSuperAdminCredential, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
+import { AUTH_ERROR_MESSAGES, classifyAuthError, consumePendingDeletion, isSuperAdminIdentifier, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import * as Auth from "@/lib/_core/auth";
@@ -310,11 +310,12 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     const classified = validateIdentifier(loginIdentifier);
 
     if (classified.ok && classified.kind === "phone") {
-      // Super Admin phone + master password authenticates directly. Any other
-      // phone is strictly rejected: the Sign In tab never auto-creates an
-      // account nor opens the legacy identity portal (which accepted any
-      // credentials). Registration happens only via the إنشاء حساب tab.
-      if (isSuperAdminCredential(loginIdentifier, loginPassword)) {
+      // Super Admin phone authenticates through the server bridge (which alone
+      // verifies the master password). Any other phone is strictly rejected:
+      // the Sign In tab never auto-creates an account nor opens the legacy
+      // identity portal (which accepted any credentials). Registration happens
+      // only via the إنشاء حساب tab.
+      if (isSuperAdminIdentifier(loginIdentifier)) {
         await runSuperAdminLogin(loginIdentifier.trim(), loginPassword, "login");
       } else {
         setError(AUTH_ERROR_MESSAGES.unregistered ?? "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
@@ -324,7 +325,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     if (!classified.ok || classified.kind !== "email" || !classified.email) return;
     const email = classified.email;
 
-    if (isSuperAdminCredential(email, loginPassword)) {
+    if (isSuperAdminIdentifier(email)) {
       await runSuperAdminLogin(email, loginPassword, "login");
       return;
     }

@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCalendars, getLocales } from "expo-localization";
 import * as Haptics from "expo-haptics";
-import { Appearance, I18nManager, Platform, useColorScheme as useSystemColorScheme } from "react-native";
+import { Appearance, Platform, useColorScheme as useSystemColorScheme } from "react-native";
 import * as Updates from "expo-updates";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
@@ -117,21 +117,14 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
   const formatHijriDate = useCallback((date: string) => hijriDateLabel(date, language), [language]);
   const formatHijriMonth = useCallback((year: number, month: number) => hijriMonthLabel(year, month, language), [language]);
 
+  // يُطبَّق اتجاه الواجهة (RTL/LTR) مركزيًا في LocaleDirectionSync داخل app/_layout.tsx
+  // وفق اللغة النشطة؛ هنا يُرصد تغيّر اللغة فقط لعرض تنبيه إعادة التشغيل على الهاتف.
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = language;
-      document.documentElement.dir = direction;
-    }
-    if (Platform.OS !== "web") {
-      I18nManager.allowRTL(true);
-      I18nManager.forceRTL(isRTL);
-    }
-
     if (previousLanguageRef.current !== null && previousLanguageRef.current !== language) {
       setLanguageChangeStatus("pending");
     }
     previousLanguageRef.current = language;
-  }, [direction, isRTL, language]);
+  }, [language]);
 
   useEffect(() => {
     Appearance.setColorScheme?.(appearanceMode === "system" ? null : appearanceMode);

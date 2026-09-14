@@ -80,9 +80,10 @@ describe("maintenance universal smart search with amber underline highlight", ()
 });
 
 describe("month selector grid in the calendar picker", () => {
-  it("ships the Arabic month names in order", () => {
+  it("uses the unified standard Arabic month names from the shared Gregorian calendar", () => {
     const source = picker();
-    expect(source).toMatch(/MONTHS_AR = \["كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران", "تموز", "آب", "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول"\]/);
+    expect(source).toContain('const months = language === "ar" ? GREGORIAN_MONTHS : MONTHS_EN;');
+    expect(source).not.toMatch(/كانون|شباط|آذار|نيسان|أيار|حزيران|تموز|أيلول|تشرين/);
   });
 
   it("cycles days -> month -> year via a single pickerMode state while keeping the yearMode pin", () => {

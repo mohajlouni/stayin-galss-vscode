@@ -297,9 +297,14 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     try {
       const result = await signInSuperAdmin({ identifier, password, refresh });
       if (result.ok) { goAfterAuth(result.destination); return; }
-      setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
+      setError(AUTH_ERROR_MESSAGES[result.error] ?? AUTH_ERROR_MESSAGES.unknown);
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] super-admin submit failed:", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
@@ -383,9 +388,14 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       );
       return;
     }
-    setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
+    setError(AUTH_ERROR_MESSAGES[result.error] ?? AUTH_ERROR_MESSAGES.unknown);
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] password submit failed (bridge/network/server?):", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
@@ -416,7 +426,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
           privacyVersion: LEGAL_VERSIONS.privacy,
           conditionsVersion: LEGAL_VERSIONS.conditions,
         });
-      } catch {
+      } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[auth] savePendingRegistration failed:`, err instanceof Error ? err.message : err);
+      }
         setMessage("تعذر تجهيز طلب إنشاء الحساب على هذا الجهاز. أعد المحاولة.");
         return;
       }
@@ -434,7 +448,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
         return;
       }
       router.push({ pathname: "/auth/otp", params: { email, mode: "signup", name: name.trim() } });
-    } catch {
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[auth] requestEmailSignupOtp failed:`, err instanceof Error ? err.message : String(err), err);
+      }
       setError(language === "ar" ? "تعذر إرسال رمز التحقق. تحقق من اتصال الإنترنت ثم أعد المحاولة." : "Could not send the verification code. Check your connection and try again.");
     } finally { setBusy(null); }
   };
@@ -475,7 +493,12 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       if (result.ok) { goAfterAuth(result.destination); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] social submit failed:", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };

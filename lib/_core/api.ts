@@ -62,6 +62,10 @@ export async function apiCall<T>(endpoint: string, options: RequestInit = {}): P
     const text = await response.text();
     return (text ? JSON.parse(text) : {}) as T;
   } catch (error) {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error(`[apiCall] ${endpoint} -> ${url} failed:`, error);
+    }
     throw error instanceof Error ? error : new Error("Unknown API request failure");
   }
 }
@@ -171,10 +175,20 @@ export async function checkPendingDeletion(email: string): Promise<{ pending: bo
       body: JSON.stringify({ email }),
       credentials: "include",
     });
-    if (!response.ok) return { pending: false, scheduledFor: null };
+    if (!response.ok) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[api] check-pending-deletion ${url} -> HTTP ${response.status}`);
+      }
+      return { pending: false, scheduledFor: null };
+    }
     const body = (await response.json()) as { pending?: boolean; scheduledFor?: string | null };
     return { pending: Boolean(body.pending), scheduledFor: body.scheduledFor ?? null };
-  } catch {
+  } catch (err) {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error(`[api] check-pending-deletion ${url} failed:`, err instanceof Error ? err.message : err);
+    }
     return { pending: false, scheduledFor: null };
   }
 }
@@ -198,10 +212,20 @@ export async function checkIdentityStatus(email: string): Promise<{ registered: 
       body: JSON.stringify({ email }),
       credentials: "include",
     });
-    if (!response.ok) return { registered: false, checked: false };
+    if (!response.ok) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[api] identity-status ${url} -> HTTP ${response.status}`);
+      }
+      return { registered: false, checked: false };
+    }
     const body = (await response.json()) as { registered?: boolean };
     return { registered: Boolean(body.registered), checked: true };
-  } catch {
+  } catch (err) {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error(`[api] identity-status ${url} failed:`, err instanceof Error ? err.message : err);
+    }
     return { registered: false, checked: false };
   }
 }
@@ -257,7 +281,12 @@ export async function exchangeSuperAdminLogin(input: { identifier: string; passw
     }
     return { ok: true, destination: result.destination };
   } catch (err) {
-    console.error("[CRITICAL LOGIN ERROR] /api/auth/super-admin-login network failure", err);
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error("[api] super-admin-login failed", { url, baseUrl, cause: err instanceof Error ? err.message : String(err), err });
+    } else {
+      console.error("[CRITICAL LOGIN ERROR] /api/auth/super-admin-login network failure", err);
+    }
     // No local bypass: authentication is delegated strictly to the backend. A
     // failure here must surface exactly what the server/network reported so the
     // session is never fabricated from client-held secrets.

@@ -59,9 +59,9 @@ export default function CalendarScreen() {
   const row = isRTL ? "row-reverse" : "row";
   const align = isRTL ? "right" : "left";
   const weekdayLabels = WEEKDAY_LABELS[deviceSettings.weekdayFormat];
-  // Saturday-first weekday grid: each row starts with Saturday at the far right and flows
-  // right-to-left to Friday at the far left. The leading-blank count is derived from the
-  // Saturday offset of the 1st so every date lands under its true weekday column.
+  // Saturday-first weekday grid: WEEKDAY_LABELS starts with Saturday (index 0 = السبت) and the
+  // leading-blank count is derived from the Saturday offset of the 1st, so header column c maps
+  // directly to weekdayLabels[c] and every date lands under its true weekday column.
   const days = useMemo(() => {
     const firstDay = new Date(Date.UTC(year, month - 1, 1, 12)).getUTCDay();
     const leadingBlanks = (firstDay + 1) % 7;
@@ -70,7 +70,7 @@ export default function CalendarScreen() {
     const cells = [...Array.from({ length: leadingBlanks }, () => null as string | null), ...Array.from({ length: daysInMonth }, (_, index) => toISO(index + 1))];
     return [...cells, ...Array.from({ length: 42 - cells.length }, () => null as string | null)];
   }, [month, year]);
-  const weekHeader = useMemo(() => Array.from({ length: 7 }, (_, column) => weekdayLabels[(column + 6) % 7]), [weekdayLabels]);
+  const weekHeader = weekdayLabels;
   const isAllUnitsView = !selectedChaletId;
   const selectedChalet = useMemo(() => chalets.find((chalet) => chalet.id === selectedChaletId), [chalets, selectedChaletId]);
   const selectedChaletAccent = selectedChalet?.color ?? colors.primary;

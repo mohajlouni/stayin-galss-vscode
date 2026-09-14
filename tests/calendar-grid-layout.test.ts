@@ -22,7 +22,7 @@ describe("calendar month grid layout", () => {
 
   it("aligns a Saturday-first weekday grid that renders right-to-left", () => {
     expect(calendar).toContain("const leadingBlanks = (firstDay + 1) % 7");
-    expect(calendar).toContain("weekdayLabels[(column + 6) % 7]");
+    expect(calendar).toContain("const weekHeader = weekdayLabels;");
     expect(calendar).toContain('style={[styles.weekRow, { flexDirection: "row-reverse" }]}');
     expect(calendar).toContain('style={[styles.daysGridContainer, { flexDirection: "row-reverse" }]}');
   });

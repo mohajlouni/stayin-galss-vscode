@@ -87,13 +87,15 @@ describe("Unified smart identifier classifier", () => {
 });
 
 describe("Password policy and real-time match", () => {
-  it("requires at least 8 characters with letters and numbers, no symbols", () => {
+  it("requires at least 8 characters with letters and numbers, allowing special characters", () => {
     expect(validatePassword("")).not.toBeNull();
     expect(validatePassword("short1")).not.toBeNull();
     expect(validatePassword("onlyletters")).not.toBeNull();
     expect(validatePassword("12345678")).not.toBeNull();
-    expect(validatePassword("Abcdef1!")).not.toBeNull();
+    expect(validatePassword("Abcdef1!")).toBeNull();
     expect(validatePassword("Stayin2026")).toBeNull();
+    expect(validatePassword("Stayin!2026#")).toBeNull();
+    expect(validatePassword("Abc def12")).not.toBeNull();
   });
 
   it("matches password confirmation in real time", () => {

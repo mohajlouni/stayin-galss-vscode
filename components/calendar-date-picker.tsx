@@ -5,13 +5,14 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useColors } from "@/hooks/use-colors";
 import { GlowGlassCard } from "@/components/glow-glass-card";
 import { weekdayLabel } from "@/lib/booking-model";
-import { gregorianMonthGrid, moveGregorianMonth } from "@/lib/gregorian-calendar";
+import { GREGORIAN_MONTHS, gregorianMonthGrid, moveGregorianMonth } from "@/lib/gregorian-calendar";
 import { useI18n } from "@/lib/i18n";
 import { useAppPreferences } from "@/lib/app-preferences";
 
-const WEEKDAYS_AR = ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"];
-const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTHS_AR = ["كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران", "تموز", "آب", "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول"];
+/** رؤوس أيام الأسبوع بترتيب موحد يبدأ بالسبت (فهرس 0 = السبت) مطابق لـ WEEKDAY_LABELS،
+ * مع تهجئة قياسية: "اثنين" و"ثلاثاء" في الصيغ المختصرة و"الاثنين" و"الثلاثاء" في الكاملة. */
+const WEEKDAYS_AR = ["سبت", "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة"];
+const WEEKDAYS_EN = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
 const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function currentDateKey() {
@@ -65,7 +66,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect, range }:
   const weekdays = language === "ar" ? WEEKDAYS_AR : WEEKDAYS_EN;
   const row = isRTL ? "row-reverse" : "row";
   const years = yearChoices(cursor.year);
-  const months = language === "ar" ? MONTHS_AR : MONTHS_EN;
+  const months = language === "ar" ? GREGORIAN_MONTHS : MONTHS_EN;
   const title = yearMode ? (language === "ar" ? "اختيار السنة" : "Choose year") : monthMode ? (language === "ar" ? "اختيار الشهر" : "Choose month") : (language === "ar" ? "اختيار التاريخ" : "Choose date");
   const subtitle = yearMode
     ? (language === "ar" ? "اختر السنة ثم عد لاختيار الشهر واليوم." : "Choose a year, then return to pick month and day.")

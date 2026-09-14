@@ -167,14 +167,14 @@ export function validateIdentifier(input: string): IdentifierValidation {
   return { ok: false, kind: "invalid", reason: raw.includes("@") ? "email" : "phone" };
 }
 
-/** Password policy: at least 8 characters, containing letters and numbers, no symbols. */
+/** Password policy: 8+ chars with letters and digits. Symbols allowed. */
 export function validatePassword(password: string): string | null {
   const value = password ?? "";
-  if (!value) return "أدخل كلمة المرور للمتابعة.";
-  if (value.length < 8) return "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.";
-  if (!/[A-Za-z]/.test(value)) return "يجب أن تحتوي كلمة المرور على أحرف.";
-  if (!/\d/.test(value)) return "يجب أن تحتوي كلمة المرور على أرقام.";
-  if (/[^\w\u0600-\u06FF]/.test(value)) return "لا تُستخدم رموز خاصة في كلمة المرور.";
+  if (value.length < 8) return "كلمة المرور يجب أن تكون 8 أحرف على الأقل.";
+  if (/\s/.test(value)) return "كلمة المرور يجب ألا تحتوي على مسافات.";
+  const hasLetter = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF]/.test(value);
+  const hasDigit = /\d/.test(value);
+  if (!hasLetter || !hasDigit) return "كلمة المرور يجب أن تحتوي على أحرف وأرقام (الرموز الخاصة مثل !@#$%^&* مسموحة).";
   return null;
 }
 
@@ -198,7 +198,7 @@ export const AUTH_ERROR_MESSAGES: Record<AuthError, string> = {
   "not-configured": "تسجيل الدخول غير مفعّل بعد على هذا التطبيق.",
   unregistered: "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.",
   "wrong-password": "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة.",
-  "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام.",
+  "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام (الرموز الخاصة مثل !@#$%^&* مسموحة).",
   "invalid-email": "أدخل بريدًا إلكترونيًا صحيحًا، مثل name@example.com.",
   "provider-unavailable": "تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم",
   "email-not-confirmed": "حسابك مسجل ولكنه غير موثّق بعد. أرسلنا لك رمز تحقق جديداً إلى بريدك الإلكتروني.",

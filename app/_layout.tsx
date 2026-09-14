@@ -2,12 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
 import { Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { AccessibilityInfo, I18nManager, Pressable, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, I18nManager, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 import * as Font from "expo-font";
 
+// يتمكّن التطبيق من الاتجاه من اليمين إلى اليسار دون فرضه بشكل أعمى؛ الاتجاه الفعلي (RTL/LTR)
+// يُطبَّق ديناميكيًا في LocaleDirectionSync وفق اللغة النشطة بعد تحميل تفضيلات التطبيق،
+// فلا تنقلب حقول الإدخال أو الواجهة عند استخدام الإنجليزية على الويب أو الهاتف.
 I18nManager.allowRTL(true);
-I18nManager.forceRTL(true);
 import { Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from "@expo-google-fonts/tajawal";
 import { Cairo_400Regular, Cairo_500Medium, Cairo_600SemiBold, Cairo_700Bold, Cairo_800ExtraBold, Cairo_900Black } from "@expo-google-fonts/cairo";
 import { IBMPlexSansArabic_400Regular, IBMPlexSansArabic_500Medium, IBMPlexSansArabic_600SemiBold, IBMPlexSansArabic_700Bold } from "@expo-google-fonts/ibm-plex-sans-arabic";
@@ -84,6 +86,7 @@ await Font.loadAsync({
           <BookingProvider>
               <ChaletScopeProvider>
                 <AppPreferencesProvider>
+                  <LocaleDirectionSync />
                   <ThemeProvider>
                     <RouteAccessGate>
                       <AppNavigator />
@@ -107,6 +110,24 @@ function TrpcProvider({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </trpc.Provider>
   );
+}
+
+/** يطبّق اتجاه الواجهة ديناميكيًا وفق اللغة النشطة: RTL مع العربية وLTR مع الإنجليزية.
+ * على الويب يحدّث اتجاه مستند الصفحة حتى تُعرض المعاينة دون قلب حقول الإدخال (كالهاتف)،
+ * وعلى الهاتف يوافق I18nManager على الاتجاه بدل فرضه أعمى عند الإقلاع. */
+function LocaleDirectionSync() {
+  const { language, isRTL } = useI18n();
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = language;
+      document.documentElement.dir = isRTL ? "rtl" : "ltr";
+    }
+    if (Platform.OS !== "web") {
+      I18nManager.allowRTL(true);
+      I18nManager.forceRTL(isRTL);
+    }
+  }, [isRTL, language]);
+  return null;
 }
 
 function AppNavigator() {

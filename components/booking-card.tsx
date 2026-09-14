@@ -49,7 +49,7 @@ type BookingCardProps = {
 const SUNK = "rgba(0, 0, 0, 0.25)";
 
 function arabicWeekday(dateKey: string) {
-  return ["الأحد", "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][new Date(`${dateKey}T12:00:00`).getDay()] ?? "";
+  return ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][new Date(`${dateKey}T12:00:00`).getDay()] ?? "";
 }
 
 function timePeriodLabel(time: string) {

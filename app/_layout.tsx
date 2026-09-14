@@ -127,7 +127,7 @@ function LocaleDirectionSync() {
       I18nManager.forceRTL(isRTL);
     }
   }, [isRTL, language]);
-  return null;
+  return <View style={{ display: "none" }} />;
 }
 
 function AppNavigator() {

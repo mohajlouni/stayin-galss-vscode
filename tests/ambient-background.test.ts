@@ -40,7 +40,14 @@ describe("ambient screen background", () => {
   it("dynamic ambient grid — deep #080C14 base, thin vector grid, breathing bottom aura with morphing chalet hue", () => {
     expect(sceneSource).toContain("FeGaussianBlur");
     expect(sceneSource).toContain("RadialGradient");
-    expect(sceneSource).toContain("useMorphingAccent");
+    expect(sceneSource).toContain("hexToRgba");
+    // Regression: `Animated.createAnimatedComponent(Stop)` has no host node — react-native-svg
+    // renders <Stop> as `null` — so Reanimated threw on mount/unmount with
+    // "[Reanimated] Cannot find host instance for this component. Maybe it renders nothing?".
+    expect(sceneSource).not.toContain("AnimatedStop");
+    expect(sceneSource).not.toContain("createAnimatedComponent(Stop)");
+    expect(sceneSource).toContain('stopColor={glowStopColor}');
+    expect(sceneSource).toContain('stopColor={coreStopColor}');
     expect(sceneSource).toContain("deviceSettings.reduceMotion");
     expect(sceneSource).toContain("pointerEvents=\"none\"");
     expect(sceneSource).toContain("#080C14");

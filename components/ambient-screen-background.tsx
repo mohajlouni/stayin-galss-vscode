@@ -76,7 +76,7 @@ export function AmbientScreenBackground() {
       </View>
       {isDark ? (
         <>
-          <Animated.View style={[styles.upperBloom, upperBloomStyle]}>
+          <Animated.View collapsable={false} style={[styles.upperBloom, upperBloomStyle]}>
             <LinearGradient
               colors={[withAlpha(colors.primary, "66"), withAlpha(colors.primary, "20"), "transparent"]}
               start={{ x: 0.12, y: 0 }}
@@ -84,7 +84,7 @@ export function AmbientScreenBackground() {
               style={styles.fill}
             />
           </Animated.View>
-          <Animated.View style={[styles.lowerBloom, lowerBloomStyle]}>
+          <Animated.View collapsable={false} style={[styles.lowerBloom, lowerBloomStyle]}>
             <LinearGradient
               colors={["transparent", withAlpha(colors.primary, "18"), withAlpha(colors.primary, "4D")]}
               start={{ x: 0.42, y: 0 }}

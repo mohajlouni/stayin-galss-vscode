@@ -49,7 +49,7 @@ export function DynamicAmbientBackground() {
       {/* Canvas شبه شفاف ليظهر اللومة والموجة السائلة خلفها */}
       <LinearGradient colors={isDark ? (["rgba(9,13,22,0.66)", "rgba(15,23,42,0.34)"] as [string, string, ...string[]]) : (["rgba(248,250,252,0.55)", "rgba(238,242,255,0.35)"] as [string, string, ...string[]])} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       <View style={[styles.base, { backgroundColor: "transparent" }]} />
-      <Animated.View style={[styles.orb, styles.orbPrimary, primaryOrbStyle]}>
+      <Animated.View collapsable={false} style={[styles.orb, styles.orbPrimary, primaryOrbStyle]}>
         <LinearGradient
           colors={[withAlpha(colors.primary, "2E"), withAlpha(orbPrimary, "18"), "transparent"]}
           start={{ x: 0, y: 0 }}
@@ -57,7 +57,7 @@ export function DynamicAmbientBackground() {
           style={styles.fill}
         />
       </Animated.View>
-      <Animated.View style={[styles.orb, styles.orbSecondary, secondaryOrbStyle]}>
+      <Animated.View collapsable={false} style={[styles.orb, styles.orbSecondary, secondaryOrbStyle]}>
         <LinearGradient
           colors={[withAlpha(orbSecondary, "1A"), withAlpha(colors.primary, "14"), "transparent"]}
           start={{ x: 1, y: 0 }}

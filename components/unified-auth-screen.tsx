@@ -571,7 +571,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
               </View>
             </View>
           </View> : null}
-          <Animated.View style={{ opacity: formOpacity }}>
+          <Animated.View collapsable={false} style={{ opacity: formOpacity }}>
             {tab === "login" ? (
               <>
                 <ThemedText variant="label" style={styles.label}>البريد الإلكتروني أو رقم الهاتف</ThemedText>
@@ -745,7 +745,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
           {tab === "login" ? (
             <View style={styles.bioArea}>
               <View style={styles.bioWrap}>
-                <Animated.View style={[styles.bioPulse, { borderColor: biometricAvailable ? colors.primary : colors.border, transform: [{ scale: pulse }] }]} />
+                <Animated.View collapsable={false} style={[styles.bioPulse, { borderColor: biometricAvailable ? colors.primary : colors.border, transform: [{ scale: pulse }] }]} />
                 <Pressable disabled={isBusy} accessibilityRole="button" accessibilityState={{ busy: isBusy }} accessibilityLabel="تسجيل الدخول السريع بالبصمة أو بصمة الوجه" onPress={() => void biometricLogin()} style={styles.bioButton}>
                   {busy === "biometric" ? <ActivityIndicator color={colors.primary} size="large" /> : <MaterialIcons name="fingerprint" size={42} color={biometricAvailable ? colors.primary : colors.muted} />}
                 </Pressable>

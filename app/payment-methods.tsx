@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
   auditEntry: { borderWidth: 1, borderRadius: 14, padding: 11 },
   auditEntryHead: { alignItems: "center", gap: 8 },
   auditCols: { paddingHorizontal: 2, marginBottom: 2 },
-  auditCol: { fontSize: 9.5, fontWeight: "800", flex: 1, letterSpacing: 0.4, textTransform: "uppercase" },
+  auditCol: { fontSize: 9.5, fontWeight: 800, flex: 1, letterSpacing: 0.4, textTransform: "uppercase" },
 floatParent: { borderWidth: 1, borderRadius: 16, padding: 12, gap: 10 },
   quickAdd: { minHeight: 30, borderRadius: 8, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4, borderWidth: 1 },
   roleChip: { flex: 1, minHeight: 42, borderRadius: 11, borderWidth: 1, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", gap: 6 },

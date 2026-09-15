@@ -19,7 +19,10 @@ export function FeatureRouteGuard() {
     : undefined;
   const blocked = !!blockedKey && global[blockedKey] === false;
 
-  if (!blocked) return null;
+  // Keep a zero-size native host instead of `null`; this overlay is mounted as a
+  // sibling of the root navigator, so removing it entirely from the host tree can
+  // break Reanimated host-instance lookups on Android Expo Go.
+  if (!blocked) return <View style={{ width: 0, height: 0, overflow: "hidden" }} pointerEvents="none" collapsable={false} />;
 
   return (
     <View style={[styles.overlay, { backgroundColor: colors.background }]}>

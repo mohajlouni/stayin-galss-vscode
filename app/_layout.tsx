@@ -7,7 +7,7 @@ import * as SplashScreen from "expo-splash-screen";
 import * as Font from "expo-font";
 
 // يتمكّن التطبيق من الاتجاه من اليمين إلى اليسار دون فرضه بشكل أعمى؛ الاتجاه الفعلي (RTL/LTR)
-// يُطبَّق ديناميكيًا في LocaleDirectionSync وفق اللغة النشطة بعد تحميل تفضيلات التطبيق،
+// يُطبَّق ديناميكيًا داخل AppNavigator وفق اللغة النشطة بعد تحميل تفضيلات التطبيق،
 // فلا تنقلب حقول الإدخال أو الواجهة عند استخدام الإنجليزية على الويب أو الهاتف.
 I18nManager.allowRTL(true);
 import { Tajawal_400Regular, Tajawal_500Medium, Tajawal_700Bold, Tajawal_800ExtraBold, Tajawal_900Black } from "@expo-google-fonts/tajawal";
@@ -31,70 +31,61 @@ import { FeatureRouteGuard } from "@/components/feature-route-guard";
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [fontsLoaded, setFontsLoaded] = useState(false);
-  
+  // تظل الشجرة كاملة مُثبّتة طوال الوقت؛ لا نبدّل الجذر المؤقت بجذر آخر لتفادي
+  // هدم شجرة المضيف أثناء تحميل الخطوط (وهو ما يُفشل Fabric وReanimated في العثور
+  // على عُقد المضيف). القشرة الأصلية SplashScreen تتولى حالة الانتظار ونخفيها فقط
+  // بعد اكتمال تحميل الخطوط، فيُعاد تقديم الشجرة للخطوط الجديدة دون إعادة تركيب.
+  const [, setFontsLoaded] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     const loadFonts = async () => {
       try {
-await Font.loadAsync({
-        "Tajawal-Regular": Tajawal_400Regular,
-        "Tajawal-Medium": Tajawal_500Medium,
-        "Tajawal-SemiBold": Tajawal_700Bold,
-        "Tajawal-Bold": Tajawal_800ExtraBold,
-        "Tajawal-Black": Tajawal_900Black,
-        "Cairo-Regular": Cairo_400Regular,
-        "Cairo-Medium": Cairo_500Medium,
-        "Cairo-SemiBold": Cairo_600SemiBold,
-        "Cairo-Bold": Cairo_700Bold,
-        "Cairo-ExtraBold": Cairo_800ExtraBold,
-        "Cairo-Black": Cairo_900Black,
-        "IBM-Plex-Sans-Arabic-Regular": IBMPlexSansArabic_400Regular,
-        "IBM-Plex-Sans-Arabic-Medium": IBMPlexSansArabic_500Medium,
-        "IBM-Plex-Sans-Arabic-SemiBold": IBMPlexSansArabic_600SemiBold,
-        "IBM-Plex-Sans-Arabic-Bold": IBMPlexSansArabic_700Bold,
-      });
-        if (mounted) {
-          setFontsLoaded(true);
-          await SplashScreen.hideAsync();
-        }
+        await Font.loadAsync({
+          "Tajawal-Regular": Tajawal_400Regular,
+          "Tajawal-Medium": Tajawal_500Medium,
+          "Tajawal-SemiBold": Tajawal_700Bold,
+          "Tajawal-Bold": Tajawal_800ExtraBold,
+          "Tajawal-Black": Tajawal_900Black,
+          "Cairo-Regular": Cairo_400Regular,
+          "Cairo-Medium": Cairo_500Medium,
+          "Cairo-SemiBold": Cairo_600SemiBold,
+          "Cairo-Bold": Cairo_700Bold,
+          "Cairo-ExtraBold": Cairo_800ExtraBold,
+          "Cairo-Black": Cairo_900Black,
+          "IBM-Plex-Sans-Arabic-Regular": IBMPlexSansArabic_400Regular,
+          "IBM-Plex-Sans-Arabic-Medium": IBMPlexSansArabic_500Medium,
+          "IBM-Plex-Sans-Arabic-SemiBold": IBMPlexSansArabic_600SemiBold,
+          "IBM-Plex-Sans-Arabic-Bold": IBMPlexSansArabic_700Bold,
+        });
       } catch (e) {
         console.warn("Font loading failed, falling back to system fonts", e);
+      } finally {
         if (mounted) {
           setFontsLoaded(true);
           await SplashScreen.hideAsync();
         }
       }
     };
-    loadFonts();
+    void loadFonts();
     return () => { mounted = false; };
   }, []);
-
-  if (!fontsLoaded) {
-    return (
-      <View style={styles.loadingContainer}>
-        <StatusBar style="auto" />
-        <Text style={styles.loadingText}>جاري تحميل التطبيق…</Text>
-      </View>
-    );
-  }
 
   return (
     <AppErrorBoundary>
       <TrpcProvider>
         <AuthSessionProvider>
           <BookingProvider>
-              <ChaletScopeProvider>
-                <AppPreferencesProvider>
-                  <LocaleDirectionSync />
-                  <ThemeProvider>
-                    <RouteAccessGate>
-                      <AppNavigator />
-                    </RouteAccessGate>
-                  </ThemeProvider>
-                </AppPreferencesProvider>
-              </ChaletScopeProvider>
-            </BookingProvider>
+            <ChaletScopeProvider>
+              <AppPreferencesProvider>
+                <ThemeProvider>
+                  <RouteAccessGate>
+                    <AppNavigator />
+                  </RouteAccessGate>
+                </ThemeProvider>
+              </AppPreferencesProvider>
+            </ChaletScopeProvider>
+          </BookingProvider>
         </AuthSessionProvider>
       </TrpcProvider>
     </AppErrorBoundary>
@@ -112,11 +103,18 @@ function TrpcProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** يطبّق اتجاه الواجهة ديناميكيًا وفق اللغة النشطة: RTL مع العربية وLTR مع الإنجليزية.
- * على الويب يحدّث اتجاه مستند الصفحة حتى تُعرض المعاينة دون قلب حقول الإدخال (كالهاتف)،
- * وعلى الهاتف يوافق I18nManager على الاتجاه بدل فرضه أعمى عند الإقلاع. */
-function LocaleDirectionSync() {
+function AppNavigator() {
+  const colors = useColors();
   const { language, isRTL } = useI18n();
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const stackScreenOptions = useMemo(() => ({
+    headerShown: false,
+    animation: reduceMotion ? "none" as const : "fade_from_bottom" as const,
+    contentStyle: { backgroundColor: colors.background },
+  }), [colors.background, reduceMotion]);
+  // يُطبَّق اتجاه الواجهة ديناميكيًا وفق اللغة النشطة: RTL مع العربية وLTR مع الإنجليزية.
+  // على الويب يحدّث اتجاه مستند الصفحة حتى تُعرض المعاينة دون قلب حقول الإدخال (كالهاتف)،
+  // وعلى الهاتف يوافق I18nManager على الاتجاه بدل فرضه أعمى عند الإقلاع.
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.documentElement.lang = language;
@@ -127,17 +125,6 @@ function LocaleDirectionSync() {
       I18nManager.forceRTL(isRTL);
     }
   }, [isRTL, language]);
-  return <View style={{ display: "none" }} />;
-}
-
-function AppNavigator() {
-  const colors = useColors();
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const stackScreenOptions = useMemo(() => ({
-    headerShown: false,
-    animation: reduceMotion ? "none" as const : "fade_from_bottom" as const,
-    contentStyle: { backgroundColor: colors.background },
-  }), [colors.background, reduceMotion]);
   useEffect(() => {
     let active = true;
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => { if (active) setReduceMotion(enabled); });
@@ -155,7 +142,11 @@ function WorkspaceSyncBanner() {
   const [refreshing, setRefreshing] = useState(false);
   const align = isRTL ? "right" : "left";
   const row = isRTL ? "row-reverse" : "row";
-  if (!syncConflict) return null;
+  // A permanent native host is kept in place of `null`: as a sibling of the root
+  // navigator this component must never vanish from the host tree, otherwise
+  // Reanimated host-instance lookups fail on Android Expo Go with
+  // "Cannot find host instance for this component. Maybe it renders nothing?".
+  if (!syncConflict) return <View style={{ width: 0, height: 0, overflow: "hidden" }} pointerEvents="none" collapsable={false} />;
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -170,6 +161,4 @@ const styles = StyleSheet.create({
   syncBanner: { borderRadius: 15, padding: 10, alignItems: "center", gap: 10, elevation: 7, shadowColor: "#0B1F1B", shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } }, 
   syncCopy: { flex: 1, minWidth: 0 }, 
   syncButton: { minHeight: 34, borderRadius: 10, justifyContent: "center", alignItems: "center", paddingHorizontal: 11, flexShrink: 0 },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#070B10" },
-  loadingText: { color: "#FF6B47", fontSize: 16, fontWeight: "600", fontFamily: "Tajawal-Medium" },
 });

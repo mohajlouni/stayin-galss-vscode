@@ -103,7 +103,7 @@ export function CalendarDatePicker({ visible, value, onClose, onSelect, range }:
   const selectedYear = selectedParts.year;
 
   return <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-    <View style={styles.backdrop}>
+    <View collapsable={false} style={styles.backdrop}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
       <GlowGlassCard radius={28} intensity={30} style={styles.sheet} contentStyle={styles.sheetContent}>
         <View style={[styles.sheetHeader, { flexDirection: row }]}>

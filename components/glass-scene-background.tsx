@@ -6,13 +6,24 @@ import Animated, { cancelAnimation, useAnimatedProps, useSharedValue, withRepeat
 
 import { useColors } from "@/hooks/use-colors";
 import { useAppPreferences } from "@/lib/app-preferences";
-import { hexToRgba, useMorphingAccent } from "@/hooks/use-morphing-accent";
+import { hexToRgba } from "@/hooks/use-morphing-accent";
 
 /** القاعدة الصلبة الفاخرة (Obsidian deep) للخلفية الموحّدة. */
 const BASE = "#080C14";
 
 const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse);
-const AnimatedStop = Animated.createAnimatedComponent(Stop);
+
+/**
+ * تنبيه: ممنوع تمرير عنصر `Stop` إلى `Animated.createAnimatedComponent`.
+ *
+ * في react-native-svg يُنفّذ `Stop` الإرجاع `null` (عقدة إعداد يقرأها التدرّج الأب
+ * فقط)، فلا يوجد أي host instance. حينها يفشل reanimated في `_getViewInfo` و
+ * `_detachStyles` ويُسقط التطبيق برسالة:
+ * "[Reanimated] Cannot find host instance for this component. Maybe it renders nothing?"
+ *
+ * لذلك تُقرأ ألوان التدرّج مباشرةً من الشاليه النشط، والحركة تبقى على `Ellipse`
+ * (وهو عنصر أصلي حقيقي `RNSVGEllipse`).
+ */
 
 /** الشبكة الهندسية: خطوط رأسية كل 48 وأفقية كل 60، وخطوط رئيسية كل 240/300. */
 const GRID_V = Array.from({ length: 11 }, (_, i) => i * 48);
@@ -37,8 +48,9 @@ export function GlassSceneBackground() {
   const isDark = colors.mode === "dark";
   const breathe = useSharedValue(0.5);
 
-  const morphGlow = useMorphingAccent(accent, isDark ? 0.5 : 0.24);
-  const morphCore = useMorphingAccent(accent, isDark ? 0.34 : 0.16);
+  // لون التدرّج يُقرأ مباشرةً من الشاليه النشط: لا يمكن تحريك `Stop` لأنه بلا host node.
+  const glowStopColor = hexToRgba(accent, isDark ? 0.5 : 0.24);
+  const coreStopColor = hexToRgba(accent, isDark ? 0.34 : 0.16);
 
   useEffect(() => {
     if (deviceSettings.reduceMotion || !isFocused) {
@@ -54,19 +66,19 @@ export function GlassSceneBackground() {
     const scale = 0.9 + breathe.value * 0.16;
     return {
       opacity: (isDark ? 0.9 : 0.7) * (0.72 + breathe.value * 0.32),
-      transform: `translate(0 ${breathe.value * -26 + 10}) scale(${scale})`,
+      transform: [{ translateY: breathe.value * -26 + 10 }, { scale }],
     };
   });
   const coreProps = useAnimatedProps(() => {
     const scale = 0.92 + breathe.value * 0.14;
     return {
       opacity: (isDark ? 0.85 : 0.6) * (0.7 + breathe.value * 0.3),
-      transform: `translate(0 ${breathe.value * -18 + 6}) scale(${scale})`,
+      transform: [{ translateY: breathe.value * -18 + 6 }, { scale }],
     };
   });
 
   return (
-    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.layer}>
+    <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" collapsable={false} style={styles.layer}>
       <View style={styles.canvas}>
         <Svg width="100%" height="100%" viewBox="0 0 480 900" preserveAspectRatio="xMidYMid slice">
           <Defs>
@@ -77,11 +89,11 @@ export function GlassSceneBackground() {
               <FeGaussianBlur stdDeviation="70" />
             </Filter>
             <RadialGradient id="gridGlow" cx="50%" cy="98%" r="72%">
-              <AnimatedStop offset="0" animatedProps={morphGlow.stopProps} stopOpacity={1} />
+              <Stop offset="0" stopColor={glowStopColor} stopOpacity={1} />
               <Stop offset="0.5" stopColor="#00000000" stopOpacity={0} />
             </RadialGradient>
             <RadialGradient id="gridCore" cx="50%" cy="100%" r="58%">
-              <AnimatedStop offset="0" animatedProps={morphCore.stopProps} stopOpacity={1} />
+              <Stop offset="0" stopColor={coreStopColor} stopOpacity={1} />
               <Stop offset="0.62" stopColor="#00000000" stopOpacity={0} />
             </RadialGradient>
           </Defs>

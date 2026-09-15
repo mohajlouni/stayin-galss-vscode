@@ -46,14 +46,20 @@ const config: ExpoConfig = {
   icon: "./assets/images/stayin-logo.jpg",
   scheme: env.scheme,
   userInterfaceStyle: "automatic",
+  // The New Architecture (Fabric) MUST stay enabled. This project depends on
+  // react-native-reanimated 4.x, and the official Reanimated docs state:
+  // "Reanimated 4 works only with the React Native New Architecture." Expo Go for
+  // SDK 54 is built on the New Architecture too. Setting this to false leaves the
+  // worklet runtime uninitialized, so the app never reaches its first render and
+  // Expo Go appears to hang on the splash screen instead of opening.
   newArchEnabled: true,
   ios: {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
     "infoPlist": {
       "ITSAppUsesNonExemptEncryption": false,
-      "LSApplicationQueriesSchemes": ["whatsapp"]
-    }
+      "LSApplicationQueriesSchemes": ["whatsapp"],
+    },
   },
   android: {
     adaptiveIcon: {
@@ -76,74 +82,10 @@ const config: ExpoConfig = {
             host: "*",
           },
         ],
-        category: ["BROWSABLE", "DEFAULT"],
+        category: ["BROWSABLE", "DEFAULT"] as const,
       },
     ],
   },
-  web: {
-    bundler: "metro",
-    output: "single",
-    favicon: "./assets/images/stayin-logo.jpg",
-  },
-  plugins: [
-    "expo-router",
-    "expo-localization",
-    [
-      "expo-image-picker",
-      {
-        photosPermission: "السماح للتطبيق باختيار صور وصول الدفعات وفواتير المصروفات من مكتبة الصور.",
-        cameraPermission: "السماح للتطبيق بالتقاط صور فواتير ووصول المصروفات.",
-      },
-    ],
-    [
-      "expo-notifications",
-      {
-        icon: "./assets/images/android-icon-monochrome.png",
-        color: "#0F8B83",
-        defaultChannel: "checkout-reminders",
-      },
-    ],
-    [
-      "expo-audio",
-      {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
-      },
-    ],
-    [
-      "expo-video",
-      {
-        supportsBackgroundPlayback: true,
-        supportsPictureInPicture: true,
-      },
-    ],
-    [
-      "expo-splash-screen",
-      {
-        image: "./assets/images/stayin-logo.jpg",
-        imageWidth: 200,
-        resizeMode: "contain",
-        backgroundColor: "#ffffff",
-        dark: {
-          backgroundColor: "#000000",
-        },
-      },
-    ],
-    [
-      "expo-build-properties",
-      {
-        android: {
-          buildArchs: ["armeabi-v7a", "arm64-v8a"],
-          minSdkVersion: 24,
-        },
-      },
-    ],
-    [
-      "expo-local-authentication",
-      {
-        faceIDPermission: "السماح لتطبيق StayIn باستخدام Face ID لتأكيد الدخول.",
-      },
-    ],
-  ],
   experiments: {
     typedRoutes: true,
     reactCompiler: true,

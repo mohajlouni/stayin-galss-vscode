@@ -4,13 +4,17 @@ export const GREGORIAN_MONTHS = GREGORIAN_MONTHS_AR;
 
 export type WeekdayFormat = "ar-short" | "ar-letter" | "en-short" | "en-letter";
 
-/** تسميات أيام الأسبوع القابلة للتهيئة، بترتيب يبدأ من الأحد (فهرس 0) حتى السبت. */
+/** تسميات أيام الأسبوع القابلة للتهيئة بترتيب موحد يبدأ من السبت (الفهرس 0 = السبت) حتى الجمعة،
+ * مطابقة لبداية الأسبوع الموحدة على السبت في كل تقويمات التطبيق. */
 export const WEEKDAY_LABELS: Record<WeekdayFormat, string[]> = {
   "ar-short": ["سب", "أح", "إث", "ثلا", "أرب", "خم", "جم"],
   "ar-letter": ["س", "ح", "ن", "ث", "ر", "خ", "ج"],
   "en-short": ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"],
   "en-letter": ["S", "S", "M", "T", "W", "T", "F"],
 };
+
+/** بداية الأسبوع الموحدة في التطبيق: السبت (قيمة getDay = 6). */
+export const WEEK_START_DAY = 6;
 
 export function normalizeWeekdayFormat(value: unknown): WeekdayFormat {
   return value === "ar-short" || value === "ar-letter" || value === "en-short" || value === "en-letter" ? value : "ar-short";
@@ -26,10 +30,13 @@ export function moveGregorianMonth(year: number, month: number, delta: number) {
   return { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1 };
 }
 
-export function gregorianMonthGrid(year: number, month: number) {
+/** يبني شبكة شهر ميلادي بستة صفوف ثابتة، مع حشو بداية الأسبوع (السبت افتراضيًا) بحيث يقع
+ * اليوم الأول في عمود يومه الصحيح. قيمة `weekStartsOn` بترقيم getDay: 6 = السبت، 0 = الأحد. */
+export function gregorianMonthGrid(year: number, month: number, weekStartsOn: number = WEEK_START_DAY) {
   const firstDay = new Date(Date.UTC(year, month - 1, 1, 12)).getUTCDay();
+  const leadingBlanks = (firstDay - weekStartsOn + 7) % 7;
   const daysInMonth = new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
   const toISO = (day: number) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  const days = [...Array.from({ length: firstDay }, () => null as string | null), ...Array.from({ length: daysInMonth }, (_, index) => toISO(index + 1))];
+  const days = [...Array.from({ length: leadingBlanks }, () => null as string | null), ...Array.from({ length: daysInMonth }, (_, index) => toISO(index + 1))];
   return [...days, ...Array.from({ length: 42 - days.length }, () => null as string | null)];
 }

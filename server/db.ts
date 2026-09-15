@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { accountDeletionRequests, activeWorkspaces, globalFeatureFlags, InsertSuggestion, InsertUser, sessions, suggestions, superAdminAudit, systemErrorLogs, users, workspaceActivity, workspaceData, workspaceDataBackups, workspaceFeatureSettings, workspaceInvitations, workspaceMembers, workspaceOwnerPins, workspaces, type WorkspaceRole } from "../drizzle/schema";
@@ -200,6 +200,25 @@ export async function ensureAlwaysPromptColumn(): Promise<void> {
   }
 }
 
+/** تمديد جدول أعضاء المنشأة لدعم الانضمام المنتظر (idempotent): سمة "pending"
+ *  وفتح عمود userId لأنه يصبح فارغًا لأي عضو أضافه المالك ولم ينضم للتطبيق بعد. */
+export async function ensureMemberPendingSupport(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.execute(sql`ALTER TABLE stayInWorkspaceMembers MODIFY COLUMN status enum('active','pending','disabled') NOT NULL DEFAULT 'active'`);
+    console.log("[Database] Extended stayInWorkspaceMembers status enum with 'pending'");
+  } catch (error) {
+    console.warn("[Database] Could not extend stayInWorkspaceMembers status enum:", error);
+  }
+  try {
+    await db.execute(sql`ALTER TABLE stayInWorkspaceMembers MODIFY COLUMN userId int NULL`);
+    console.log("[Database] Opened stayInWorkspaceMembers.userId for pending rows");
+  } catch (error) {
+    console.warn("[Database] Could not open stayInWorkspaceMembers.userId:", error);
+  }
+}
+
 /** حفظ تفضيل "اعرض شاشة اختيار المنشآت دائماً عند تسجيل الدخول" للمستخدم الحالي (idempotent). */
 export async function setWorkspaceSelectionPreference(userId: number, enabled: boolean): Promise<void> {
   const db = await getDb();
@@ -232,6 +251,7 @@ export async function ensureUserCodes(): Promise<void> {
     const memberships = await db.select({ userId: workspaceMembers.userId, role: workspaceMembers.role }).from(workspaceMembers);
     const rolesByUser = new Map<number, Set<string>>();
     for (const membership of memberships) {
+      if (membership.userId === null) continue;
       const roles = rolesByUser.get(membership.userId) ?? new Set<string>();
       roles.add(membership.role);
       rolesByUser.set(membership.userId, roles);
@@ -362,10 +382,12 @@ export function isImmutableRootAccount(user: { openId?: string | null; email?: s
   return matchesSuperAdminIdentity({ openId: user.openId, email: user.email, phone: user.phone }, ENV.ownerOpenId);
 }
 
-/** Does a given user-id belong to the immune root account? */
-export async function isImmutableRootUserId(userId: number): Promise<boolean> {
+/** Does a given user-id belong to the immune root account? Pending members
+ *  (userId null) have no linked account and are never treated as the root. */
+export async function isImmutableRootUserId(userId: number | null): Promise<boolean> {
   const database = await getDb();
   if (!database) return false;
+  if (userId === null) return false;
   const row = (await database.select({ openId: users.openId, email: users.email, phone: users.phone, userCode: users.userCode, role: users.role }).from(users).where(eq(users.id, userId)).limit(1))[0];
   if (!row) return false;
   return isImmutableRootAccount(row);
@@ -1056,7 +1078,7 @@ export async function deleteWorkspaceIfOwner(user: { id: number; name: string | 
 }
 
 /** Categories the granular purge engine can wipe inside a single workspace. */
-export const PURGE_RECORD_CATEGORIES = ["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "units", "workspace"] as const;
+export const PURGE_RECORD_CATEGORIES = ["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "staff", "units", "workspace"] as const;
 export type PurgeRecordCategory = (typeof PURGE_RECORD_CATEGORIES)[number];
 
 /**
@@ -1107,6 +1129,13 @@ export async function purgeWorkspaceRecords(actor: { id: number; name: string | 
   if (selected.includes("loyalty")) { removed.loyaltyAccounts = (data.loyaltyAccounts ?? []).length; removed.loyaltyTransactions = (data.loyaltyTransactions ?? []).length; data.loyaltyAccounts = []; data.loyaltyTransactions = []; }
   if (selected.includes("financials")) { removed.expenses = (data.expenses ?? []).length; removed.floatSettlements = (data.staffFloatSettlements ?? []).length; data.expenses = []; data.staffFloatSettlements = []; }
   if (selected.includes("analytics")) { removed.auditLog = data.auditLog.length; removed.weatherLogs = (data.weatherLogs ?? []).length; removed.utilityReadings = (data.utilityReadings ?? []).length; data.auditLog = []; data.weatherLogs = []; data.utilityReadings = []; }
+  if (selected.includes("staff")) {
+    removed.invitations = Number(((await database.select({ c: sql`count(*)` }).from(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, workspaceId)))[0]?.c ?? 0));
+    await database.delete(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, workspaceId));
+    const members = await database.select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, "owner")));
+    removed.staff = members.length;
+    if (members.length) await database.update(workspaceMembers).set({ status: "disabled" }).where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, "owner")));
+  }
   if (selected.includes("units")) { removed.chalets = data.chalets.length; removed.turnoverTasks = data.turnoverTasks.length; removed.specialPriceRules = data.specialPriceRules.length; data.chalets = []; data.turnoverTasks = []; data.specialPriceRules = []; }
   const payload = JSON.stringify(normalizeAppData({ ...data }));
   const result = await saveOwnerEmergencySnapshot({ workspaceId, payload, actorUserId: actor.id, action: "workspace-purge", subject: "تصفير بيانات المنشأة", details: JSON.stringify(removed) });
@@ -1204,8 +1233,9 @@ export async function listWorkspaceMembers(workspaceId: number) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const members = await database.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
-  const userCodes = new Map((await database.select({ id: users.id, userCode: users.userCode }).from(users).where(inArray(users.id, members.map((m) => m.userId)))).map((u) => [u.id, u.userCode ?? null]));
-  return members.map((m) => ({ ...withPermissions(m), userCode: userCodes.get(m.userId) ?? null }));
+  const linkedUserIds = members.map((m) => m.userId).filter((id): id is number => id !== null);
+  const userCodes = new Map((linkedUserIds.length ? await database.select({ id: users.id, userCode: users.userCode }).from(users).where(inArray(users.id, linkedUserIds)) : []).map((u) => [u.id, u.userCode ?? null]));
+  return members.map((m) => ({ ...withPermissions(m), userCode: m.userId !== null ? (userCodes.get(m.userId) ?? null) : null }));
 }
 
 export async function listWorkspaceCollectionRecipients(workspaceId: number) {
@@ -1241,16 +1271,70 @@ export async function revokeWorkspaceInvitation(workspaceId: number, invitationI
   await database.insert(workspaceActivity).values({ workspaceId: invitation.workspaceId, actorUserId, action: "invitation-revoked", subject: invitation.employeeName, details: invitation.phone });
 }
 
+/** يحدّث بيانات دعوة معلقة (الاسم / الهاتف / الدور / الصلاحيات) ويحتفظ برمز الدعوة نفسه — يُستخدم لتصحيح أخطاء الإدخال من لوحة المالك. */
+export async function updateWorkspaceInvitation(input: { workspaceId: number; invitationId: number; employeeName?: string; phone?: string; role?: Exclude<WorkspaceRole, "owner">; permissions?: WorkspacePermissions; actorUserId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const invitation = (await database.select().from(workspaceInvitations).where(and(eq(workspaceInvitations.id, input.invitationId), eq(workspaceInvitations.workspaceId, input.workspaceId))).limit(1))[0];
+  if (!invitation) throw new Error("Invitation not found");
+  if (invitation.usedAt || invitation.revokedAt) throw new Error("Invitation is already used or revoked");
+  await database.update(workspaceInvitations).set({
+    ...(input.employeeName !== undefined ? { employeeName: input.employeeName } : {}),
+    ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    ...(input.role !== undefined ? { role: input.role } : {}),
+    ...(input.permissions !== undefined ? { permissions: JSON.stringify(input.permissions) } : {}),
+  }).where(eq(workspaceInvitations.id, input.invitationId));
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "invitation-updated", subject: input.employeeName ?? invitation.employeeName, details: input.phone ?? invitation.phone });
+  return { updated: true as const };
+}
+
+/** ينشئ أو يحدّث صف عضو المنشأة (pending إن لم يوجد) ويصكّ رمز دعوة جديدًا
+ *  صالحًا لرابط/نسخ الدعوة، مع إبطال الدعوات المعلقة السابقة لنفس الهاتف حتى
+ *  يبقى رمز واحد صالح لكل رقم. يُستدعى من إضافة العضو ومن "نسخ كود الدعوة". */
+export async function addWorkspaceStaff(input: { workspaceId: number; employeeName: string; phone: string; pin: string; createdByUserId: number; role?: Exclude<WorkspaceRole, "owner">; permissions: WorkspacePermissions; expiresAt: Date }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const role = input.role ?? "staff";
+  const permissions = JSON.stringify(input.permissions);
+  const existing = (await database.select({ id: workspaceMembers.id, displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.phone, input.phone), ne(workspaceMembers.role, "owner"))).limit(1))[0];
+  let memberId: number;
+  if (existing) {
+    await database.update(workspaceMembers).set({ displayName: input.employeeName, role, permissions }).where(eq(workspaceMembers.id, existing.id));
+    memberId = existing.id;
+  } else {
+    const inserted = await database.insert(workspaceMembers).values({ workspaceId: input.workspaceId, userId: null, displayName: input.employeeName, phone: input.phone, role, permissions, status: "pending" });
+    memberId = Number(inserted[0].insertId);
+  }
+  await database.update(workspaceInvitations).set({ revokedAt: new Date() }).where(and(eq(workspaceInvitations.workspaceId, input.workspaceId), eq(workspaceInvitations.phone, input.phone), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt)));
+  const invitation = await database.insert(workspaceInvitations).values({ workspaceId: input.workspaceId, employeeName: input.employeeName, phone: input.phone, pinHash: pinHash(input.pin), createdByUserId: input.createdByUserId, role, permissions, expiresAt: input.expiresAt });
+  const invitationId = Number(invitation[0].insertId);
+  await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.createdByUserId, action: existing ? "employee-re-invited" : "employee-invited", subject: input.employeeName, details: `دعوة موظف: ${input.phone}` });
+  return { memberId, invitationId, pin: input.pin, expiresAt: input.expiresAt };
+}
+
 export async function acceptWorkspaceInvitation(input: { userId: number; phone: string; pin: string }) {
   const database = await getDb();
   if (!database) throw new Error("Database is unavailable");
   const invitation = (await database.select().from(workspaceInvitations).where(and(eq(workspaceInvitations.phone, input.phone), eq(workspaceInvitations.pinHash, pinHash(input.pin)), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt), gt(workspaceInvitations.expiresAt, new Date()))).orderBy(desc(workspaceInvitations.createdAt)).limit(1))[0];
   if (!invitation) throw new Error("Invitation is invalid or expired");
-  await database.insert(workspaceMembers).values({ workspaceId: invitation.workspaceId, userId: input.userId, displayName: invitation.employeeName, phone: invitation.phone, role: invitation.role, permissions: JSON.stringify(parseStoredPermissions(invitation.permissions, invitation.role)), status: "active" });
+
+  // ربط صف العضو الذي أنشأه المالك مسبقًا (pending / أي صف سابق بنفس الهاتف)
+  // بدلًا من إنشاء صف جديد — فلا تكرارات، ويُربط userId فور قبول الدعوة.
+  const permissions = JSON.stringify(parseStoredPermissions(invitation.permissions, invitation.role));
+  const existing = (await database.select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.phone, invitation.phone), ne(workspaceMembers.role, "owner"))).limit(1))[0];
+  let member: (typeof workspaceMembers.$inferSelect);
+  if (existing) {
+    await database.update(workspaceMembers).set({ userId: input.userId, displayName: invitation.employeeName, role: invitation.role, permissions, status: "active" }).where(eq(workspaceMembers.id, existing.id));
+    member = (await database.select().from(workspaceMembers).where(eq(workspaceMembers.id, existing.id)).limit(1))[0];
+  } else {
+    const inserted = await database.insert(workspaceMembers).values({ workspaceId: invitation.workspaceId, userId: input.userId, displayName: invitation.employeeName, phone: invitation.phone, role: invitation.role, permissions, status: "active" });
+    member = (await database.select().from(workspaceMembers).where(eq(workspaceMembers.id, Number(inserted[0].insertId))).limit(1))[0];
+  }
   await database.update(workspaceInvitations).set({ usedAt: new Date() }).where(eq(workspaceInvitations.id, invitation.id));
   await database.insert(workspaceActivity).values({ workspaceId: invitation.workspaceId, actorUserId: input.userId, action: "employee-joined", subject: invitation.employeeName, details: invitation.phone });
   await setActiveWorkspace(input.userId, invitation.workspaceId);
-  return getActiveWorkspaceMember(input.userId);
+  if (!member) throw new Error("Invitation is invalid or expired");
+  return withPermissions(member);
 }
 
 /**
@@ -1301,6 +1385,27 @@ export async function removeWorkspaceMember(input: { workspaceId: number; member
   await database.update(workspaceMembers).set({ status: "disabled" }).where(eq(workspaceMembers.id, input.memberId));
   await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "employee-removed", subject: member.displayName, details: `إزالة من فريق العمل: ${member.phone}` });
   return { removed: true };
+}
+
+/**
+ * حذف نهائي لأي أثر لفريق العمل لرقم هاتف معين داخل المنشأة: تُلغى كل الدعوات
+ * المعلقة على الرقم، ويُعطَّل أي عضو نشط (غير المالك) مطابق للرقم. يُستخدم من
+ * نافذة تأكيد الحذف المخصصة لضمان ألّا تعود البطاقة بعد إعادة الجلب من الخادم.
+ */
+export async function deleteWorkspaceStaffByPhone(input: { workspaceId: number; phone: string; actorUserId: number }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database is unavailable");
+  const pendingInvitations = await database.select({ id: workspaceInvitations.id, employeeName: workspaceInvitations.employeeName }).from(workspaceInvitations).where(and(eq(workspaceInvitations.workspaceId, input.workspaceId), eq(workspaceInvitations.phone, input.phone), isNull(workspaceInvitations.usedAt), isNull(workspaceInvitations.revokedAt)));
+  for (const invitation of pendingInvitations) {
+    await database.update(workspaceInvitations).set({ revokedAt: new Date() }).where(and(eq(workspaceInvitations.id, invitation.id), eq(workspaceInvitations.workspaceId, input.workspaceId)));
+    await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "invitation-revoked", subject: invitation.employeeName, details: `حذف نهائي بالهاتف: ${input.phone}` });
+  }
+  const activeMembers = await database.select({ id: workspaceMembers.id, displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, input.workspaceId), eq(workspaceMembers.phone, input.phone), inArray(workspaceMembers.status, ["active", "pending"]), ne(workspaceMembers.role, "owner")));
+  for (const member of activeMembers) {
+    await database.update(workspaceMembers).set({ status: "disabled" }).where(and(eq(workspaceMembers.id, member.id), eq(workspaceMembers.workspaceId, input.workspaceId)));
+    await database.insert(workspaceActivity).values({ workspaceId: input.workspaceId, actorUserId: input.actorUserId, action: "employee-removed", subject: member.displayName, details: `حذف نهائي بالهاتف: ${input.phone}` });
+  }
+  return { invitationsRevoked: pendingInvitations.length, membersDisabled: activeMembers.length };
 }
 
 export async function listWorkspaceActivity(workspaceId: number) {

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const addUserModal = readFileSync(resolve(process.cwd(), "components/users/AddUserModal.tsx"), "utf8");
 const userMgmt = readFileSync(resolve(process.cwd(), "app/user-management.tsx"), "utf8");
-const claim = readFileSync(resolve(process.cwd(), "app/auth/claim-staff-account.tsx"), "utf8");
+const hub = readFileSync(resolve(process.cwd(), "app/workspace-hub.tsx"), "utf8");
 const payment = readFileSync(resolve(process.cwd(), "app/payment-methods.tsx"), "utf8");
 
 describe("unified staff registration (توحيد تسجيل الفريق)", () => {
@@ -38,14 +38,19 @@ describe("unified staff registration (توحيد تسجيل الفريق)", () =
     expect(userMgmt).toContain("updateMemberPermissions.mutateAsync({ memberId: byPhone.id");
     expect(userMgmt).toContain("findOnbookByPhone(onbookStaff, phone)");
     expect(userMgmt).toContain("inviteFromAddModal(name, phone, role, permissions)");
-    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen || Boolean(editingOnbook)}");
+    expect(userMgmt).toContain("<AddUserModal visible={addUserOpen || Boolean(editingOnbook) || Boolean(editingInvitation)}");
   });
 
-  it("مطالبة الهاتف أولًا مع ربط العهود وحساب التطبيق", () => {
-    expect(claim).toContain("findOnbookByPhone");
-    expect(claim).toContain("تم العثور على سجل مالي وعهد سابقة مرتبطة برقمك، هل ترغب بربط حسابك؟");
-    expect(claim).toContain("authUid: user?.id ? String(user.id) : undefined");
-    expect(claim).toContain("دعوة للانضمام إلى منشأة StayIn - إدارة الوحدات والعهد");
+  it("transfers activation to the workspace hub: phone + 6-digit PIN against the database, deep-link prefill", () => {
+    expect(hub).toContain("trpc.workspace.acceptInvitation.useMutation()");
+    expect(hub).toContain("useLocalSearchParams<{ phone?: string; code?: string }>()");
+    expect(hub).toContain("acceptInvitation.mutateAsync({ phone: invitePhone.trim(), pin: code })");
+    expect(hub).toContain("acceptCode.mutateAsync({ code })");
+    expect(hub).toContain("رقم الهاتف المدعو (اختياري)");
+    expect(hub).not.toContain("claim-staff-account");
+    expect(userMgmt).not.toContain("authUid: user?.id ? String(user.id) : undefined");
+    expect(userMgmt).not.toContain("تفعيل دعوة الموظف");
+    expect(userMgmt).toContain("محور المنشأة — سجّل الدخول");
   });
 
   it("نافذة الدفع: قائمة مسؤولين مباشرة بدون تبويبات أو رموز داخلية, وبطاقات مدمجة", () => {

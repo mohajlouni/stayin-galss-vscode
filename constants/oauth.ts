@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
 
@@ -37,11 +38,25 @@ export function getApiBaseUrl(): string {
 
   // On web, derive from current hostname by replacing port 8081 with 3000
   if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
-    const { protocol, hostname } = window.location;
+    const { protocol, hostname, port } = window.location;
     // Pattern: 8081-sandboxid.region.domain -> 3000-sandboxid.region.domain
     const apiHostname = hostname.replace(/^8081-/, "3000-");
+    if (port === "8081") {
+      return `${protocol}//${hostname}:3000`;
+    }
     if (apiHostname !== hostname) {
       return `${protocol}//${apiHostname}`;
+    }
+  }
+
+  // On native (Expo Go / dev client) derive the API host from the Metro server the
+  // bundle was loaded from. A phone on the same LAN reaches Metro via a LAN IP such
+  // as 192.168.0.117:8081, and `localhost` there would point at the phone itself.
+  if (ReactNative.Platform.OS !== "web") {
+    const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost ?? "";
+    const host = hostUri.split(":")[0];
+    if (host) {
+      return `http://${host}:3000`;
     }
   }
 

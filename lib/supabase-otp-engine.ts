@@ -167,14 +167,14 @@ export function validateIdentifier(input: string): IdentifierValidation {
   return { ok: false, kind: "invalid", reason: raw.includes("@") ? "email" : "phone" };
 }
 
-/** Password policy: at least 8 characters, containing letters and numbers, no symbols. */
+/** Password policy: 8+ chars with letters and digits. Symbols allowed. */
 export function validatePassword(password: string): string | null {
   const value = password ?? "";
-  if (!value) return "أدخل كلمة المرور للمتابعة.";
-  if (value.length < 8) return "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.";
-  if (!/[A-Za-z]/.test(value)) return "يجب أن تحتوي كلمة المرور على أحرف.";
-  if (!/\d/.test(value)) return "يجب أن تحتوي كلمة المرور على أرقام.";
-  if (/[^\w\u0600-\u06FF]/.test(value)) return "لا تُستخدم رموز خاصة في كلمة المرور.";
+  if (value.length < 8) return "كلمة المرور يجب أن تكون 8 أحرف على الأقل.";
+  if (/\s/.test(value)) return "كلمة المرور يجب ألا تحتوي على مسافات.";
+  const hasLetter = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0600-\u06FF]/.test(value);
+  const hasDigit = /\d/.test(value);
+  if (!hasLetter || !hasDigit) return "كلمة المرور يجب أن تحتوي على أحرف وأرقام (الرموز الخاصة مثل !@#$%^&* مسموحة).";
   return null;
 }
 
@@ -198,7 +198,7 @@ export const AUTH_ERROR_MESSAGES: Record<AuthError, string> = {
   "not-configured": "تسجيل الدخول غير مفعّل بعد على هذا التطبيق.",
   unregistered: "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.",
   "wrong-password": "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة.",
-  "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام.",
+  "invalid-password": "كلمة المرور لا تستوفي المتطلبات. استخدم 8 أحرف على الأقل مع أحرف وأرقام (الرموز الخاصة مثل !@#$%^&* مسموحة).",
   "invalid-email": "أدخل بريدًا إلكترونيًا صحيحًا، مثل name@example.com.",
   "provider-unavailable": "تسجيل الدخول عبر هذا المزود غير مفعّل حالياً في إعدادات الخادم",
   "email-not-confirmed": "حسابك مسجل ولكنه غير موثّق بعد. أرسلنا لك رمز تحقق جديداً إلى بريدك الإلكتروني.",
@@ -229,33 +229,42 @@ export function classifyAuthError(error: unknown): AuthError {
 }
 
 /**
- * Super Admin master credentials used for the direct login bypass. The server
- * merges this identity to the canonical owner `openId` and returns
- * `role: "super_admin"`, so no Supabase Auth record or email confirmation is
- * required to sign in — the bridge issues the owner session directly.
+ * Super Admin identity. The master password is NEVER baked into client code:
+ * it is resolved from the environment at call time (`SUPER_ADMIN_MASTER_PASSWORD`),
+ * so a production client build cannot verify — or leak — it. Password validation
+ * is delegated to the server endpoint, which reads the same variable server-side.
  */
 export const SUPER_ADMIN_EMAIL = "moh.ajlouni.90@gmail.com";
-export const SUPER_ADMIN_PASSWORD = "Ajlouni911";
 
 /** True when the identifier is the Super Admin email (case-insensitive). */
 export function isSuperAdminEmail(identifier: string): boolean {
   return normalizeEmail(identifier) === SUPER_ADMIN_EMAIL;
 }
 
-/** True when the supplied password matches the Super Admin master password. */
+/** True when the supplied password matches the env-configured Super Admin master password. */
 export function isSuperAdminPassword(password: string): boolean {
-  return String(password ?? "") === SUPER_ADMIN_PASSWORD;
+  const masterPassword = process.env.SUPER_ADMIN_MASTER_PASSWORD ?? "";
+  return masterPassword.length > 0 && String(password ?? "") === masterPassword;
 }
 
 /**
- * True when the identifier is the Super Admin identity (email OR the canonical
- * Jordanian phone shape) AND the password matches. Used by the client to route
- * straight to the server bridge instead of a (possibly unseeded) Supabase auth.
+ * True when the identifier belongs to the Super Admin identity (email OR the
+ * canonical Jordanian phone shape). The client routes such identifiers straight
+ * to the server bridge; the server alone verifies the password.
  */
-export function isSuperAdminCredential(identifier: string, password: string): boolean {
-  if (!isSuperAdminPassword(password)) return false;
+export function isSuperAdminIdentifier(identifier: string): boolean {
   const normalized = normalizeEmail(identifier);
   if (normalized === SUPER_ADMIN_EMAIL) return true;
   const classified = classifyIdentifier(identifier);
   return classified.kind === "phone" && classified.phone === "+962797402940";
+}
+
+/**
+ * True when the identifier is the Super Admin identity AND the password matches
+ * the env-configured master password. Kept for server-side checks and tests;
+ * production client bundles resolve an empty password (no env) and never match.
+ */
+export function isSuperAdminCredential(identifier: string, password: string): boolean {
+  if (!isSuperAdminPassword(password)) return false;
+  return isSuperAdminIdentifier(identifier);
 }

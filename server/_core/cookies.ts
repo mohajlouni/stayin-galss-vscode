@@ -1,5 +1,7 @@
 import type { CookieOptions, Request } from "express";
 
+import { isTrustedCookieParentDomain } from "./security";
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 function isIpAddress(host: string) {
@@ -22,7 +24,13 @@ function isSecureRequest(req: Request) {
 /**
  * Extract parent domain for cookie sharing across subdomains.
  * e.g., "3000-xxx.manuspre.computer" -> ".manuspre.computer"
- * This allows cookies set by 3000-xxx to be read by 8081-xxx
+ * This allows cookies set by 3000-xxx to be read by 8081-xxx.
+ *
+ * The parent is returned ONLY when it sits on the explicit trusted-suffix
+ * whitelist (`TRUSTED_WEB_HOST_SUFFIXES`). Hosts outside the whitelist (or any
+ * arbitrary domain an attacker can point at the server via a Host header) get
+ * no cookie `domain`, so the cookie stays host-only and cannot be shared (or
+ * exfiltrated) to a foreign parent domain.
  */
 function getParentDomain(hostname: string | undefined): string | undefined {
   if (!hostname) return undefined;
@@ -42,7 +50,8 @@ function getParentDomain(hostname: string | undefined): string | undefined {
 
   // Return parent domain with leading dot (e.g., ".manuspre.computer")
   // This allows cookie to be shared across all subdomains
-  return "." + parts.slice(-2).join(".");
+  const parent = "." + parts.slice(-2).join(".");
+  return isTrustedCookieParentDomain(parent) ? parent : undefined;
 }
 
 export function getSessionCookieOptions(

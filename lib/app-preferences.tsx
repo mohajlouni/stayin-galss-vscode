@@ -1,8 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { reloadAppAsync } from "expo";
 import { getCalendars, getLocales } from "expo-localization";
 import * as Haptics from "expo-haptics";
-import { Appearance, I18nManager, Platform, useColorScheme as useSystemColorScheme } from "react-native";
-import * as Updates from "expo-updates";
+import { Appearance, Platform, useColorScheme as useSystemColorScheme } from "react-native";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { useBookings } from "@/lib/booking-store";
@@ -117,21 +117,14 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
   const formatHijriDate = useCallback((date: string) => hijriDateLabel(date, language), [language]);
   const formatHijriMonth = useCallback((year: number, month: number) => hijriMonthLabel(year, month, language), [language]);
 
+  // يُطبَّق اتجاه الواجهة (RTL/LTR) مركزيًا داخل AppNavigator في app/_layout.tsx
+  // وفق اللغة النشطة؛ هنا يُرصد تغيّر اللغة فقط لعرض تنبيه إعادة التشغيل على الهاتف.
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = language;
-      document.documentElement.dir = direction;
-    }
-    if (Platform.OS !== "web") {
-      I18nManager.allowRTL(true);
-      I18nManager.forceRTL(isRTL);
-    }
-
     if (previousLanguageRef.current !== null && previousLanguageRef.current !== language) {
       setLanguageChangeStatus("pending");
     }
     previousLanguageRef.current = language;
-  }, [direction, isRTL, language]);
+  }, [language]);
 
   useEffect(() => {
     Appearance.setColorScheme?.(appearanceMode === "system" ? null : appearanceMode);
@@ -167,11 +160,19 @@ export function AppPreferencesProvider({ children }: { children: React.ReactNode
     setLanguageChangeStatus("acknowledged");
   }, []);
 
+  // ملاحظة مهمة: واجهة إعادة التحميل القديمة من expo-updates مرفوضة في Expo Go
+  // ووضع التطوير (ERR_UPDATES_DISABLED)، وكانت تترك التطبيق معلقًا بعد تغيير اللغة
+  // دون أن يفتح. نستخدم `reloadAppAsync()` من expo وهي واجهة عامة تعمل في Expo Go
+  // وبناء التطوير والإنتاج على حد سواء، فلا يفشل تبديل اللغة أبدًا.
   const restartApp = useCallback(async () => {
-    if (Platform.OS !== "web") {
-      await Updates.reloadAsync();
-    } else {
+    if (Platform.OS === "web") {
       window.location.reload();
+      return;
+    }
+    try {
+      await reloadAppAsync();
+    } catch {
+      // التفضيل محفوظ بالفعل، وسيُطبَّق عند التشغيل التالي حتى لو تعذّرت إعادة التحميل.
     }
   }, []);
 

@@ -55,7 +55,7 @@ const CADENCE_FILTERS: { id: "all" | "daily" | "weekly" | "monthly" | "other"; l
 const matchesCadenceFilter = (frequency: MaintenanceFrequency, cadence: "all" | "daily" | "weekly" | "monthly" | "other") => cadence === "all" ? true : cadence === "other" ? frequency === "biweekly" || frequency === "custom" || frequency === "once" : frequency === cadence;
 
 /** أسماء أيام الأسبوع حسب فهرس getDay (0 = الأحد). */
-const ROLLER_WEEKDAYS: { ar: string[]; en: string[] } = { ar: ["أحد", "إثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
+const ROLLER_WEEKDAYS: { ar: string[]; en: string[] } = { ar: ["أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة", "سبت"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
 /** عرض الخلية الثابت (38) + الفجوة (2) = 40px، فيكون تحريك 7 أيام = 280px مضبوطاً تماماً على حدود الأيام. */
 const ROLLER_PILL_STEP = 40;
 

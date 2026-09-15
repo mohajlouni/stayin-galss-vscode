@@ -36,8 +36,7 @@ const expenseCategorySchema = z.enum(["guards-salaries", "maintenance", "cleanin
 const expensePaymentSchema = z.enum(["cash", "click"]);
 const ownerPinSchema = z.string().regex(/^\d{4}$/, "Owner PIN must be four digits");
 
-/** رمز استرجاع سيد ثابت يمنح السوبر أدمن الدخول لأدوات الطوارئ مهما كان PIN المالك. */
-const SUPER_ADMIN_MASTER_PIN = "246810";
+/** رمز استرجاع سيد يُمنح للسوبر أدمن في بيئة التشغيل عبر SUPER_ADMIN_MASTER_PIN (لا يُكتب أبدًا في الكود). */
 type EmergencyActor = { id: number; openId?: string | null; email?: string | null; phone?: string | null; role?: string | null; isSuperAdmin?: boolean };
 function isSuperAdminActor(actor: EmergencyActor, ownerOpenId: string): boolean {
   if (actor.isSuperAdmin) return true;
@@ -66,7 +65,7 @@ async function requireEmergencyOwner(userId: number, workspaceId: number, actor:
     try { await db.requireWorkspaceOwner(workspaceId, userId); } catch { throw new TRPCError({ code: "FORBIDDEN", message: "Owner access required" }); }
   }
   if (pin) {
-    if (isSuperAdmin && pin === SUPER_ADMIN_MASTER_PIN) return;
+    if (isSuperAdmin && ENV.superAdminMasterPin && pin === ENV.superAdminMasterPin) return;
     const verification = await db.verifyWorkspaceOwnerPin({ workspaceId, pin });
     if (!verification.configured) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Owner PIN must be configured" });
     if (!verification.verified) throw new TRPCError({ code: "FORBIDDEN", message: "Invalid owner PIN" });
@@ -246,8 +245,15 @@ export const appRouter = router({
       if (summary.member.role !== "owner" && input.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can invite an operational manager" });
       const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-      const invitationId = await db.createWorkspaceInvitation({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
-      return { invitationId, pin, expiresAt };
+      return db.addWorkspaceStaff({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
+    }),
+    refreshInvitationCode: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32), employeeName: z.string().trim().min(2).max(255), role: workspaceInviteRoleSchema, permissions: workspacePermissionsSchema })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      if (summary.member.role !== "owner" && input.role === "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only the primary owner can invite an operational manager" });
+      const pin = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      return db.addWorkspaceStaff({ workspaceId: summary.member.workspaceId, employeeName: input.employeeName, phone: input.phone, pin, createdByUserId: ctx.user.id, role: input.role, permissions: input.permissions, expiresAt });
     }),
     updateMemberPermissions: protectedProcedure.input(z.object({ memberId: z.number().int().positive(), permissions: workspacePermissionsSchema })).mutation(async ({ ctx, input }) => {
       const summary = await db.getWorkspaceSummary(ctx.user);
@@ -292,6 +298,19 @@ export const appRouter = router({
       const summary = await db.getWorkspaceSummary(ctx.user);
       if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
       await db.revokeWorkspaceInvitation(summary.member.workspaceId, input.invitationId, ctx.user.id);
+      return { success: true };
+    }),
+    deleteStaffMember: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32) })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      // حذف حقيقي من قاعدة البيانات: إلغاء الدعوات المعلقة وإعطال الأعضاء
+      // المطابقين للرقم داخل هذه المنشأة فقط.
+      return db.deleteWorkspaceStaffByPhone({ workspaceId: summary.member.workspaceId, phone: input.phone, actorUserId: ctx.user.id });
+    }),
+    updateInvitation: protectedProcedure.input(z.object({ invitationId: z.number().int().positive(), employeeName: z.string().trim().min(2).max(255).optional(), phone: z.string().trim().min(6).max(32).optional(), role: workspaceInviteRoleSchema.optional(), permissions: workspacePermissionsSchema.optional() })).mutation(async ({ ctx, input }) => {
+      const summary = await db.getWorkspaceSummary(ctx.user);
+      if (!summary.member || !canManageWorkspace(summary.member.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager access required" });
+      await db.updateWorkspaceInvitation({ workspaceId: summary.member.workspaceId, invitationId: input.invitationId, employeeName: input.employeeName, phone: input.phone, role: input.role, permissions: input.permissions, actorUserId: ctx.user.id });
       return { success: true };
     }),
     acceptInvitation: protectedProcedure.input(z.object({ phone: z.string().trim().min(6).max(32), pin: z.string().regex(/^\d{6}$/, "PIN must contain 6 digits") })).mutation(async ({ ctx, input }) => {
@@ -358,7 +377,7 @@ export const appRouter = router({
     }),
     purgeRecords: protectedProcedure.input(z.object({
       workspaceId: z.number().int().positive(),
-      categories: z.array(z.enum(["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "units", "workspace"])).min(1),
+      categories: z.array(z.enum(["bookings", "waitlist", "maintenance", "notifications", "customers", "loyalty", "financials", "analytics", "staff", "units", "workspace"])).min(1),
       challenge: z.string().trim().max(16),
     })).mutation(async ({ ctx, input }) => {
       // Only the verified Property Owner of that workspace or the Super Admin
@@ -586,7 +605,7 @@ export const appRouter = router({
     }),
     verifyPin: protectedProcedure.input(z.object({ workspaceId: z.number().int().positive(), pin: ownerPinSchema })).mutation(async ({ ctx, input }) => {
       await requireEmergencyOwner(ctx.user.id, input.workspaceId, ctx.user);
-      if (isSuperAdminActor(ctx.user, ENV.ownerOpenId) && input.pin === SUPER_ADMIN_MASTER_PIN) {
+      if (isSuperAdminActor(ctx.user, ENV.ownerOpenId) && ENV.superAdminMasterPin && input.pin === ENV.superAdminMasterPin) {
         return { verified: true, locked: false, lockedUntil: null, failedAttempts: 0 };
       }
       const result = await db.verifyWorkspaceOwnerPin(input);

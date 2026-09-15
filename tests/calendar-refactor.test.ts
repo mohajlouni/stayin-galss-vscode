@@ -14,7 +14,7 @@ describe("calendar matrix refactor", () => {
 
   it("builds the Saturday-first grid from the Saturday offset of the 1st and renders rows right-to-left", () => {
     expect(calendar).toContain("const leadingBlanks = (firstDay + 1) % 7");
-    expect(calendar).toContain("weekdayLabels[(column + 6) % 7]");
+    expect(calendar).toContain("const weekHeader = weekdayLabels;");
     expect(calendar).toContain('style={[styles.weekRow, { flexDirection: "row-reverse" }]}');
     expect(calendar).toContain('style={[styles.daysGridContainer, { flexDirection: "row-reverse" }]}');
     expect(calendar).toContain("return [...cells, ...Array.from({ length: 42 - cells.length }, () => null as string | null)]");

@@ -60,6 +60,7 @@ export default function ParallaxScrollView({
       scrollEventThrottle={16}
     >
       <Animated.View
+        collapsable={false}
         style={[
           {
             overflow: "hidden",

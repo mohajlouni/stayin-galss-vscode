@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  claimMatches,
   findOnbookByPhone,
   findOnbookByUid,
   hasDuplicatePhone,
@@ -14,8 +13,8 @@ import {
 } from "@/lib/staff-directory";
 
 const staff: OnbookStaff[] = [
-  { uid: "S2001", name: "ليان", phone: "0791234567", role: "staff", isAppUser: false },
-  { uid: "G5001", name: "نور", phone: "+962791234568", role: "guard", isAppUser: false },
+  { uid: "S2001", name: "ليان", phone: "0791234567", role: "staff" },
+  { uid: "G5001", name: "نور", phone: "+962791234568", role: "guard" },
 ];
 
 describe("phoneKey (أرقام الهاتف المحلية/الدولية)", () => {
@@ -66,22 +65,6 @@ describe("findOnbookByUid / findOnbookByPhone (بحث في الدليل)", () =>
   });
 });
 
-describe("claimMatches (مطابقة مضبوطة: الهاتف + المعرّف معًا)", () => {
-  it("ينجح عندما يتطابق العنصران معًا فقط", () => {
-    expect(claimMatches(staff[0], "0791234567", "S2001")).toBe(true);
-  });
-
-  it("يفشل عند تطابق أحدهما فقط", () => {
-    expect(claimMatches(staff[0], "0791234567", "G5001")).toBe(false);
-    expect(claimMatches(staff[0], "0790000000", "S2001")).toBe(false);
-  });
-
-  it("يفشل عند فراغ أيٍّ من الحقلين", () => {
-    expect(claimMatches(staff[0], "", "S2001")).toBe(false);
-    expect(claimMatches(staff[0], "0791234567", undefined)).toBe(false);
-  });
-});
-
 describe("hasDuplicatePhone / validateOnbookEntry (منع تكرار الهواتف)", () => {
   it("يكتشف تكرارًا مع أعضاء التطبيق أو مع المنتسبين الآخرين", () => {
     expect(hasDuplicatePhone(["0791234567"], staff, "+962791234567")).toBe(true);
@@ -106,7 +89,7 @@ describe("normalizeOnbookStaff (تنظيف القائمة المخزنة)", () =
 
   it("يصفّي الأسطر غير المكتملة والمكررة ويوحّد الحقول", () => {
     const raw = [
-      { uid: "#S2001", name: "  أحمد ", phone: "+962791234567", role: "staff", isAppUser: true },
+      { uid: "#S2001", name: "  أحمد ", phone: "+962791234567", role: "staff" },
       { uid: "#s2001", name: "مكرر", phone: "0798877665" },
       { uid: "S2002", name: "بلا هاتف", phone: "12" },
       { uid: "G5001", name: "نور", phone: "0791234568", role: "guard" },
@@ -114,7 +97,7 @@ describe("normalizeOnbookStaff (تنظيف القائمة المخزنة)", () =
     ];
     const out = normalizeOnbookStaff(raw);
     expect(out).toHaveLength(2);
-    expect(out[0]).toEqual({ uid: "S2001", name: "أحمد", phone: "962791234567", role: "staff", isAppUser: true, email: undefined, createdAt: undefined });
-    expect(out[1]).toEqual({ uid: "G5001", name: "نور", phone: "0791234568", role: "guard", isAppUser: false, email: undefined, createdAt: undefined });
+    expect(out[0]).toEqual({ uid: "S2001", name: "أحمد", phone: "962791234567", role: "staff", email: undefined, createdAt: undefined });
+    expect(out[1]).toEqual({ uid: "G5001", name: "نور", phone: "0791234568", role: "guard", email: undefined, createdAt: undefined });
   });
 });

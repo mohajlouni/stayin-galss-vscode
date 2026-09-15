@@ -1,10 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
   AUTH_ERROR_MESSAGES,
   SUPABASE_OTP_ERROR_MESSAGES,
   SUPER_ADMIN_EMAIL,
-  SUPER_ADMIN_PASSWORD,
   classifyAuthError,
   classifyIdentifier,
   classifyOtpError,
@@ -86,13 +87,15 @@ describe("Unified smart identifier classifier", () => {
 });
 
 describe("Password policy and real-time match", () => {
-  it("requires at least 8 characters with letters and numbers, no symbols", () => {
+  it("requires at least 8 characters with letters and numbers, allowing special characters", () => {
     expect(validatePassword("")).not.toBeNull();
     expect(validatePassword("short1")).not.toBeNull();
     expect(validatePassword("onlyletters")).not.toBeNull();
     expect(validatePassword("12345678")).not.toBeNull();
-    expect(validatePassword("Abcdef1!")).not.toBeNull();
+    expect(validatePassword("Abcdef1!")).toBeNull();
     expect(validatePassword("Stayin2026")).toBeNull();
+    expect(validatePassword("Stayin!2026#")).toBeNull();
+    expect(validatePassword("Abc def12")).not.toBeNull();
   });
 
   it("matches password confirmation in real time", () => {
@@ -138,6 +141,11 @@ describe("Auth error classification and messages", () => {
 });
 
 describe("Super Admin credential bypass", () => {
+  // The master password is mocked in tests/setup-env.ts (test config only);
+  // production resolves it strictly from the environment. No literal exists
+  // anywhere in source.
+  const masterPassword = process.env.SUPER_ADMIN_MASTER_PASSWORD ?? "test-super-admin-password";
+
   it("recognizes the canonical master email", () => {
     expect(SUPER_ADMIN_EMAIL).toBe("moh.ajlouni.90@gmail.com");
     expect(isSuperAdminEmail("  MOH.AJLOUNI.90@GMAIL.COM ")).toBe(true);
@@ -145,22 +153,28 @@ describe("Super Admin credential bypass", () => {
   });
 
   it("matches email + master password as a Super Admin credential", () => {
-    expect(isSuperAdminCredential("moh.ajlouni.90@gmail.com", "Ajlouni911")).toBe(true);
-    expect(isSuperAdminCredential("MOH.AJLOUNI.90@GMAIL.COM", "Ajlouni911")).toBe(true);
+    expect(isSuperAdminCredential("moh.ajlouni.90@gmail.com", masterPassword)).toBe(true);
+    expect(isSuperAdminCredential("MOH.AJLOUNI.90@GMAIL.COM", masterPassword)).toBe(true);
   });
 
   it("matches phone shapes + master password as a Super Admin credential", () => {
-    expect(isSuperAdminCredential("0797402940", "Ajlouni911")).toBe(true);
-    expect(isSuperAdminCredential("+962797402940", "Ajlouni911")).toBe(true);
-    expect(isSuperAdminCredential("٠٧٩٧٤٠٢٩٤٠", "Ajlouni911")).toBe(true);
+    expect(isSuperAdminCredential("0797402940", masterPassword)).toBe(true);
+    expect(isSuperAdminCredential("+962797402940", masterPassword)).toBe(true);
+    expect(isSuperAdminCredential("٠٧٩٧٤٠٢٩٤٠", masterPassword)).toBe(true);
   });
 
-  it("rejects wrong password or a non-Super-Admin identity", () => {
-    expect(SUPER_ADMIN_PASSWORD).toBe("Ajlouni911");
+  it("rejects a wrong password or a non-Super-Admin identity", () => {
     expect(isSuperAdminCredential("moh.ajlouni.90@gmail.com", "wrongpass1")).toBe(false);
     expect(isSuperAdminCredential("0797402940", "wrongpass1")).toBe(false);
-    expect(isSuperAdminCredential("someone@example.com", "Ajlouni911")).toBe(false);
-    expect(isSuperAdminCredential("0790000001", "Ajlouni911")).toBe(false);
+    expect(isSuperAdminCredential("someone@example.com", masterPassword)).toBe(false);
+    expect(isSuperAdminCredential("0790000001", masterPassword)).toBe(false);
+  });
+
+  it("never bakes the master password literal into the engine source", () => {
+    expect(process.env.SUPER_ADMIN_MASTER_PASSWORD).toBeTruthy();
+    const engineSource = readFileSync(resolve(process.cwd(), "lib/supabase-otp-engine.ts"), "utf8");
+    expect(engineSource).not.toContain("Ajlouni" + "911");
+    expect(engineSource).not.toContain("SUPER_ADMIN_PASSWORD =");
   });
 
   it("does not conclude an account is absent from a bare 400 status, so an unverified user is never reported as unregistered", () => {

@@ -9,8 +9,10 @@ import { gregorianMonthGrid, moveGregorianMonth } from "@/lib/gregorian-calendar
 import { useI18n } from "@/lib/i18n";
 import { useAppPreferences } from "@/lib/app-preferences";
 
-const WEEK_AR = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-const WEEK_EN = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** رؤوس أيام الأسبوع بترتيب موحد يبدأ بالسبت (فهرس 0 = السبت) مطابق لبقية تقويمات التطبيق،
+ * مع تهجئة قياسية: "الاثنين" و"الثلاثاء" في الصيغ الكاملة. */
+const WEEK_AR = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+const WEEK_EN = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 
 type Props = { value: string; onChange: (date: string) => void; bookings: Booking[]; waitlist?: WaitlistEntry[]; rangeStart?: string; rangeEnd?: string; embedded?: boolean; minimumDate?: string };
 
@@ -44,7 +46,7 @@ export function BookingDatePicker({ value, onChange, bookings, waitlist = [], ra
         </Pressable>
       </View>
       <View style={{ flexDirection: direction, flexWrap: "wrap", marginTop: 10 }}>
-        {week.map((day) => <Text key={day} style={{ width: "14.28%", textAlign: "center", color: colors.muted, fontSize: 10, paddingVertical: 5 }}>{day.slice(0, 3)}</Text>)}
+        {week.map((day) => <Text key={day} style={{ width: "14.28%", textAlign: "center", color: colors.muted, fontSize: 10, paddingVertical: 5 }}>{language === "ar" ? day : day.slice(0, 3)}</Text>)}
       </View>
       <View style={{ flexDirection: direction, flexWrap: "wrap" }}>
         {days.map((date, index) => {

@@ -20,5 +20,5 @@ export function GlassModalMotion({ children, style }: { children: ReactNode; sty
     ]).start();
   }, [deviceSettings.reduceMotion, opacity, translateY]);
 
-  return <Animated.View style={[{ opacity, transform: [{ translateY }] }, style]}>{children}</Animated.View>;
+  return <Animated.View collapsable={false} style={[{ opacity, transform: [{ translateY }] }, style]}>{children}</Animated.View>;
 }

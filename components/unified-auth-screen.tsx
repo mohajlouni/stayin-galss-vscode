@@ -11,7 +11,7 @@ import { ThemedText } from "@/components/themed-text";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useAuthSession } from "@/lib/auth-session";
 import { LEGAL_VERSIONS, savePendingRegistration } from "@/lib/legal-consent";
-import { AUTH_ERROR_MESSAGES, classifyAuthError, consumePendingDeletion, isSuperAdminCredential, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
+import { AUTH_ERROR_MESSAGES, classifyAuthError, consumePendingDeletion, isSuperAdminIdentifier, probePendingSignup, requestEmailSignupOtp, resendSignupCode, signInSuperAdmin, signInWithPasswordFlow, socialSignIn, validateIdentifier, validatePassword } from "@/lib/supabase-otp";
 import { useColors } from "@/hooks/use-colors";
 import { useI18n } from "@/lib/i18n";
 import * as Auth from "@/lib/_core/auth";
@@ -297,9 +297,14 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     try {
       const result = await signInSuperAdmin({ identifier, password, refresh });
       if (result.ok) { goAfterAuth(result.destination); return; }
-      setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
+      setError(AUTH_ERROR_MESSAGES[result.error] ?? AUTH_ERROR_MESSAGES.unknown);
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] super-admin submit failed:", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
@@ -310,11 +315,12 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     const classified = validateIdentifier(loginIdentifier);
 
     if (classified.ok && classified.kind === "phone") {
-      // Super Admin phone + master password authenticates directly. Any other
-      // phone is strictly rejected: the Sign In tab never auto-creates an
-      // account nor opens the legacy identity portal (which accepted any
-      // credentials). Registration happens only via the إنشاء حساب tab.
-      if (isSuperAdminCredential(loginIdentifier, loginPassword)) {
+      // Super Admin phone authenticates through the server bridge (which alone
+      // verifies the master password). Any other phone is strictly rejected:
+      // the Sign In tab never auto-creates an account nor opens the legacy
+      // identity portal (which accepted any credentials). Registration happens
+      // only via the إنشاء حساب tab.
+      if (isSuperAdminIdentifier(loginIdentifier)) {
         await runSuperAdminLogin(loginIdentifier.trim(), loginPassword, "login");
       } else {
         setError(AUTH_ERROR_MESSAGES.unregistered ?? "هذا الحساب غير مسجل، يرجى إنشاء حساب جديد.");
@@ -324,7 +330,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
     if (!classified.ok || classified.kind !== "email" || !classified.email) return;
     const email = classified.email;
 
-    if (isSuperAdminCredential(email, loginPassword)) {
+    if (isSuperAdminIdentifier(email)) {
       await runSuperAdminLogin(email, loginPassword, "login");
       return;
     }
@@ -382,9 +388,14 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       );
       return;
     }
-    setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
+    setError(AUTH_ERROR_MESSAGES[result.error] ?? AUTH_ERROR_MESSAGES.unknown);
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] password submit failed (bridge/network/server?):", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
@@ -415,7 +426,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
           privacyVersion: LEGAL_VERSIONS.privacy,
           conditionsVersion: LEGAL_VERSIONS.conditions,
         });
-      } catch {
+      } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[auth] savePendingRegistration failed:`, err instanceof Error ? err.message : err);
+      }
         setMessage("تعذر تجهيز طلب إنشاء الحساب على هذا الجهاز. أعد المحاولة.");
         return;
       }
@@ -433,7 +448,11 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
         return;
       }
       router.push({ pathname: "/auth/otp", params: { email, mode: "signup", name: name.trim() } });
-    } catch {
+    } catch (err) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error(`[auth] requestEmailSignupOtp failed:`, err instanceof Error ? err.message : String(err), err);
+      }
       setError(language === "ar" ? "تعذر إرسال رمز التحقق. تحقق من اتصال الإنترنت ثم أعد المحاولة." : "Could not send the verification code. Check your connection and try again.");
     } finally { setBusy(null); }
   };
@@ -474,7 +493,12 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
       if (result.ok) { goAfterAuth(result.destination); return; }
       setError(AUTH_ERROR_MESSAGES[result.error] ?? "");
     } catch (err) {
-      console.error("[CRITICAL LOGIN ERROR]:", err);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.error("[auth] social submit failed:", err instanceof Error ? err.message : err, err);
+      } else {
+        console.error("[CRITICAL LOGIN ERROR]:", err);
+      }
       setError(AUTH_ERROR_MESSAGES[classifyAuthError(err)] ?? AUTH_ERROR_MESSAGES.unknown);
     } finally { setBusy(null); }
   };
@@ -547,7 +571,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
               </View>
             </View>
           </View> : null}
-          <Animated.View style={{ opacity: formOpacity }}>
+          <Animated.View collapsable={false} style={{ opacity: formOpacity }}>
             {tab === "login" ? (
               <>
                 <ThemedText variant="label" style={styles.label}>البريد الإلكتروني أو رقم الهاتف</ThemedText>
@@ -721,7 +745,7 @@ export function UnifiedAuthScreen({ initialTab = "login", standaloneRegister = f
           {tab === "login" ? (
             <View style={styles.bioArea}>
               <View style={styles.bioWrap}>
-                <Animated.View style={[styles.bioPulse, { borderColor: biometricAvailable ? colors.primary : colors.border, transform: [{ scale: pulse }] }]} />
+                <Animated.View collapsable={false} style={[styles.bioPulse, { borderColor: biometricAvailable ? colors.primary : colors.border, transform: [{ scale: pulse }] }]} />
                 <Pressable disabled={isBusy} accessibilityRole="button" accessibilityState={{ busy: isBusy }} accessibilityLabel="تسجيل الدخول السريع بالبصمة أو بصمة الوجه" onPress={() => void biometricLogin()} style={styles.bioButton}>
                   {busy === "biometric" ? <ActivityIndicator color={colors.primary} size="large" /> : <MaterialIcons name="fingerprint" size={42} color={biometricAvailable ? colors.primary : colors.muted} />}
                 </Pressable>

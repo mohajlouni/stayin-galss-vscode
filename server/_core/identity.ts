@@ -63,3 +63,14 @@ export function matchesRootAccountCode(candidate: string | number | null | undef
   if (ROOT_USER_IDENTIFIERS.has(normalized)) return true;
   return normalized === "u1000" || normalized === "1000";
 }
+
+/**
+ * True when a decoded session payload belongs to THIS app. Verifying the claim
+ * against `ENV.appId` (instead of only checking that it is a non-empty string)
+ * prevents a token minted for another app on the same platform secret from
+ * being accepted here. Doubles as a type predicate so the caller's payload
+ * narrows `appId` to `string` once the check passes.
+ */
+export function isSessionAppIdValid(sessionAppId: unknown, expectedAppId: string): sessionAppId is string {
+  return typeof sessionAppId === "string" && sessionAppId.length > 0 && sessionAppId === expectedAppId;
+}

@@ -88,7 +88,7 @@ export function HomeTopWidget({ logoUrl, unreadCount, onNewBooking, onNotificati
 
       {hasTiles ? <>
         <Pressable accessibilityRole="button" accessibilityLabel={collapsed ? (language === "ar" ? "إظهار الطقس والقمر" : "Show weather & moon") : (language === "ar" ? "إخفاء الطقس والقمر" : "Hide weather & moon")} onPress={() => setCollapsed((current) => !current)} style={({ pressed }) => [styles.collapseHandle, { flexDirection: row, opacity: pressed ? 0.7 : 1 }]}><MaterialIcons name={collapsed ? "keyboard-arrow-down" : "keyboard-arrow-up"} size={18} color={colors.muted} /><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: align }}>{collapsed ? (language === "ar" ? "إظهار الطقس والقمر" : "Show weather & moon") : (language === "ar" ? "إخفاء الطقس والقمر" : "Hide weather & moon")}</Text><View style={styles.flex} /></Pressable>
-        <Animated.View style={[styles.collapseBody, { opacity: height, transform: [{ scaleY: height }] }]}>
+        <Animated.View collapsable={false} style={[styles.collapseBody, { opacity: height, transform: [{ scaleY: height }] }]}>
           {rendered ? <>
             {showWeather ? <View style={styles.tile}><ChaletWeatherWidget compact /></View> : null}
             {showLunar ? <View style={styles.tile}><LunarPhasePanel compact nearWater={nearWater} /></View> : null}

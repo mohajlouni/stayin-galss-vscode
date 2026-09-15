@@ -12,7 +12,7 @@ import {
   classifySignupProbeError,
   isOtpTokenPresent,
   isSignupProbePending,
-  isSuperAdminCredential,
+  isSuperAdminIdentifier,
   isSuperAdminEmail,
   isSuperAdminPassword,
   normalizeEmail,
@@ -30,7 +30,7 @@ import {
 } from "@/lib/supabase-otp-engine";
 
 export type { AuthError, IdentifierKind, SignupProbeResult, SupabaseOtpError } from "@/lib/supabase-otp-engine";
-export { AUTH_ERROR_MESSAGES, SUPABASE_OTP_ERROR_MESSAGES, classifyAuthError, classifyIdentifier, formatCountdown, isSuperAdminCredential, isSuperAdminEmail, isSuperAdminPassword, passwordsMatch, SUPER_ADMIN_EMAIL, validateIdentifier, validatePassword } from "@/lib/supabase-otp-engine";
+export { AUTH_ERROR_MESSAGES, SUPABASE_OTP_ERROR_MESSAGES, classifyAuthError, classifyIdentifier, formatCountdown, isSuperAdminCredential, isSuperAdminEmail, isSuperAdminIdentifier, isSuperAdminPassword, passwordsMatch, SUPER_ADMIN_EMAIL, validateIdentifier, validatePassword } from "@/lib/supabase-otp-engine";
 
 /**
  * Passwordless Email OTP authentication on top of Supabase Auth, bridged into
@@ -163,20 +163,26 @@ export type SignInWithPasswordResult =
 
 /**
  * Direct Super Admin login bypass. When the identifier is the Super Admin email
- * or phone and the password matches the master credential, we authenticate
- * straight through the server (which issues the owner session with
+ * or phone, we authenticate straight through the server (which validates the
+ * master password from the environment and issues the owner session with
  * `role: "super_admin"`) instead of relying on a Supabase Auth record that may
- * not be seeded or email-confirmed.
+ * not be seeded or email-confirmed. Password verification is delegated to the
+ * server endpoint; no master secret exists in client code.
  */
 export async function signInSuperAdmin(input: { identifier: string; password: string; refresh: ReturnType<typeof useAuthSession>["refresh"] }): Promise<SignInWithPasswordResult> {
-  if (!isSuperAdminCredential(input.identifier, input.password)) {
-    return { ok: false, error: "wrong-password" };
+  if (!isSuperAdminIdentifier(input.identifier)) {
+    return { ok: false, error: "unregistered" };
   }
 
   const { exchangeSuperAdminLogin } = await import("@/lib/_core/api");
   const result = await exchangeSuperAdminLogin({ identifier: input.identifier.trim(), password: input.password });
   if (!result.ok) {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+    // eslint-disable-next-line no-console
+    console.error("[auth] super-admin submit failed:", result.error);
+  } else {
     console.error("[CRITICAL LOGIN ERROR]:", result.error);
+  }
     const code = classifyAuthError(result.error ?? "");
     if (code === "network") return { ok: false, error: "network" };
     if (code === "wrong-password") return { ok: false, error: "wrong-password" };
@@ -201,20 +207,28 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
   // Defensive: if a Super Admin phone-shaped identifier (e.g. "0797402940") ever
   // reaches this path, route straight to the direct bypass — never forward a
   // phone number to Supabase password auth (SMS auth is disabled there).
-  if (isSuperAdminCredential(input.email, input.password)) {
+  if (isSuperAdminIdentifier(input.email)) {
     return signInSuperAdmin({ identifier: input.email, password: input.password, refresh: input.refresh });
   }
 
   const email = normalizeEmail(input.email);
   const validation = validateEmail(email);
   if (validation) return { ok: false, error: "invalid-email" };
+  // Passwords legitimately contain symbols (!@#$%^&*): only enforce the
+  // minimum length here and let the server/Supabase judge correctness, so a
+  // valid symbol-bearing password is never misreported as "invalid" locally.
   if (input.password.length < 8) return { ok: false, error: "invalid-password" };
 
   if (!isSupabaseConfigured || !supabase) return { ok: false, error: "not-configured" };
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password: input.password });
   if (error || !data.session) {
-    console.error("[Login Error] Supabase email/password sign-in failed", error ?? "no session");
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error("[auth] password submit failed (bridge/network/server?):", error instanceof Error ? error.message : error, error ?? "no session");
+    } else {
+      console.error("[Login Error] Supabase email/password sign-in failed", error ?? "no session");
+    }
     const code = await classifyLoginFailure(email, error ?? new Error("sign-in-failed"));
     // A pending-deletion account may no longer accept the stored password (or was
     // passwordless), so the generic "wrong password" would be misleading. Query the
@@ -239,7 +253,12 @@ export async function signInWithPasswordFlow(input: { email: string; password: s
     lastPendingDeletion = otpResult.pendingDeletion ?? null;
     passwordDestination = otpResult.destination;
   } catch (err) {
-    console.error("[Login Error] Session bridge failed", err);
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error("[auth] session bridge failed (network/HTTP/server?):", err instanceof Error ? err.message : err, err);
+    } else {
+      console.error("[Login Error] Session bridge failed", err);
+    }
     const code = classifyAuthError(err);
     if (code === "unregistered") return { ok: false, error: "unregistered" };
     return { ok: false, error: "unknown" };
@@ -330,7 +349,13 @@ export async function requestEmailSignupOtp(input: { email: string; password: st
   const validation = validateEmail(email);
   if (validation) return { error: "invalid-email" };
   const passwordIssue = validatePassword(input.password);
-  if (passwordIssue) return { error: "unknown" };
+  if (passwordIssue) {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      // eslint-disable-next-line no-console
+      console.error("[auth] signup blocked by local password policy:", passwordIssue);
+    }
+    return { error: "invalid-password" as unknown as SupabaseOtpError };
+  }
   if (!isSupabaseConfigured || !supabase) return { error: "not-configured" };
 
   // Numerical sign-up OTP. `shouldCreateUser: true` provisions the Supabase Auth

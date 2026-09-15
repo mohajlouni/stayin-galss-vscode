@@ -10,13 +10,15 @@ import { ChaletDeletePanel } from "@/components/chalet-delete-panel";
 import { ScreenContainer } from "@/components/screen-container";
 import { ScreenBackButton } from "@/components/screen-back-button";
 import { useColors } from "@/hooks/use-colors";
-import { CHALET_COLORS, PROPERTY_TYPES, type PropertyType, type ReservedPeriodColorKey, ChaletShift, chaletLinkedBookingCount, chaletPerformanceSummary, formatMoney, getChaletShifts, isValidChaletColor, isValidChaletReferenceCode, isValidGoogleMapsUrl, isValidGuardianPhone, isValidUnitCode, normalizeChaletReferenceCode, propertyTypeIcon, propertyTypeLabel, suggestChaletReferenceCode } from "@/lib/booking-model";
+import { CHALET_COLORS, DEFAULT_WEEKEND_DAYS, PROPERTY_TYPES, type PropertyType, type ReservedPeriodColorKey, ChaletShift, chaletLinkedBookingCount, chaletPerformanceSummary, formatMoney, getChaletShifts, isValidChaletColor, isValidChaletReferenceCode, isValidGoogleMapsUrl, isValidGuardianPhone, isValidUnitCode, normalizeChaletReferenceCode, propertyTypeIcon, propertyTypeLabel, suggestChaletReferenceCode } from "@/lib/booking-model";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { useBookings } from "@/lib/booking-store";
 import { useI18n } from "@/lib/i18n";
 
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
-const WEEKEND_DAYS = [{ value: 0, ar: "الأحد", en: "Sun" }, { value: 1, ar: "الإثنين", en: "Mon" }, { value: 2, ar: "الثلاثاء", en: "Tue" }, { value: 3, ar: "الأربعاء", en: "Wed" }, { value: 4, ar: "الخميس", en: "Thu" }, { value: 5, ar: "الجمعة", en: "Fri" }, { value: 6, ar: "السبت", en: "Sat" }];
+/** أيام نهاية الأسبوع بترتيب موحد يبدأ بالسبت (القيم فهارس getDay: 6 = السبت)،
+ * مع تهجئة قياسية "الاثنين" و"الثلاثاء" في الصيغ الكاملة. */
+const WEEKEND_DAYS = [{ value: 6, ar: "السبت", en: "Sat" }, { value: 0, ar: "الأحد", en: "Sun" }, { value: 1, ar: "الاثنين", en: "Mon" }, { value: 2, ar: "الثلاثاء", en: "Tue" }, { value: 3, ar: "الأربعاء", en: "Wed" }, { value: 4, ar: "الخميس", en: "Thu" }, { value: 5, ar: "الجمعة", en: "Fri" }];
 const FIXED_PERIODS: Array<{ key: string; kind: ReservedPeriodColorKey; ar: string; en: string; color: string; defaultActive: boolean; startTime: string; endTime: string }> = [
   { key: "morning", kind: "morning", ar: "صباحي", en: "Morning", color: "#0284C7", defaultActive: true, startTime: "08:00", endTime: "16:00" },
   { key: "evening", kind: "evening", ar: "سهرة", en: "Evening", color: "#4F46E5", defaultActive: true, startTime: "22:00", endTime: "02:00" },
@@ -107,7 +109,7 @@ export default function ChaletProfileScreen() {
   const [guardianPhone, setGuardianPhone] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [notes, setNotes] = useState("");
-  const [weekendDays, setWeekendDays] = useState<number[]>([5, 6]);
+  const [weekendDays, setWeekendDays] = useState<number[]>([...DEFAULT_WEEKEND_DAYS]);
   const [shifts, setShifts] = useState<ChaletShift[]>(() => fixedShiftState([]));
 
   useEffect(() => {
@@ -129,7 +131,7 @@ export default function ChaletProfileScreen() {
     setGuardianPhone(existing?.guardianPhone ?? "");
     setContactPhone(existing?.contactPhone ?? "");
     setNotes(existing?.notes ?? "");
-    setWeekendDays(existing?.weekendDays ?? settings.weekendDays ?? [5, 6]);
+    setWeekendDays(existing?.weekendDays ?? settings.weekendDays ?? [...DEFAULT_WEEKEND_DAYS]);
     setShifts(fixedShiftState(getChaletShifts(existing, settings)));
   }, [chalets, existing, settings]);
 

@@ -48,7 +48,7 @@ const unifiedAuth = source("components/unified-auth-screen.tsx");
     expect(settings).toContain("AppToggle");
     expect(login).toContain("UnifiedAuthScreen");
     expect(register).toContain("UnifiedAuthScreen");
-    expect(unifiedAuth).toContain("AppToggle");
+    expect(unifiedAuth).toContain("تذكرني");
     expect(oauth).toContain("Secure identity portal is not configured");
   });
 

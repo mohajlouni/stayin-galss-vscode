@@ -3,7 +3,6 @@ import { StatusBar } from "expo-status-bar";
 import { Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, I18nManager, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import * as SplashScreen from "expo-splash-screen";
 import * as Font from "expo-font";
 
 // يتمكّن التطبيق من الاتجاه من اليمين إلى اليسار دون فرضه بشكل أعمى؛ الاتجاه الفعلي (RTL/LTR)
@@ -28,13 +27,13 @@ import { AuthSessionProvider } from "@/lib/auth-session";
 import { RouteAccessGate } from "@/components/route-access-gate";
 import { FeatureRouteGuard } from "@/components/feature-route-guard";
 
-SplashScreen.preventAutoHideAsync();
-
 export default function RootLayout() {
-  // تظل الشجرة كاملة مُثبّتة طوال الوقت؛ لا نبدّل الجذر المؤقت بجذر آخر لتفادي
-  // هدم شجرة المضيف أثناء تحميل الخطوط (وهو ما يُفشل Fabric وReanimated في العثور
-  // على عُقد المضيف). القشرة الأصلية SplashScreen تتولى حالة الانتظار ونخفيها فقط
-  // بعد اكتمال تحميل الخطوط، فيُعاد تقديم الشجرة للخطوط الجديدة دون إعادة تركيب.
+  // الإقلاع: لا نُعلّق أول رسم على تحميل الخطوط إطلاقًا. أُلغي
+  // `SplashScreen.preventAutoHideAsync()` لأن حجبه للشاشة الأصلية كان يُبقي
+  // المستخدم أمام شعار ثابت حتى تنتهي كل أوزان الخطوط (7 خطوط عربية × 3 عائلات)،
+  // وهو ما ظهر كبطء إقلاع على جهاز Android. الآن تُرسم الشجرة كاملة فورًا بالخطوط
+  // النظامية، وتُحمَّل الخطوط في الخلفية، ثم تحديث حالة واحدة يعيد تقديم النصوص
+  // بالخطوط المحمّلة دون إعادة تركيب أي عقدة مضيف (Fabric/Reanimated آمنان).
   const [, setFontsLoaded] = useState(false);
 
   useEffect(() => {
@@ -61,10 +60,7 @@ export default function RootLayout() {
       } catch (e) {
         console.warn("Font loading failed, falling back to system fonts", e);
       } finally {
-        if (mounted) {
-          setFontsLoaded(true);
-          await SplashScreen.hideAsync();
-        }
+        if (mounted) setFontsLoaded(true);
       }
     };
     void loadFonts();

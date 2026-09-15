@@ -1,15 +1,33 @@
 import { useEffect } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import Svg, { Defs, Ellipse, FeGaussianBlur, Filter, Line, RadialGradient, Stop } from "react-native-svg";
 import Animated, { cancelAnimation, useAnimatedProps, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 
 import { useColors } from "@/hooks/use-colors";
+import { useAmbientMotionGate } from "@/hooks/use-ambient-motion";
 import { useAppPreferences } from "@/lib/app-preferences";
 import { hexToRgba } from "@/hooks/use-morphing-accent";
 
 /** القاعدة الصلبة الفاخرة (Obsidian deep) للخلفية الموحّدة. */
 const BASE = "#080C14";
+
+/**
+ * فلاتر الضباب `FeGaussianBlur` على عناصر SVG ضخمة (rx=520) مكلفة جدًا على Android:
+ * تُنفَّذ على وحدة المعالجة وتُعاد مع كل إطار تتحرك فيه الهالة، فتستهلك أول إطار
+ * تفاعلي عند الإقلاع. لذلك على Android نُلغي الفلتر ونستبدله بتدرّج ثابت متعدد
+ * المحطات (Lightweight static gradient) يعطي التلاشي الناعم نفسه دون أي تكلفة
+ * لكل إطار، ونُبقي الفلتر على المنصات التي تعالجه بشكل أصلي وسلس.
+ */
+const HEAVY_SVG_BLUR_FILTERS = Platform.OS !== "android";
+
+/** محطات التلاشي: متعددة على Android لتعويض غياب الفلتر، ومحطة واحدة مع الفلتر. */
+const AURA_RAMP = HEAVY_SVG_BLUR_FILTERS
+  ? { mid1: 0.25, mid1Opacity: 0.55, mid2: 0.38, mid2Opacity: 0.22, end: 0.5 }
+  : { mid1: 0.24, mid1Opacity: 0.44, mid2: 0.46, mid2Opacity: 0.16, end: 0.72 };
+
+const AURA_FILTER = HEAVY_SVG_BLUR_FILTERS ? "url(#gridAura)" : undefined;
+const AURA_CORE_FILTER = HEAVY_SVG_BLUR_FILTERS ? "url(#gridAuraCore)" : undefined;
 
 const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse);
 
@@ -46,6 +64,7 @@ export function GlassSceneBackground() {
   const isFocused = useIsFocused();
   const accent = colors.primary;
   const isDark = colors.mode === "dark";
+  const canAnimate = useAmbientMotionGate(isFocused, deviceSettings.reduceMotion);
   const breathe = useSharedValue(0.5);
 
   // لون التدرّج يُقرأ مباشرةً من الشاليه النشط: لا يمكن تحريك `Stop` لأنه بلا host node.
@@ -53,14 +72,14 @@ export function GlassSceneBackground() {
   const coreStopColor = hexToRgba(accent, isDark ? 0.34 : 0.16);
 
   useEffect(() => {
-    if (deviceSettings.reduceMotion || !isFocused) {
+    if (!canAnimate) {
       cancelAnimation(breathe);
       breathe.value = 0.6;
       return;
     }
     breathe.value = withRepeat(withTiming(0.96, { duration: 9000 }), -1, true);
     return () => cancelAnimation(breathe);
-  }, [breathe, deviceSettings.reduceMotion, isFocused]);
+  }, [breathe, canAnimate]);
 
   const auraProps = useAnimatedProps(() => {
     const scale = 0.9 + breathe.value * 0.16;
@@ -82,19 +101,27 @@ export function GlassSceneBackground() {
       <View style={styles.canvas}>
         <Svg width="100%" height="100%" viewBox="0 0 480 900" preserveAspectRatio="xMidYMid slice">
           <Defs>
-            <Filter id="gridAura" x="-200%" y="-200%" width="600%" height="600%">
-              <FeGaussianBlur stdDeviation="90" />
-            </Filter>
-            <Filter id="gridAuraCore" x="-160%" y="-160%" width="480%" height="480%">
-              <FeGaussianBlur stdDeviation="70" />
-            </Filter>
+            {HEAVY_SVG_BLUR_FILTERS ? (
+              <>
+                <Filter id="gridAura" x="-200%" y="-200%" width="600%" height="600%">
+                  <FeGaussianBlur stdDeviation="90" />
+                </Filter>
+                <Filter id="gridAuraCore" x="-160%" y="-160%" width="480%" height="480%">
+                  <FeGaussianBlur stdDeviation="70" />
+                </Filter>
+              </>
+            ) : null}
             <RadialGradient id="gridGlow" cx="50%" cy="98%" r="72%">
               <Stop offset="0" stopColor={glowStopColor} stopOpacity={1} />
-              <Stop offset="0.5" stopColor="#00000000" stopOpacity={0} />
+              <Stop offset={AURA_RAMP.mid1} stopColor={glowStopColor} stopOpacity={AURA_RAMP.mid1Opacity} />
+              <Stop offset={AURA_RAMP.mid2} stopColor={glowStopColor} stopOpacity={AURA_RAMP.mid2Opacity} />
+              <Stop offset={AURA_RAMP.end} stopColor={glowStopColor} stopOpacity={0} />
             </RadialGradient>
             <RadialGradient id="gridCore" cx="50%" cy="100%" r="58%">
               <Stop offset="0" stopColor={coreStopColor} stopOpacity={1} />
-              <Stop offset="0.62" stopColor="#00000000" stopOpacity={0} />
+              <Stop offset={AURA_RAMP.mid1} stopColor={coreStopColor} stopOpacity={AURA_RAMP.mid1Opacity} />
+              <Stop offset={AURA_RAMP.mid2} stopColor={coreStopColor} stopOpacity={AURA_RAMP.mid2Opacity} />
+              <Stop offset={AURA_RAMP.end} stopColor={coreStopColor} stopOpacity={0} />
             </RadialGradient>
           </Defs>
 
@@ -104,12 +131,12 @@ export function GlassSceneBackground() {
           {GRID_V_MAJOR.map((x) => <Line key={`gvm-${x}`} x1={x} y1={0} x2={x} y2={900} stroke={GRID_STROKE_MAJOR} strokeWidth={0.5} />)}
           {GRID_H_MAJOR.map((y) => <Line key={`ghm-${y}`} x1={0} y1={y} x2={480} y2={y} stroke={GRID_STROKE_MAJOR} strokeWidth={0.5} />)}
 
-          {/* الهالة المحيطية الضخمة في الأسفل — ضباب feGaussianBlur عميق */}
-          <AnimatedEllipse cx={240} cy={890} rx={520} ry={430} fill="url(#gridGlow)" filter="url(#gridAura)" animatedProps={auraProps} />
-          <AnimatedEllipse cx={240} cy={902} rx={380} ry={315} fill="url(#gridCore)" filter="url(#gridAuraCore)" animatedProps={coreProps} />
+          {/* الهالة المحيطية الضخمة في الأسفل — تلاشٍ ثابت على Android وضباب feGaussianBlur على غيره */}
+          <AnimatedEllipse cx={240} cy={890} rx={520} ry={430} fill="url(#gridGlow)" filter={AURA_FILTER} animatedProps={auraProps} />
+          <AnimatedEllipse cx={240} cy={902} rx={380} ry={315} fill="url(#gridCore)" filter={AURA_CORE_FILTER} animatedProps={coreProps} />
 
           {/* لمعة زجاجية سفلية رفيعة */}
-          <Ellipse cx={240} cy={906} rx={250} ry={44} fill={hexToRgba("#FFFFFF", 0.045)} filter="url(#gridAura)" />
+          <Ellipse cx={240} cy={906} rx={250} ry={44} fill={hexToRgba("#FFFFFF", 0.045)} filter={AURA_FILTER} />
         </Svg>
       </View>
     </View>

@@ -5,6 +5,7 @@ import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat
 import { useEffect } from "react";
 
 import { useColors } from "@/hooks/use-colors";
+import { useAmbientMotionGate } from "@/hooks/use-ambient-motion";
 import { useAppPreferences } from "@/lib/app-preferences";
 
 function withAlpha(color: string, alpha: string) {
@@ -15,6 +16,9 @@ function withAlpha(color: string, alpha: string) {
  * DynamicAmbientBackground — Underlay behind all screens featuring soft blurred radial gradient spheres
  * One sphere linked dynamically to activeUnitColor (via colors.primary / colors.neonGlow) and one brand cyan/amber.
  * Uses AppThemeTokens.background canvasGradient, orbPrimary (dynamic), orbSecondary, and glass blur.
+ *
+ * الأداء: الأوربات ساكنة تمامًا حتى نهاية الإقلاع، ولا تبدأ أي حلقة `withRepeat`
+ * على شاشات الدخول أو قبل الوصول إلى تبويبات لوحة التحكم (انظر use-ambient-motion).
  */
 export function DynamicAmbientBackground() {
   const colors = useColors();
@@ -24,17 +28,18 @@ export function DynamicAmbientBackground() {
   const appBg = colors.appTheme.background;
   const orbPrimary = colors.appTheme.background.orbPrimary;
   const orbSecondary = colors.appTheme.background.orbSecondary;
+  const canAnimate = useAmbientMotionGate(isFocused, deviceSettings.reduceMotion);
   const breath = useSharedValue(0.55);
 
   useEffect(() => {
-    if (!isDark || !isFocused || deviceSettings.reduceMotion) {
+    if (!isDark || !canAnimate) {
       cancelAnimation(breath);
       breath.value = 0.6;
       return;
     }
     breath.value = withRepeat(withTiming(0.9, { duration: 5200 }), -1, true);
     return () => cancelAnimation(breath);
-  }, [breath, deviceSettings.reduceMotion, isDark, isFocused]);
+  }, [breath, canAnimate, isDark]);
 
   const primaryOrbStyle = useAnimatedStyle(() => ({
     opacity: 0.34 * (0.6 + breath.value * 0.4),

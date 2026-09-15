@@ -5,6 +5,7 @@ import { useIsFocused } from "@react-navigation/native";
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 
 import { useColors } from "@/hooks/use-colors";
+import { useAmbientMotionGate } from "@/hooks/use-ambient-motion";
 import { useAppPreferences } from "@/lib/app-preferences";
 
 const NEON_OPACITY = {
@@ -20,7 +21,8 @@ function withAlpha(color: string, alpha: string) {
 /**
  * مشهد خلفي Neo-Glassmorphism حيّ: هالات زجاجية ملونة خلف طبقة ضبابية،
  * مع لمعة ضوء علوية ونقشة خفيفة تعطي عمق "زجاج مصنفر" دون تكلفة تفاعل أو رسم زائد.
- * لا يضع أي طبقة فوق المحتوى، وتتوقف الحركة خارج الشاشة المركزة ومع تقليل الحركة.
+ * لا يضع أي طبقة فوق المحتوى، وتتوقف الحركة خارج الشاشة المركزة ومع تقليل الحركة،
+ * وكذلك طوال الإقلاع وعلى شاشات الدخول (use-ambient-motion) فلا تزاحم أول إطار.
  */
 export function AmbientScreenBackground() {
   const { deviceSettings } = useAppPreferences();
@@ -28,10 +30,11 @@ export function AmbientScreenBackground() {
   const isFocused = useIsFocused();
   const isDark = colors.background === "#070B10";
   const intensity = NEON_OPACITY[deviceSettings.glassBackgroundLevel];
+  const canAnimate = useAmbientMotionGate(isFocused, deviceSettings.reduceMotion);
   const breath = useSharedValue(0.52);
 
   useEffect(() => {
-    if (!isDark || !isFocused || deviceSettings.reduceMotion) {
+    if (!isDark || !canAnimate) {
       cancelAnimation(breath);
       breath.value = 0.58;
       return;
@@ -39,7 +42,7 @@ export function AmbientScreenBackground() {
 
     breath.value = withRepeat(withTiming(0.88, { duration: 5400 }), -1, true);
     return () => cancelAnimation(breath);
-  }, [breath, deviceSettings.reduceMotion, isDark, isFocused]);
+  }, [breath, canAnimate, isDark]);
 
   const upperBloomStyle = useAnimatedStyle(() => ({
     opacity: intensity.upper * (0.56 + breath.value * 0.44),

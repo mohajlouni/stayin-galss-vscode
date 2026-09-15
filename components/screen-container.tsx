@@ -11,6 +11,11 @@ export interface ScreenContainerProps extends ViewProps {
   className?: string;
   containerClassName?: string;
   safeAreaClassName?: string;
+  /**
+   * المشهد الزجاجي الخلفي زخرفي بالكامل. الشاشات التي تحتاج خلفية صلبة نظيفة
+   * (شاشة الدخول مثلًا) تمرّر `false` فلا يُركّب أي مشهد خلفي فوق المحتوى.
+   */
+  ambientBackground?: boolean;
 }
 
 export function ScreenContainer({
@@ -19,6 +24,7 @@ export function ScreenContainer({
   className,
   containerClassName,
   safeAreaClassName,
+  ambientBackground = true,
   style,
   ...props
 }: ScreenContainerProps) {
@@ -30,7 +36,7 @@ export function ScreenContainer({
       style={[{ flex: 1, minHeight: 0, direction, backgroundColor: colors.background }, style]}
       {...props}
     >
-      <DynamicGlassBackground />
+      {ambientBackground ? <DynamicGlassBackground /> : null}
       <SafeAreaView edges={edges} className={cn("flex-1", safeAreaClassName)} style={{ flex: 1, minHeight: 0, zIndex: 1, backgroundColor: "transparent" }}>
         <View className={cn("flex-1", className)} style={{ flex: 1, minHeight: 0, zIndex: 1, direction, backgroundColor: "transparent" }}>{children}</View>
       </SafeAreaView>
